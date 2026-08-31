@@ -4,9 +4,6 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - "DS_Mobile_Digital_Hub_v1_7_Step1_Complete.zip"
-      - ".github/workflows/android-build.yml"
 
 permissions:
   contents: read
@@ -30,7 +27,6 @@ jobs:
           PROJECT_DIR=$(find /tmp/ds-mobile -type f -name package.json -print -quit | xargs dirname)
           test -n "$PROJECT_DIR"
           rsync -a "$PROJECT_DIR/" ./ --exclude='.git/'
-          echo "Project extracted from: $PROJECT_DIR"
           test -f package.json
           test -f src-tauri/Cargo.toml
           test -f src-tauri/tauri.${{ matrix.variant }}-android.conf.json
@@ -91,11 +87,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload build metadata
+      - name: Create build metadata
         run: |
           node -e "const fs=require('fs'); fs.writeFileSync('version-${{ matrix.variant }}.json', JSON.stringify({variant:'${{ matrix.variant }}',version:require('./package.json').version,commit:process.env.GITHUB_SHA,built_at:new Date().toISOString()},null,2))"
 
-      - name: Publish build metadata
+      - name: Upload build metadata
         uses: actions/upload-artifact@v4
         with:
           name: version-info-${{ matrix.variant }}

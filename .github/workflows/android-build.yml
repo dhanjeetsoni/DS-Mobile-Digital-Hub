@@ -64,6 +64,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare Tauri mobile Rust library
+        run: |
+          test -f src-tauri/src/main.rs
+          cp src-tauri/src/main.rs src-tauri/src/lib.rs
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src-tauri/src/lib.rs')
+          s = p.read_text(encoding='utf-8')
+          if 'fn main(' not in s:
+              raise SystemExit('Could not find fn main() in src-tauri/src/main.rs')
+          s = s.replace('fn main(', '#[cfg_attr(mobile, tauri::mobile_entry_point)]\npub fn run(', 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src-tauri/Cargo.toml')
+          s = p.read_text(encoding='utf-8')
+          if '[lib]' not in s:
+              s += '\n\n[lib]\nname = "ds_mobile_digital_hub_lib"\ncrate-type = ["staticlib", "cdylib", "rlib"]\n'
+          else:
+              print('Existing [lib] section detected; leaving it unchanged.')
+          p.write_text(s, encoding='utf-8')
+          PY
+          cat > src-tauri/src/main.rs <<'EOF'
+          fn main() {
+              ds_mobile_digital_hub_lib::run();
+          }
+          EOF
+          cargo metadata --manifest-path src-tauri/Cargo.toml --no-deps --format-version 1 > /tmp/cargo-metadata.json
+          grep -q '"kind":\["lib"\]' /tmp/cargo-metadata.json
+
       - name: Initialize Android project for ${{ matrix.variant }}
         env:
           NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.0.12077973

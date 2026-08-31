@@ -93,7 +93,15 @@ jobs:
           }
           EOF
           cargo metadata --manifest-path src-tauri/Cargo.toml --no-deps --format-version 1 > /tmp/cargo-metadata.json
-          grep -q '"kind":\["lib"\]' /tmp/cargo-metadata.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/cargo-metadata.json').read_text())
+          targets = [t for p in data.get('packages', []) for t in p.get('targets', [])]
+          if not any('lib' in t.get('kind', []) for t in targets):
+              raise SystemExit('Cargo metadata does not contain a library target')
+          print('Cargo library target verified:', [t.get('name') for t in targets if 'lib' in t.get('kind', [])])
+          PY
 
       - name: Initialize Android project for ${{ matrix.variant }}
         env:

@@ -1,0 +1,103 @@
+name: Build Android Apps (Staff + Owner)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "DS_Mobile_Digital_Hub_v1_7_Step1_Complete.zip"
+      - ".github/workflows/android-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    name: Build ${{ matrix.variant }} APK
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [staff, owner]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract project archive
+        run: |
+          unzip -q DS_Mobile_Digital_Hub_v1_7_Step1_Complete.zip -d /tmp/ds-mobile
+          PROJECT_DIR=$(find /tmp/ds-mobile -type f -name package.json -print -quit | xargs dirname)
+          test -n "$PROJECT_DIR"
+          rsync -a "$PROJECT_DIR/" ./ --exclude='.git/'
+          echo "Project extracted from: $PROJECT_DIR"
+          test -f package.json
+          test -f src-tauri/Cargo.toml
+          test -f src-tauri/tauri.${{ matrix.variant }}-android.conf.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: sdkmanager --install "ndk;27.0.12077973"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Initialize Tauri Android project
+        env:
+          NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.0.12077973
+        run: npx tauri android init
+
+      - name: Build ${{ matrix.variant }} APK
+        env:
+          VITE_APP_VARIANT: ${{ matrix.variant }}
+          NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.0.12077973
+        run: npx tauri android build --config src-tauri/tauri.${{ matrix.variant }}-android.conf.json --apk --debug
+
+      - name: Collect APKs
+        run: |
+          mkdir -p artifacts/${{ matrix.variant }}
+          find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print -exec cp {} artifacts/${{ matrix.variant }}/ \;
+          test -n "$(find artifacts/${{ matrix.variant }} -type f -name '*.apk' -print -quit)"
+
+      - name: Upload ${{ matrix.variant }} APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ds-mobile-${{ matrix.variant }}-apk
+          path: artifacts/${{ matrix.variant }}/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build metadata
+        run: |
+          node -e "const fs=require('fs'); fs.writeFileSync('version-${{ matrix.variant }}.json', JSON.stringify({variant:'${{ matrix.variant }}',version:require('./package.json').version,commit:process.env.GITHUB_SHA,built_at:new Date().toISOString()},null,2))"
+
+      - name: Publish build metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-info-${{ matrix.variant }}
+          path: version-${{ matrix.variant }}.json
+          retention-days: 30

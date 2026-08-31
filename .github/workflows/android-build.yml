@@ -34,11 +34,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -46,8 +46,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android NDK
-        run: sdkmanager --install "ndk;27.0.12077973"
+      - name: Install Android SDK packages and NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -62,10 +64,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Initialize Tauri Android project
+      - name: Initialize Android project for ${{ matrix.variant }}
         env:
           NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.0.12077973
-        run: npx tauri android init
+        run: |
+          rm -rf src-tauri/gen/android
+          npx tauri android init --config src-tauri/tauri.${{ matrix.variant }}-android.conf.json
+
+      - name: Verify Android package identity
+        run: |
+          echo "Expected: com.dsmobile.digitalhub.${{ matrix.variant }}"
+          grep -R "com.dsmobile.digitalhub.${{ matrix.variant }}" src-tauri/gen/android/app/src/main 2>/dev/null | head -n 5 || true
 
       - name: Build ${{ matrix.variant }} APK
         env:

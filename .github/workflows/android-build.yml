@@ -48,7 +48,7 @@ jobs:
 
       - name: Install Android SDK packages and NDK
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973"
 
       - name: Setup Rust
@@ -66,6 +66,7 @@ jobs:
 
       - name: Prepare Tauri mobile Rust library
         run: |
+          set -e
           test -f src-tauri/src/main.rs
           cp src-tauri/src/main.rs src-tauri/src/lib.rs
           python3 - <<'PY'
@@ -79,12 +80,12 @@ jobs:
           PY
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p = Path('src-tauri/Cargo.toml')
           s = p.read_text(encoding='utf-8')
-          if '[lib]' not in s:
-              s += '\n\n[lib]\nname = "ds_mobile_digital_hub_lib"\ncrate-type = ["staticlib", "cdylib", "rlib"]\n'
-          else:
-              print('Existing [lib] section detected; leaving it unchanged.')
+          # Remove any existing [lib] section completely, then add a known-good one.
+          s = re.sub(r'(?ms)^\[lib\]\s*.*?(?=^\[[^\[].*?\]\s*$|\Z)', '', s)
+          s = s.rstrip() + '\n\n[lib]\nname = "ds_mobile_digital_hub_lib"\npath = "src/lib.rs"\ncrate-type = ["staticlib", "cdylib", "rlib"]\n'
           p.write_text(s, encoding='utf-8')
           PY
           cat > src-tauri/src/main.rs <<'EOF'
@@ -92,15 +93,20 @@ jobs:
               ds_mobile_digital_hub_lib::run();
           }
           EOF
+          echo '--- Cargo.toml [lib] ---'
+          sed -n '/^\[lib\]/,$p' src-tauri/Cargo.toml | head -n 10
+          echo '--- lib.rs header ---'
+          head -n 12 src-tauri/src/lib.rs
           cargo metadata --manifest-path src-tauri/Cargo.toml --no-deps --format-version 1 > /tmp/cargo-metadata.json
           python3 - <<'PY'
           import json
           from pathlib import Path
           data = json.loads(Path('/tmp/cargo-metadata.json').read_text())
           targets = [t for p in data.get('packages', []) for t in p.get('targets', [])]
-          if not any('lib' in t.get('kind', []) for t in targets):
-              raise SystemExit('Cargo metadata does not contain a library target')
-          print('Cargo library target verified:', [t.get('name') for t in targets if 'lib' in t.get('kind', [])])
+          libs = [t.get('name') for t in targets if 'lib' in t.get('kind', [])]
+          if not libs:
+              raise SystemExit('Cargo metadata still has no library target')
+          print('Cargo library target verified:', libs)
           PY
 
       - name: Initialize Android project for ${{ matrix.variant }}

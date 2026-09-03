@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test:static": "node scripts/static-audit.mjs",
     "test": "vitest run",
+    "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "android:init": "tauri android init",

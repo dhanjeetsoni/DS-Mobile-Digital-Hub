@@ -1,0 +1,13 @@
+-- Step 1.7 critical finding: the app's "real-time session kick" listener
+-- (App.tsx, `staff-access-${id}` channel, postgres_changes on public.profiles)
+-- was already written in a previous step, but public.profiles was never
+-- added to the `supabase_realtime` publication -- so Supabase was silently
+-- never sending these change events at all. In production, an Owner
+-- Pausing or Deleting a staff account did NOT kick an already-open session
+-- immediately as the plan requires; it only took effect on the staff
+-- member's *next* login attempt, or (for time-based expiry only) the
+-- client's own 5s local-clock check. A manual Pause/Delete was silently
+-- not real-time. This adds the table to the publication so the existing
+-- client-side listener (UPDATE + new DELETE handler) actually receives
+-- events.
+alter publication supabase_realtime add table public.profiles;

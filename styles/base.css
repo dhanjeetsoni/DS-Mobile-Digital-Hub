@@ -1,0 +1,152 @@
+/* ==========================================================================
+   DS Nexus — base layer
+   Element defaults, focus, scrollbars, numerics and print — for the new
+   design-system kit only. No component styles live here; components are
+   Tailwind utilities over the token contract.
+
+   Everything below is scoped under `.ds-scope` (instead of bare `html`,
+   `body`, `*`) so it layers in cleanly next to the app's existing styling
+   (src/index.css) without overriding it anywhere. Wrap only the new-kit
+   surfaces in `<div className="ds-scope" data-theme=".." data-mode=""..>`.
+   ========================================================================== */
+
+@layer base {
+  .ds-scope,
+  .ds-scope * {
+    border-color: var(--line);
+  }
+
+  .ds-scope {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Chrome's default tap highlight fires on every POS keypad press. */
+  .ds-scope * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .ds-scope h1,
+  .ds-scope h2,
+  .ds-scope h3,
+  .ds-scope h4 {
+    font-weight: 650;
+    letter-spacing: -0.011em;
+    line-height: 1.2;
+  }
+
+  /* One ring definition for the new-kit surfaces, driven by the live theme.
+     Keyboard users get it; mouse users don't, which is why it's
+     :focus-visible only. */
+  .ds-scope :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  .ds-scope ::selection {
+    background: rgb(from var(--brand) r g b / 0.28);
+    color: var(--ink);
+  }
+
+  /* Money and IMEI/serial digits are tabular everywhere, so columns of amounts
+     line up and a 15-digit IMEI never reflows as you type. */
+  .ds-scope .num,
+  .ds-scope input[inputmode="numeric"],
+  .ds-scope input[inputmode="decimal"],
+  .ds-scope td.num {
+    font-family: var(--font-num);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* Kill the spinner arrows: quantity and price fields are typed or keypad-fed,
+     and the arrows are a mis-tap hazard on touch. */
+  .ds-scope input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  .ds-scope input[type="number"]::-webkit-outer-spin-button,
+  .ds-scope input[type="number"]::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
+  .ds-scope input::placeholder,
+  .ds-scope textarea::placeholder {
+    color: var(--ink-faint);
+  }
+
+  .ds-scope [disabled],
+  .ds-scope [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  /* Thin, theme-aware scrollbars inside the new-kit surfaces only. */
+  .ds-scope * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  .ds-scope ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .ds-scope ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .ds-scope ::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 99px;
+  }
+  .ds-scope ::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-faint);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Motion. Modals/sheets/toasts inside the new kit share these four keyframes
+   so enter and exit feel identical across the app instead of each screen
+   inventing its own. Keyframe names are prefixed `ds-` and the trigger
+   classes (`anim-fade` etc.) are only ever added inside `.ds-scope` markup,
+   so there's no risk of them colliding with the existing app's own
+   `overlayEnter` / `modalEnter` animations.
+   -------------------------------------------------------------------------- */
+@keyframes ds-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ds-pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes ds-slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes ds-shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+
+.ds-scope .anim-fade { animation: ds-fade-in 180ms var(--ease-out) both; }
+.ds-scope .anim-pop { animation: ds-pop-in 220ms var(--ease-spring) both; }
+.ds-scope .anim-sheet { animation: ds-slide-up 260ms var(--ease-out) both; }
+
+/* Skeleton loaders read as "content is coming", not "something broke". */
+.ds-scope .skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 37%,
+    var(--surface-2) 63%
+  );
+  background-size: 200% 100%;
+  animation: ds-shimmer 1.4s linear infinite;
+}

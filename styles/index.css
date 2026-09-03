@@ -1,0 +1,8 @@
+/* DS Nexus — single stylesheet entry point.
+   Order is load-bearing: the token contract (which pulls in Tailwind) must come
+   first, then the theme palettes that re-point those tokens, then the base
+   element layer that consumes them. main.tsx imports only this file. */
+
+@import "./tokens.css";
+@import "./themes.css";
+@import "./base.css";

@@ -1,0 +1,252 @@
+/* ==========================================================================
+   DS Nexus — 10 themes × light/dark
+   --------------------------------------------------------------------------
+   Contract (see tokens.css):
+     [data-theme="x"]                  -> that theme's DARK palette
+     [data-theme="x"][data-mode="light"] -> that theme's LIGHT palette
+
+   Specificity is deliberate: the shared per-mode block and the theme block are
+   both single attribute selectors, so source order decides (modes first, themes
+   after). The light override is two attributes, so it always wins.
+
+   Status colours (ok / warn / danger / info) are inherited from the shared mode
+   block; a theme only redeclares them when its identity demands it (Cyber Neon,
+   High-Contrast). Everything else is redeclared per theme in full so flipping
+   mode can never leave a stale dark value behind.
+   ========================================================================== */
+
+[data-mode="dark"] {
+  --shade: #000000;
+  --ink-invert: #0b1020;
+  --ok: #34d399; --ok-soft: #05301f;
+  --warn: #fbbf24; --warn-soft: #3a2708;
+  --danger: #fb7185; --danger-soft: #40121f;
+  --info: #60a5fa; --info-soft: #0c2647;
+  color-scheme: dark;
+}
+
+[data-mode="light"] {
+  --shade: #1e2433;
+  --ink-invert: #ffffff;
+  --ok: #047857; --ok-soft: #d1fae5;
+  --warn: #a15c07; --warn-soft: #fef3c7;
+  --danger: #c81e1e; --danger-soft: #fee2e2;
+  --info: #1d4ed8; --info-soft: #dbeafe;
+  color-scheme: light;
+}
+
+/* 1 — Midnight : deep navy, the default face of the app ------------------- */
+[data-theme="midnight"] {
+  --canvas: #0b1020; --canvas-alt: #0e1428;
+  --surface: #141b33; --surface-2: #1b2340; --surface-3: #232d50;
+  --line: #263056; --line-strong: #36406e;
+  --ink: #e8ecf8; --ink-muted: #a3adca; --ink-faint: #6d779a;
+  --brand: #4f7cff; --brand-hi: #6f95ff; --brand-fg: #ffffff; --brand-soft: #17224a;
+  --accent: #22d3ee; --accent-fg: #04222b; --accent-soft: #0d2b35;
+}
+[data-theme="midnight"][data-mode="light"] {
+  --canvas: #f5f7fd; --canvas-alt: #eef2fb;
+  --surface: #ffffff; --surface-2: #f7f9ff; --surface-3: #eef2fc;
+  --line: #dae1f2; --line-strong: #b9c4e0;
+  --ink: #131a2e; --ink-muted: #4e5875; --ink-faint: #7d87a3;
+  --brand: #2e5bd8; --brand-hi: #1f47b8; --brand-fg: #ffffff; --brand-soft: #e3eaff;
+  --accent: #0e7490; --accent-fg: #ffffff; --accent-soft: #cffafe;
+}
+
+/* 2 — Nord : arctic blue-grey, low glare for long counter shifts ---------- */
+[data-theme="nord"] {
+  --canvas: #2e3440; --canvas-alt: #292f3a;
+  --surface: #333b49; --surface-2: #3b4453; --surface-3: #454f61;
+  --line: #434c5e; --line-strong: #55617a;
+  --ink: #eceff4; --ink-muted: #b8c2d4; --ink-faint: #7f8ca3;
+  --brand: #88c0d0; --brand-hi: #9fd0de; --brand-fg: #1f2530; --brand-soft: #2b3a44;
+  --accent: #b48ead; --accent-fg: #241d24; --accent-soft: #3a2f3a;
+}
+[data-theme="nord"][data-mode="light"] {
+  --canvas: #eceff4; --canvas-alt: #e5e9f0;
+  --surface: #ffffff; --surface-2: #f6f8fb; --surface-3: #e9edf4;
+  --line: #d8dee9; --line-strong: #b6c0d0;
+  --ink: #2e3440; --ink-muted: #4c566a; --ink-faint: #7b869c;
+  --brand: #4a7f95; --brand-hi: #35697e; --brand-fg: #ffffff; --brand-soft: #d9eaf1;
+  --accent: #8a5f86; --accent-fg: #ffffff; --accent-soft: #f0e2ee;
+}
+
+/* 3 — Emerald : cash-green, reads as "profit" on the money screens -------- */
+[data-theme="emerald"] {
+  --canvas: #071410; --canvas-alt: #0a1a15;
+  --surface: #0f231d; --surface-2: #152e26; --surface-3: #1c3a30;
+  --line: #1e4034; --line-strong: #2c5847;
+  --ink: #e4f5ee; --ink-muted: #9dc4b5; --ink-faint: #6a8d80;
+  --brand: #2fbf7f; --brand-hi: #4bd598; --brand-fg: #04231a; --brand-soft: #0d3327;
+  --accent: #f5b544; --accent-fg: #2b1c02; --accent-soft: #372709;
+}
+[data-theme="emerald"][data-mode="light"] {
+  --canvas: #f2faf6; --canvas-alt: #e9f5ef;
+  --surface: #ffffff; --surface-2: #f5fbf8; --surface-3: #e7f4ee;
+  --line: #d3e8de; --line-strong: #accfbe;
+  --ink: #08251b; --ink-muted: #3f6355; --ink-faint: #708c80;
+  --brand: #0f8a5f; --brand-hi: #0b6f4c; --brand-fg: #ffffff; --brand-soft: #d6f3e5;
+  --accent: #b4741a; --accent-fg: #ffffff; --accent-soft: #fdf0d5;
+}
+
+/* 4 — Royal Purple : premium, high-margin feel for the owner dashboard ---- */
+[data-theme="royal"] {
+  --canvas: #120a24; --canvas-alt: #17102e;
+  --surface: #1e1539; --surface-2: #281c49; --surface-3: #33255c;
+  --line: #352a5e; --line-strong: #4b3c7e;
+  --ink: #ece7fb; --ink-muted: #b7abdd; --ink-faint: #8478ad;
+  --brand: #a06bff; --brand-hi: #b78bff; --brand-fg: #ffffff; --brand-soft: #291a4d;
+  --accent: #ffb3d9; --accent-fg: #3a0f28; --accent-soft: #3d1830;
+}
+[data-theme="royal"][data-mode="light"] {
+  --canvas: #f8f5ff; --canvas-alt: #f1ebfe;
+  --surface: #ffffff; --surface-2: #faf7ff; --surface-3: #f0e9fd;
+  --line: #e2d8f7; --line-strong: #c2b0e6;
+  --ink: #1b1035; --ink-muted: #52447a; --ink-faint: #8074a5;
+  --brand: #7233d8; --brand-hi: #5c22b8; --brand-fg: #ffffff; --brand-soft: #ebe0ff;
+  --accent: #b83280; --accent-fg: #ffffff; --accent-soft: #fbe0ef;
+}
+
+/* 5 — Sunset Orange : warm, high-energy retail floor --------------------- */
+[data-theme="sunset"] {
+  --canvas: #180c07; --canvas-alt: #1e110a;
+  --surface: #26170f; --surface-2: #331e14; --surface-3: #40271a;
+  --line: #452a1c; --line-strong: #5f3b28;
+  --ink: #fdece2; --ink-muted: #cfab97; --ink-faint: #9b7a68;
+  --brand: #ff7a2f; --brand-hi: #ff955a; --brand-fg: #241002; --brand-soft: #3d1d0b;
+  --accent: #ffd166; --accent-fg: #2e2103; --accent-soft: #3b2c09;
+}
+[data-theme="sunset"][data-mode="light"] {
+  --canvas: #fff8f3; --canvas-alt: #fff0e6;
+  --surface: #ffffff; --surface-2: #fffaf6; --surface-3: #ffeee2;
+  --line: #f6ded0; --line-strong: #e3b799;
+  --ink: #2a1409; --ink-muted: #6b4530; --ink-faint: #997663;
+  --brand: #d4550a; --brand-hi: #b34406; --brand-fg: #ffffff; --brand-soft: #ffe6d3;
+  --accent: #9a6600; --accent-fg: #ffffff; --accent-soft: #fff0c9;
+}
+
+/* 6 — Rose : soft magenta, pairs with the accessories / gifts screens ----- */
+[data-theme="rose"] {
+  --canvas: #16090f; --canvas-alt: #1c0d14;
+  --surface: #24121a; --surface-2: #301823; --surface-3: #3d1f2d;
+  --line: #42212f; --line-strong: #5c2f42;
+  --ink: #fde8ef; --ink-muted: #d3a3b6; --ink-faint: #9e7484;
+  --brand: #ff5d8f; --brand-hi: #ff82a9; --brand-fg: #2a0713; --brand-soft: #401426;
+  --accent: #a78bfa; --accent-fg: #1b1033; --accent-soft: #271d43;
+}
+[data-theme="rose"][data-mode="light"] {
+  --canvas: #fff5f8; --canvas-alt: #ffecf1;
+  --surface: #ffffff; --surface-2: #fff9fb; --surface-3: #ffebf1;
+  --line: #f8d9e3; --line-strong: #ebadc1;
+  --ink: #2b0a16; --ink-muted: #6f3a4c; --ink-faint: #9d7180;
+  --brand: #d81e60; --brand-hi: #b81450; --brand-fg: #ffffff; --brand-soft: #ffe0eb;
+  --accent: #6d3fd4; --accent-fg: #ffffff; --accent-soft: #ece3ff;
+}
+
+/* 7 — Cyber Neon : near-black + neon, the "shop window" theme ------------- */
+[data-theme="cyber"] {
+  --canvas: #05070d; --canvas-alt: #080c15;
+  --surface: #0b1120; --surface-2: #101a2e; --surface-3: #16243d;
+  --line: #1b2b45; --line-strong: #26456b;
+  --ink: #e6fbff; --ink-muted: #8fb6c9; --ink-faint: #5c7f92;
+  --brand: #00e5ff; --brand-hi: #5cf0ff; --brand-fg: #001a20; --brand-soft: #062b34;
+  --accent: #ff2bd6; --accent-fg: #2a0022; --accent-soft: #340429;
+  --ok: #00ffa3; --ok-soft: #002d20;
+  --warn: #ffe14d; --warn-soft: #322c05;
+  --danger: #ff3d6e; --danger-soft: #33061a;
+  --info: #00e5ff; --info-soft: #052b33;
+}
+[data-theme="cyber"][data-mode="light"] {
+  --canvas: #f2f6f8; --canvas-alt: #e8eef2;
+  --surface: #ffffff; --surface-2: #f7fbfd; --surface-3: #e9f2f6;
+  --line: #d2e0e7; --line-strong: #a9c2cd;
+  --ink: #041018; --ink-muted: #395260; --ink-faint: #6c8593;
+  --brand: #0089a7; --brand-hi: #006b84; --brand-fg: #ffffff; --brand-soft: #cdf3fb;
+  --accent: #c0009c; --accent-fg: #ffffff; --accent-soft: #ffd9f6;
+  --ok: #047857; --ok-soft: #d1fae5;
+  --warn: #a15c07; --warn-soft: #fef3c7;
+  --danger: #c81e1e; --danger-soft: #fee2e2;
+  --info: #0e7490; --info-soft: #cffafe;
+}
+
+/* 8 — Slate Mono : monochrome, nothing competes with the numbers ---------- */
+[data-theme="slate"] {
+  --canvas: #0e1013; --canvas-alt: #131619;
+  --surface: #191d22; --surface-2: #21262c; --surface-3: #2a3037;
+  --line: #2c3238; --line-strong: #3f474f;
+  --ink: #eceef1; --ink-muted: #a8afb8; --ink-faint: #737b85;
+  --brand: #d7dbe0; --brand-hi: #f0f2f5; --brand-fg: #14171b; --brand-soft: #262c33;
+  --accent: #8b95a1; --accent-fg: #0f1215; --accent-soft: #23282e;
+}
+[data-theme="slate"][data-mode="light"] {
+  --canvas: #f4f5f7; --canvas-alt: #ebedf0;
+  --surface: #ffffff; --surface-2: #f8f9fa; --surface-3: #eef0f3;
+  --line: #dfe2e7; --line-strong: #bcc2ca;
+  --ink: #14171b; --ink-muted: #4d545d; --ink-faint: #7b838d;
+  --brand: #2b3138; --brand-hi: #14181d; --brand-fg: #ffffff; --brand-soft: #e5e7ea;
+  --accent: #5c6673; --accent-fg: #ffffff; --accent-soft: #e9ecef;
+}
+
+/* 9 — Paper Light : warm paper, best match for printed invoices ----------- */
+[data-theme="paper"] {
+  --canvas: #14120e; --canvas-alt: #1a1713;
+  --surface: #211d18; --surface-2: #2b2620; --surface-3: #362f27;
+  --line: #382f26; --line-strong: #4d4335;
+  --ink: #f4eee2; --ink-muted: #c3b6a0; --ink-faint: #8f836f;
+  --brand: #c99a3f; --brand-hi: #dcb35e; --brand-fg: #1d1505; --brand-soft: #38290f;
+  --accent: #7fa88a; --accent-fg: #0e1a13; --accent-soft: #1c2b22;
+}
+[data-theme="paper"][data-mode="light"] {
+  --canvas: #f7f3ea; --canvas-alt: #f1ebde;
+  --surface: #fffdf8; --surface-2: #faf6ed; --surface-3: #f0e9da;
+  --line: #e3dac6; --line-strong: #c6b795;
+  --ink: #241f16; --ink-muted: #5c5344; --ink-faint: #8a7f6b;
+  --brand: #8a5a1a; --brand-hi: #6f4712; --brand-fg: #ffffff; --brand-soft: #f2e3c9;
+  --accent: #2f6b4a; --accent-fg: #ffffff; --accent-soft: #d9ebe0;
+}
+
+/* 10 — High-Contrast : accessibility. Pure black/white ground, borders always
+   visible, every foreground pair clears WCAG AAA for body text. -------------- */
+[data-theme="contrast"] {
+  --canvas: #000000; --canvas-alt: #000000;
+  --surface: #0a0a0a; --surface-2: #141414; --surface-3: #1f1f1f;
+  --line: #767676; --line-strong: #ffffff;
+  --ink: #ffffff; --ink-muted: #e6e6e6; --ink-faint: #c4c4c4;
+  --brand: #ffe600; --brand-hi: #fff566; --brand-fg: #000000; --brand-soft: #33300a;
+  --accent: #00ffff; --accent-fg: #000000; --accent-soft: #00333a;
+  --ok: #00ff66; --ok-soft: #003318;
+  --warn: #ffcc00; --warn-soft: #332900;
+  --danger: #ff6b6b; --danger-soft: #3a0d0d;
+  --info: #66d9ff; --info-soft: #002d3a;
+}
+[data-theme="contrast"][data-mode="light"] {
+  --canvas: #ffffff; --canvas-alt: #ffffff;
+  --surface: #ffffff; --surface-2: #f2f2f2; --surface-3: #e6e6e6;
+  --line: #595959; --line-strong: #000000;
+  --ink: #000000; --ink-muted: #1a1a1a; --ink-faint: #3d3d3d;
+  --brand: #0000cc; --brand-hi: #000099; --brand-fg: #ffffff; --brand-soft: #dcdcff;
+  --accent: #7a0099; --accent-fg: #ffffff; --accent-soft: #f3dbfa;
+  --ok: #006622; --ok-soft: #d6f5e0;
+  --warn: #7a4d00; --warn-soft: #fff0cc;
+  --danger: #b00000; --danger-soft: #ffdada;
+  --info: #00408f; --info-soft: #d6e8ff;
+}
+
+/* High-Contrast never softens a border and never dims a focus ring — those are
+   the two things screen-magnifier users rely on most. */
+[data-theme="contrast"] * {
+  --shadow-card: none;
+  --shadow-pop: 0 0 0 2px var(--line-strong);
+}
+[data-theme="contrast"] :focus-visible {
+  outline: 3px solid var(--brand) !important;
+  outline-offset: 2px !important;
+}
+
+/* Cyber Neon earns its name: brand-tinted glow instead of a neutral drop
+   shadow. Scoped to the theme so no other palette pays for it. */
+[data-theme="cyber"][data-mode="dark"] {
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.6), 0 0 24px -8px rgb(from var(--brand) r g b / 0.25);
+  --shadow-pop: 0 24px 64px -20px rgb(from var(--brand) r g b / 0.35), 0 0 0 1px rgb(from var(--brand) r g b / 0.25);
+}
+

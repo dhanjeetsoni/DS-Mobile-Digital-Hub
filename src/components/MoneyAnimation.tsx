@@ -1,0 +1,2 @@
+import React,{useEffect,useState} from 'react';
+export function MoneyAnimation(){const[items,setItems]=useState<number[]>([]);useEffect(()=>{const id=window.setInterval(()=>{setItems(v=>[...v.slice(-4),Date.now()]);},9000);return()=>window.clearInterval(id)},[]);return <>{items.map((id,i)=><span key={id} className="money-float" style={{left:`${15+i*17}%`,top:`${58+i*5}%`,'--money-x':`${20+i*13}px`} as React.CSSProperties}>₹</span>)}</>}

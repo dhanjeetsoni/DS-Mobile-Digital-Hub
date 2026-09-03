@@ -1,0 +1,128 @@
+/* ==========================================================================
+   DS Nexus — token contract
+   --------------------------------------------------------------------------
+   Every colour in the new design-system layer is a semantic token, never a
+   literal hex. A theme is nothing more than a block that re-points these
+   variables (themes.css), which is why swapping themes at runtime costs one
+   attribute write and zero re-renders.
+
+   `@theme inline` re-exports the runtime variables to Tailwind, so utilities
+   like `bg-surface`, `text-ink-muted`, `border-line` follow the live theme
+   instead of being frozen at build time.
+
+   NOTE — integration with the existing app: this project already ships its
+   own hand-rolled theme system (src/index.css, 22 themes keyed off
+   `html[data-theme]`). To add this newer design-system kit *without*
+   touching that existing system at all, every token here is registered
+   globally (harmless — the names are new and don't collide with anything
+   the old CSS defines), but anything that would otherwise apply to bare
+   `html`/`body` is scoped under `.ds-scope` instead (see base.css). Mount
+   `.ds-scope` (with a `data-theme`/`data-mode` pair) around any part of the
+   UI that should use this new kit — see AppearanceStudioView.tsx for the
+   wiring — and the rest of the app is completely unaffected.
+   ========================================================================== */
+
+@import "tailwindcss";
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-canvas-alt: var(--canvas-alt);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-ink-invert: var(--ink-invert);
+
+  --color-brand: var(--brand);
+  --color-brand-hi: var(--brand-hi);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-soft: var(--brand-soft);
+
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-num);
+
+  --radius-xs: 6px;
+  --radius-sm: 9px;
+  --radius-md: 13px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+
+  --shadow-card: 0 1px 2px rgb(from var(--shade) r g b / 0.28), 0 8px 24px -12px rgb(from var(--shade) r g b / 0.35);
+  --shadow-pop: 0 24px 64px -20px rgb(from var(--shade) r g b / 0.55), 0 2px 8px rgb(from var(--shade) r g b / 0.28);
+  --shadow-glow: 0 0 0 1px rgb(from var(--brand) r g b / 0.35), 0 12px 40px -14px rgb(from var(--brand) r g b / 0.55);
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
+}
+
+/* --------------------------------------------------------------------------
+   Defaults every theme inherits. A theme only overrides what it changes.
+   Kept on `:root` (harmless — these are new variable names the old CSS never
+   references), except the one rule that would otherwise touch the shared
+   `html` element's font-size, which is scoped to `.ds-scope` below so it
+   can never rescale the rest of the app.
+   -------------------------------------------------------------------------- */
+:root {
+  /* Density: the whole new-kit layout scales from this one number, so the
+     "compact / cosy / roomy" switch is a single variable, not 400 class edits. */
+  --density: 1;
+  --gap: calc(0.75rem * var(--density));
+  --pad: calc(1rem * var(--density));
+  --row-h: calc(2.6rem * var(--density));
+  --control-h: calc(2.5rem * var(--density));
+
+  /* Text scale: "sm / md / lg / xl" inside the new kit only. */
+  --text-scale: 1;
+
+  --font-ui: "Inter var", "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto,
+    "Noto Sans", "Noto Sans Devanagari", sans-serif;
+  --font-num: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+
+  --shade: #000000;
+  --ring: var(--brand);
+  --sidebar-w: 17rem;
+  --topbar-h: 3.5rem;
+}
+
+/* Scoped, not global: only elements inside `.ds-scope` grow/shrink with the
+   new kit's text-size control. The rest of the app's `html` font-size (and
+   therefore every existing rem-based Tailwind class already in use across
+   the app) is left exactly as it was. */
+.ds-scope {
+  font-size: calc(1rem * var(--text-scale));
+}
+
+/* Honour the OS setting for people who ask for less motion. This is a global,
+   additive rule (broadens an equivalent rule the old CSS already has), so it
+   is safe to leave unscoped. */
+@media (prefers-reduced-motion: reduce) {
+  .ds-scope,
+  .ds-scope *,
+  .ds-scope *::before,
+  .ds-scope *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

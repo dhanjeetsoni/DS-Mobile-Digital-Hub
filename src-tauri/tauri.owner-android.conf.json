@@ -1,0 +1,12 @@
+{
+  "productName": "DS Owner",
+  "identifier": "com.dsmobile.digitalhub.owner",
+  "app": {
+    "windows": []
+  },
+  "bundle": {
+    "android": {
+      "minSdkVersion": 24
+    }
+  }
+}

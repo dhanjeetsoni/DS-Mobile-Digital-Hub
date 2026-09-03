@@ -1,0 +1,7 @@
+-- Base normalized sales rows expose cost_price; staff uses the sanitized state projection instead.
+drop policy if exists sales_store_access on public.sales;
+create policy sales_owner_manager_select on public.sales for select to authenticated using (exists(select 1 from public.profiles p where p.id=auth.uid() and p.store_id=sales.store_id and p.role in ('owner','manager')));
+create policy sales_store_write on public.sales for insert to authenticated with check (exists(select 1 from public.profiles p where p.id=auth.uid() and p.store_id=sales.store_id and p.role in ('owner','manager','staff')));
+create policy sales_owner_manager_update on public.sales for update to authenticated using (exists(select 1 from public.profiles p where p.id=auth.uid() and p.store_id=sales.store_id and p.role in ('owner','manager'))) with check (exists(select 1 from public.profiles p where p.id=auth.uid() and p.store_id=sales.store_id and p.role in ('owner','manager')));
+drop policy if exists sale_items_store_access on public.sale_items;
+create policy sale_items_owner_manager on public.sale_items for all to authenticated using (exists(select 1 from public.sales s join public.profiles p on p.store_id=s.store_id where s.id=sale_items.sale_id and p.id=auth.uid() and p.role in ('owner','manager'))) with check (exists(select 1 from public.sales s join public.profiles p on p.store_id=s.store_id where s.id=sale_items.sale_id and p.id=auth.uid() and p.role in ('owner','manager')));

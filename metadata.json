@@ -1,0 +1,7 @@
+{
+  "name": "DS Mobile & Digital Hub Pro",
+  "description": "Comprehensive Mobile Store & Digital Hub Management with AI Box/IMEI OCR Scanner, 2nd-Hand Buyback KYC, SIM Activation Tracker, Xerox 1-Tap Grid, Mobile Finance EMI Ledger, Repair Ticketing & Daily Galla Closing.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

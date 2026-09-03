@@ -1,0 +1,21 @@
+[package]
+name = "ds_mobile_digital_hub"
+version = "1.0.0"
+description = "DS Mobile & Digital Hub desktop application"
+authors = ["DS Mobile & Digital Hub"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# STEP 12.2 — Windows silent auto-update. The plugin polls the dynamic
+# JSON endpoint at plugins.updater.endpoints in tauri.conf.json
+# (supabase/functions/app-update-manifest), verifies the download against
+# plugins.updater.pubkey, and installs it. tauri-plugin-process supplies
+# the relaunch() call used after a successful install (see
+# src/services/windowsUpdater.ts) — without it the person would have to
+# manually reopen the app after every update.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

@@ -1,0 +1,12 @@
+{
+  "productName": "DS Staff",
+  "identifier": "com.dsmobile.digitalhub.staff",
+  "app": {
+    "windows": []
+  },
+  "bundle": {
+    "android": {
+      "minSdkVersion": 24
+    }
+  }
+}

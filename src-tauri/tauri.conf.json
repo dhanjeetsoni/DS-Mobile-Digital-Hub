@@ -1,0 +1,52 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DS Mobile & Digital Hub",
+  "version": "1.0.0",
+  "identifier": "com.dsmobile.digitalhub",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:3000",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "DS Mobile & Digital Hub",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "displayLanguageSelector": false
+      }
+    },
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://vjimgnmbgghtsfafamye.supabase.co/functions/v1/app-update-manifest"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCMEIwMTZEMEQ3RUNENzgKUldSNHpYNE5iUUVMMjRxWWx1OWJKbWJNRkRLS2Z4R0hleUp1R1IzVDg1NEFkMnNiMVpabFFLVDkK"
+    }
+  }
+}

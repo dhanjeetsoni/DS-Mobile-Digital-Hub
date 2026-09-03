@@ -46,7 +46,7 @@
       "endpoints": [
         "https://vjimgnmbgghtsfafamye.supabase.co/functions/v1/app-update-manifest"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCMEIwMTZEMEQ3RUNENzgKUldSNHpYNE5iUUVMMjRxWWx1OWJKbWJNRkRLS2Z4R0hleUp1R1IzVDg1NEFkMnNiMVpabFFLVDkK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDNUFEREMzRjU0MjM0ODcKUldTSE5FTDF3OTFhakcwc05UanplcWVta3ZkQlNDQ2wwMGVsSU5mdzdrNGcwTzB0N0RxUDlIamEK"
     }
   }
 }

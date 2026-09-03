@@ -55,8 +55,18 @@ jobs:
           echo "VITE_APP_VERSION=${{ env.APP_VERSION }}" >> .env
           echo "VITE_APP_BUILD=${{ github.run_number }}" >> .env
 
+      - name: Check signing key presence
+        id: signing_check
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Disable updater signing if no key is set yet
-        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' }}
+        if: steps.signing_check.outputs.has_key == 'false'
         shell: bash
         run: |
           echo "No TAURI_SIGNING_PRIVATE_KEY secret found - building the installer WITHOUT updater signing."

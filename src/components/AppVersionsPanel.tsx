@@ -18,6 +18,13 @@ import { r2PublicUrl } from "../services/r2Client";
 
 interface AppVersionsPanelProps {
   storeId: string | null | undefined;
+  // While the cloud profile/store is still being confirmed, storeId is
+  // briefly null even for a signed-in user — without this flag the panel
+  // rendered "Store abhi set nahi hua" on every load for a split second
+  // (and indefinitely if the profile fetch itself was failing, e.g. the
+  // profiles RLS recursion bug). See StaffAccessView's storeLoading for
+  // the same pattern.
+  storeLoading?: boolean;
   toast: (msg: string, color?: string) => void;
 }
 
@@ -27,7 +34,7 @@ const CONTENT_TYPE_BY_PLATFORM: Record<AppPlatform, string> = {
   "owner-android": "application/vnd.android.package-archive",
 };
 
-export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, toast }) => {
+export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, storeLoading, toast }) => {
   const [rows, setRows] = useState<AppVersionRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -102,6 +109,18 @@ export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, toa
       setBusyId(null);
     }
   };
+
+  if (storeLoading) {
+    return (
+      <div className="section">
+        <h2>App Versions</h2>
+        <div className="card" style={{ padding: 20, textAlign: "center", color: "var(--ink-soft)", marginTop: 12 }}>
+          <Loader2 size={18} className="spin" style={{ marginBottom: 8 }} /><br />
+          Store status check ho raha hai…
+        </div>
+      </div>
+    );
+  }
 
   if (!storeId) {
     return (

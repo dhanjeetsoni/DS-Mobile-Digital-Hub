@@ -5,7 +5,12 @@
 // in one place means the Windows and Android builds never drift apart.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default();
+    let mut builder = tauri::Builder::default()
+        // Registered unconditionally (desktop AND mobile) — this is what
+        // lets openTelegramConnection()/openWhatsApp() open an external
+        // link from inside the packaged Android webview, where a plain
+        // window.open() has no browser tab to go to.
+        .plugin(tauri_plugin_shell::init());
 
     // STEP 12.2 — App Update & OTA Push System (Windows). Only meaningful
     // for the Windows desktop shell — the two Android builds

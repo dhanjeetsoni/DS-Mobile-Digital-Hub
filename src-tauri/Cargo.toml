@@ -33,3 +33,9 @@ serde_json = "1"
 # it's available to link against.
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Lets the webview open external URLs (Telegram deep link, WhatsApp
+# wa.me link) in the system browser/app. Registered on BOTH desktop and
+# mobile in lib.rs (unlike updater/process, which are desktop-only) —
+# inside the packaged Android app, window.open() has nowhere to go, so
+# telegram.ts / whatsapp.ts call this plugin's open() instead.
+tauri-plugin-shell = "2"

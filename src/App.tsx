@@ -3170,7 +3170,7 @@ export default function App() {
         );
 
       case "appVersions":
-        return <AppVersionsPanel storeId={cloudProfile?.store_id} toast={showToast} />;
+        return <AppVersionsPanel storeId={cloudProfile?.store_id} storeLoading={!cloudReady} toast={showToast} />;
 
       case "settings":
         return (

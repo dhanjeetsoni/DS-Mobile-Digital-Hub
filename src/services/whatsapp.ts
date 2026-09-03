@@ -13,11 +13,30 @@ function normalizePhone(raw: string): string | null {
   return null;
 }
 
+// Packaged Windows/Android app: window.open() has nowhere to go inside
+// the webview, so the shell plugin (registered in src-tauri/src/lib.rs)
+// hands the link to the OS instead. Falls back to window.open() in the
+// plain browser dev server, where the plugin isn't injected — same
+// pattern as telegram.ts's openExternalLink().
+async function openExternalLink(url: string): Promise<void> {
+  const isTauri = typeof window !== "undefined" && Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
+  if (isTauri) {
+    try {
+      const { open } = await import("@tauri-apps/plugin-shell");
+      await open(url);
+      return;
+    } catch {
+      // Plugin not available for some reason — fall through to window.open()
+    }
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 export function openWhatsApp(phone: string, message: string): boolean {
   const normalized = normalizePhone(phone);
   if (!normalized) return false;
   const url = `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
-  window.open(url, "_blank", "noopener,noreferrer");
+  void openExternalLink(url);
   return true;
 }
 

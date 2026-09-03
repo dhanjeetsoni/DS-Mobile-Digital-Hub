@@ -34,7 +34,28 @@ export async function describeFunctionsError(error: unknown): Promise<string> {
 }
 
 async function call(action:'begin'|'poll'|'status'|'test'|'security_alert'|'send_report'|'send_weekly_report',message?:string,report?:unknown){const {data:{session}}=await supabase.auth.getSession();if(!session)throw new Error('Sign in to connect Telegram.');const {data,error}=await supabase.functions.invoke('telegram-connect',{body:{action,message,report}});if(error)throw new Error(await describeFunctionsError(error));return data;}
-export async function openTelegramConnection(){const d=await call('begin');if(d?.deepLink)window.open(d.deepLink,'_blank','noopener,noreferrer');return d;}
+// Packaged Windows/Android app: the webview's window.open() has nowhere
+// to go (no browser tab, no OS-level "open with Telegram" hook), so it
+// silently no-ops there. The shell plugin (registered unconditionally in
+// lib.rs, see its comment) hands the URL to the OS instead, which opens
+// the Telegram app/browser exactly like a normal deep link tap would.
+// Dynamic import + runtime check so this file still loads fine when
+// rendered in the plain browser dev server, where the plugin isn't
+// injected — same pattern as windowsUpdater.ts.
+async function openExternalLink(url: string): Promise<void> {
+  const isTauri = typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
+  if (isTauri) {
+    try {
+      const { open } = await import('@tauri-apps/plugin-shell');
+      await open(url);
+      return;
+    } catch {
+      // Plugin not available for some reason — fall through to window.open()
+    }
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+export async function openTelegramConnection(){const d=await call('begin');if(d?.deepLink)await openExternalLink(d.deepLink);return d;}
 export const pollTelegramConnection=()=>call('poll'); export const sendTelegramTest=()=>call('test');
 export const sendTelegramSecurityAlert=(message:string)=>call('security_alert',message);
 // Generic plain-text report sender (Customer Directory export, etc.) — same

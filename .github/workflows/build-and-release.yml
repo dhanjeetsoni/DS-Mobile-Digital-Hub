@@ -147,7 +147,13 @@ jobs:
           echo "VITE_APP_BUILD=${{ github.run_number }}" >> .env.${{ matrix.variant }}
 
       - name: tauri android init (safe to repeat, creates gen/android + a default debug keystore.properties)
-        run: npx tauri android init
+        # Must use the same per-variant config as the build step below.
+        # Without --config here, this generates the Android project using
+        # the base tauri.conf.json identifier (com.dsmobile.digitalhub),
+        # while the build step uses tauri.<variant>-android.conf.json's
+        # identifier (com.dsmobile.digitalhub.<variant>) — the Java package
+        # path Tauri looks for then doesn't exist, and the build fails.
+        run: npx tauri android init --config src-tauri/tauri.${{ matrix.variant }}-android.conf.json
 
       - name: Wire up the release keystore (if the secret is set)
         shell: bash

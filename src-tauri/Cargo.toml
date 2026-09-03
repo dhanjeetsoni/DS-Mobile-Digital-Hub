@@ -5,12 +5,20 @@ description = "DS Mobile & Digital Hub desktop application"
 authors = ["DS Mobile & Digital Hub"]
 edition = "2021"
 
+# Required for Android/iOS builds — Tauri's mobile build compiles this
+# crate as a library and calls lib.rs's run() through the
+# tauri::mobile_entry_point macro. Without this, `cargo build --lib` (which
+# the Android build runs) fails with "no library targets found".
+[lib]
+name = "ds_mobile_digital_hub_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-# Required by the tauri::generate_context!() macro in main.rs — Tauri v2
+# Required by the tauri::generate_context!() macro in lib.rs — Tauri v2
 # needs serde_json available directly in this crate's dependency tree,
 # not just transitively through the tauri crate.
 serde_json = "1"
@@ -20,6 +28,8 @@ serde_json = "1"
 # plugins.updater.pubkey, and installs it. tauri-plugin-process supplies
 # the relaunch() call used after a successful install (see
 # src/services/windowsUpdater.ts) — without it the person would have to
-# manually reopen the app after every update.
+# manually reopen the app after every update. Only actually registered on
+# desktop (see lib.rs), but must stay an unconditional dependency here so
+# it's available to link against.
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"

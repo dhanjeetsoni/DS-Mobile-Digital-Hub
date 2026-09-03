@@ -146,29 +146,45 @@ jobs:
           echo "VITE_APP_VERSION=${{ env.APP_VERSION }}" >> .env.${{ matrix.variant }}
           echo "VITE_APP_BUILD=${{ github.run_number }}" >> .env.${{ matrix.variant }}
 
-      - name: tauri android init (safe to repeat, creates gen/android + a default debug keystore.properties)
+      - name: tauri android init (safe to repeat; regenerates gen/android from scratch every run)
         # Must use the same per-variant config as the build step below.
         # Without --config here, this generates the Android project using
         # the base tauri.conf.json identifier (com.dsmobile.digitalhub),
         # while the build step uses tauri.<variant>-android.conf.json's
         # identifier (com.dsmobile.digitalhub.<variant>) — the Java package
         # path Tauri looks for then doesn't exist, and the build fails.
+        #
+        # NOTE: this does NOT generate a keystore.properties, and the
+        # generated build.gradle.kts has no signingConfigs / release
+        # signing wiring at all — that's a manual one-time edit per
+        # Tauri's own Android signing guide. Because gen/android is
+        # gitignored (regenerated fresh every run), a manual edit would
+        # never survive — so the next step wires it up programmatically
+        # instead, every run.
         run: npx tauri android init --config src-tauri/tauri.${{ matrix.variant }}-android.conf.json
 
-      - name: Wire up the release keystore (if the secret is set)
+      - name: Wire release signing into build.gradle.kts (idempotent, always run)
+        # `tauri android init`'s template never adds a signingConfigs
+        # block or assigns one to the "release" buildType (confirmed
+        # against Tauri's own template source), so without this step the
+        # release build is always unsigned regardless of secrets.
+        run: node scripts/ci-wire-android-signing.mjs src-tauri/gen/android/app/build.gradle.kts
+
+      - name: Write keystore.properties (if the release keystore secret is set)
         shell: bash
         run: |
           if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
             echo "Release keystore secret found - this build will be signed with your real release key."
             echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
             {
-              echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}"
+              echo "storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+              echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}"
               echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}"
               echo "storeFile=$RUNNER_TEMP/release.keystore"
             } > src-tauri/gen/android/keystore.properties
           else
-            echo "No ANDROID_KEYSTORE_BASE64 secret set yet - leaving the auto-generated DEBUG keystore.properties from 'tauri android init' in place."
-            echo "This produces a debug-signed APK: perfectly fine to install and test on a real phone, just not Play-Store-ready."
+            echo "No ANDROID_KEYSTORE_BASE64 secret set yet - no keystore.properties written."
+            echo "The signing config injected above falls back to the auto-generated DEBUG key for the release build type, so this still produces an installable debug-signed APK — just not Play-Store-ready."
           fi
 
       - name: Build ${{ matrix.variant }} Android APK

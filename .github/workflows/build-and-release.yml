@@ -6,11 +6,19 @@ name: Build & Release (Step 12)
 # is always the separate, manual "upload + Make Live" step in the Owner
 # app's App Versions panel (Step 12.3) — see STEP12-APP-UPDATE-SETUP.md.
 #
-# Trigger: push a tag like v1.4.0.
+# Trigger: either push a tag like v1.4.0, OR go to the Actions tab on
+# GitHub.com, open this workflow, and click "Run workflow" (no git command
+# needed for the manual path).
 on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for this manual build (e.g. 1.0.0-test)"
+        required: false
+        default: "0.0.1-test"
 
 jobs:
   windows:
@@ -28,6 +36,15 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Compute version string
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "APP_VERSION=${{ github.event.inputs.version }}" >> "$GITHUB_ENV"
+          else
+            echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          fi
+
       - name: Write .env (Windows build)
         shell: bash
         run: |
@@ -35,10 +52,25 @@ jobs:
           echo "VITE_SUPABASE_PUBLISHABLE_KEY=${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}" >> .env
           echo "VITE_APP_VARIANT=full" >> .env
           echo "VITE_APP_PLATFORM=windows" >> .env
-          echo "VITE_APP_VERSION=${GITHUB_REF_NAME#v}" >> .env
+          echo "VITE_APP_VERSION=${{ env.APP_VERSION }}" >> .env
           echo "VITE_APP_BUILD=${{ github.run_number }}" >> .env
 
-      - name: Build + sign (Tauri Updater artifacts)
+      - name: Disable updater signing if no key is set yet
+        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' }}
+        shell: bash
+        run: |
+          echo "No TAURI_SIGNING_PRIVATE_KEY secret found - building the installer WITHOUT updater signing."
+          echo "The app will still install and run fine; only the in-app auto-update check will stay off until this secret is added."
+          node -e "
+            const fs = require('fs');
+            const p = 'src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            if (c.bundle) c.bundle.createUpdaterArtifacts = false;
+            if (c.plugins && c.plugins.updater) c.plugins.updater.active = false;
+            fs.writeFileSync(p, JSON.stringify(c, null, 2));
+          "
+
+      - name: Build (+ sign updater artifacts if key is set)
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -48,12 +80,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          # NSIS installer (.exe) + its updater .sig (createUpdaterArtifacts:
-          # true in tauri.conf.json), and the MSI if produced.
+          # NSIS installer (.exe) + its updater .sig (only produced when
+          # createUpdaterArtifacts stayed true, i.e. signing key was set),
+          # and the MSI if produced.
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/nsis/*.sig
             src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: warn
 
   android:
     runs-on: ubuntu-latest
@@ -83,6 +117,15 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Compute version string
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "APP_VERSION=${{ github.event.inputs.version }}" >> "$GITHUB_ENV"
+          else
+            echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          fi
+
       - name: Write .env (${{ matrix.variant }} Android build)
         shell: bash
         run: |
@@ -90,27 +133,29 @@ jobs:
           echo "VITE_SUPABASE_PUBLISHABLE_KEY=${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}" >> .env.${{ matrix.variant }}
           echo "VITE_APP_VARIANT=${{ matrix.variant }}" >> .env.${{ matrix.variant }}
           echo "VITE_APP_PLATFORM=${{ matrix.variant }}-android" >> .env.${{ matrix.variant }}
-          echo "VITE_APP_VERSION=${GITHUB_REF_NAME#v}" >> .env.${{ matrix.variant }}
+          echo "VITE_APP_VERSION=${{ env.APP_VERSION }}" >> .env.${{ matrix.variant }}
           echo "VITE_APP_BUILD=${{ github.run_number }}" >> .env.${{ matrix.variant }}
 
-      - name: Decode Android signing keystore
-        shell: bash
-        run: |
-          # One-time setup needed: generate a keystore with
-          # `keytool -genkeypair -v -keystore release.keystore -alias ds-mobile -keyalg RSA -keysize 2048 -validity 10000`
-          # then base64 it and store as the ANDROID_KEYSTORE_BASE64 secret,
-          # plus ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_PASSWORD. Without
-          # these secrets set, this step produces an empty/invalid keystore
-          # and the build below will fail — that's expected until you add them.
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
-
-      - name: tauri android init (first run only, safe to repeat)
+      - name: tauri android init (safe to repeat, creates gen/android + a default debug keystore.properties)
         run: npx tauri android init
 
+      - name: Wire up the release keystore (if the secret is set)
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "Release keystore secret found - this build will be signed with your real release key."
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            {
+              echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}"
+              echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}"
+              echo "storeFile=$RUNNER_TEMP/release.keystore"
+            } > src-tauri/gen/android/keystore.properties
+          else
+            echo "No ANDROID_KEYSTORE_BASE64 secret set yet - leaving the auto-generated DEBUG keystore.properties from 'tauri android init' in place."
+            echo "This produces a debug-signed APK: perfectly fine to install and test on a real phone, just not Play-Store-ready."
+          fi
+
       - name: Build ${{ matrix.variant }} Android APK
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: npm run android:${{ matrix.variant }}:build
 
       - name: Upload ${{ matrix.variant }} APK
@@ -118,6 +163,7 @@ jobs:
         with:
           name: ${{ matrix.variant }}-android-apk
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
 
   release:
     needs: [windows, android]
@@ -130,7 +176,8 @@ jobs:
       - name: Create GitHub Release with all builds attached
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-run{1}', github.event.inputs.version, github.run_number) || github.ref_name }}
           # Attach every build so a human downloads + uploads them into the
-          # Owner app's App Versions panel — this workflow never publishes
+          # Owner app's App Versions panel - this workflow never publishes
           # to app_versions/Supabase itself (see file header comment).
           files: dist-artifacts/**/*

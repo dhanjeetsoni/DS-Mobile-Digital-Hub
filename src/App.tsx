@@ -996,8 +996,12 @@ export default function App() {
   // that used to live here, the old 22-theme CSS, and the Sidebar's old
   // "Theme" dropdown have all been retired (Part 2) — Appearance Studio
   // (owner section) is now the only theme control, and it applies app-wide.
-  // db.settings.theme is kept in the data model only for exportStandaloneHtml.ts's
-  // offline export, which still ships its own small embedded palette.
+  // db.settings.theme is still in the data model, but nothing reads or writes
+  // it anymore as of Part 3: exportStandaloneHtml.ts now derives its export
+  // palette live from the Appearance Studio store (useAppearance) instead,
+  // so the offline export follows whichever theme is active automatically.
+  // The field is kept only as a legacy fallback inside exportStandaloneHtml.ts
+  // for the unlikely case the appearance store isn't available.
 
   // Apply text size + font style preference to html element (item: "text change options")
   useEffect(() => {

@@ -12,9 +12,8 @@
    used-value time, this one block automatically follows whichever theme
    Appearance Studio has active — no per-theme duplication needed here.
 
-   A handful of old variables (--purple*, --navy*, --inv-*, --money-x) have
-   no equivalent in the new 10-theme palette yet and are intentionally left
-   unmapped for now — tracked for Part 3 refinement.
+   Part 3 maps the remaining rare variables (--purple*, --navy*). Two are
+   still intentionally left alone — see the note at the bottom of this file.
    ========================================================================== */
 
 :root {
@@ -63,4 +62,37 @@
   --sidebar-active-bg: var(--brand);
   --sidebar-hover-bg: var(--surface-2);
   --sidebar-footer-bg: var(--canvas-alt);
+
+  /* Part 3 — purple / navy
+     In the old default theme these were literally #8b5cf6 (a distinct
+     "second colour" used for category tags — jobs/repairs, exchanges,
+     drawings) and #0f172a (identical to --ink). They map onto the closest
+     equivalent role in the new token set:
+       --purple  -> --accent      (every new theme also carries a second,
+                                    distinct hue alongside --brand — the
+                                    same job old --purple did)
+       --navy    -> --ink         (the two were literally the same value
+                                    in the old default theme, and most
+                                    --navy usage in the app is text colour)
+     Most --navy usage is text/icon colour, so --ink is the right call.
+     A few spots use --navy as a *background* instead (ModelSearchView's
+     selected-brand chip, one header gradient in App.tsx) — --ink is a
+     text colour, so it will invert oddly there in dark themes (light text
+     colour used as a fill). Flagging for a manual visual check + a
+     follow-up patch rather than guessing a background token that only
+     fits those two spots. */
+  --purple: var(--accent);
+  --purple-light: var(--accent-soft);
+  --navy: var(--ink);
+  --navy-2: var(--ink-muted);
+  --navy-dark: var(--ink);
 }
+
+/* Deliberately NOT mapped here (out of scope for the live-app bridge):
+   - --inv-* (InvoiceViewerModal + the .invoice-paper CSS block in
+     index.css): this is a print-style, always-consistent invoice look —
+     same reasoning as exportStandaloneHtml.ts's own palette in Part 2,
+     an invoice shouldn't change colour because the shopkeeper switched
+     the app's UI theme.
+   - --money-x: not a colour, it's a per-element pixel offset the money
+     animation sets inline for its float distance. Nothing to bridge. */

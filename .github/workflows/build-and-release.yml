@@ -159,6 +159,25 @@ jobs:
           echo "VITE_APP_VERSION=${{ env.APP_VERSION }}" >> .env
           echo "VITE_APP_BUILD=${{ github.run_number }}" >> .env
 
+      - name: Build frontend (dist/) explicitly before Android packaging
+        # ROOT CAUSE of the blank/white-screen bug: `tauri android build`'s
+        # beforeBuildCommand (`npm run build` from tauri.conf.json) was
+        # relied on to produce dist/ right before Android packaging step,
+        # but for `tauri android build` specifically this hook was not
+        # reliably producing a populated dist/ before the Gradle asset-copy
+        # task ran — shipped APKs ended up with assets/ containing only
+        # tauri.conf.json and dexopt files, no index.html/JS/CSS at all, so
+        # the WebView had literally nothing to render (blank white screen,
+        # not even the boot-fallback overlay, since index.html itself was
+        # missing). Building dist/ explicitly and verifying it here, before
+        # `tauri android init`/`build` ever runs, guarantees the frontend
+        # bundle exists and gets picked up.
+        run: |
+          npm run build
+          echo "----- dist/ contents -----"
+          ls -la dist
+          test -f dist/index.html || (echo "::error::dist/index.html missing after npm run build — aborting before packaging a blank APK" && exit 1)
+
       - name: tauri android init (safe to repeat; regenerates gen/android from scratch every run)
         # Must use the same per-variant config as the build step below.
         # Without --config here, this generates the Android project using

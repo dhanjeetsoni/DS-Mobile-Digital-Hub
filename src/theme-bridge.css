@@ -1,0 +1,66 @@
+/* ==========================================================================
+   Theme bridge — Part 1
+   --------------------------------------------------------------------------
+   The app's existing CSS (src/index.css) and every existing component were
+   written against one set of variable names (--paper, --card, --ink, ...).
+   The new Appearance Studio kit (styles/themes.css) defines a different,
+   newer set (--canvas, --surface, --ink, ...) and now owns html[data-theme]
+   globally (see main.tsx / theme/applyAppearance.ts).
+
+   Rather than rewrite every existing component's CSS, this file aliases the
+   old names onto the new ones. Because CSS custom properties resolve at
+   used-value time, this one block automatically follows whichever theme
+   Appearance Studio has active — no per-theme duplication needed here.
+
+   A handful of old variables (--purple*, --navy*, --inv-*, --money-x) have
+   no equivalent in the new 10-theme palette yet and are intentionally left
+   unmapped for now — tracked for Part 3 refinement.
+   ========================================================================== */
+
+html {
+  /* Surfaces */
+  --paper: var(--canvas);
+  --card: var(--surface);
+  --card-glass: var(--surface-2);
+  --surface-soft: var(--surface-2);
+  --input-bg: var(--surface);
+  --input-focus-bg: var(--surface-2);
+  --table-hover: var(--surface-2);
+
+  /* Ink / borders */
+  --ink-soft: var(--ink-muted);
+  --ink-muted: var(--ink-faint);
+  --line-light: var(--surface-2);
+
+  /* Brand / accent */
+  --accent: var(--brand);
+  --accent-2: var(--brand-hi);
+  --glow: var(--brand);
+  --glow-2: var(--brand-hi);
+  --glow-soft: var(--brand-soft);
+
+  /* Status colours */
+  --blue: var(--info);
+  --blue-light: var(--info-soft);
+  --blue-border: var(--info-soft);
+  --red: var(--danger);
+  --red-light: var(--danger-soft);
+  --red-border: var(--danger-soft);
+  --green: var(--ok);
+  --green-light: var(--ok-soft);
+  --green-border: var(--ok-soft);
+  --amber: var(--warn);
+  --amber-light: var(--warn-soft);
+  --amber-border: var(--warn-soft);
+
+  /* Sidebar */
+  --sidebar-bg: var(--surface-3);
+  --sidebar-border: var(--line);
+  --sidebar-text: var(--ink-muted);
+  --sidebar-text-active: var(--brand-fg);
+  --sidebar-text-hover: var(--ink);
+  --sidebar-heading: var(--ink);
+  --sidebar-active-bg: var(--brand);
+  --sidebar-hover-bg: var(--surface-2);
+  --sidebar-footer-bg: var(--canvas-alt);
+}

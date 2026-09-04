@@ -990,10 +990,12 @@ export default function App() {
     showToast(`${saleIds.length} purane invoice record${saleIds.length > 1 ? "s" : ""} clear kar diye gaye (PDF export ke baad).`, "green");
   };
 
-  // Apply theme to html element
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", db.settings.theme || "obsidian-orange");
-  }, [db.settings.theme]);
+  // NOTE (Part 1 — global Appearance Studio wiring): html[data-theme] is now
+  // owned entirely by the new theme system (theme/applyAppearance.ts, started
+  // once in main.tsx via startAppearanceSync()). The old settings-driven write
+  // here was removed so the two systems stop fighting over the same DOM
+  // attribute. db.settings.theme / the Sidebar "Theme" dropdown are left as-is
+  // for now and get retired in Part 2.
 
   // Apply text size + font style preference to html element (item: "text change options")
   useEffect(() => {

@@ -347,14 +347,22 @@ export default function App() {
     e.preventDefault();
     if (gateAttempts.lockUntil > Date.now()) return;
     const configuredPass = db.settings.ownerPasscode || "";
-    const isSupabaseOwner = cloudProfile?.role === "owner" || cloudProfile?.role === "manager";
     // If the shop hasn't set a custom owner passcode yet, fall back to the
     // documented default "1234" so a fresh/local install is never locked
     // out. Once the owner sets a real passcode in Settings, that becomes
     // the only accepted value (the "1234" fallback stops applying).
+    //
+    // IMPORTANT: this PIN must ALWAYS be checked on its own merits. It is
+    // documented to the user (see the hint text on this screen) as a
+    // separate, device-only security layer from the Cloud account — it
+    // must never be silently bypassed just because a Supabase cloud
+    // session happens to already be authenticated as owner/manager (e.g.
+    // a persisted login from an earlier session on this device). A prior
+    // version of this check did exactly that, letting ANY typed value
+    // unlock Owner mode whenever a cloud-owner session was active.
     const correct =
       (configuredPass && gatePassInput === configuredPass) ||
-      (!configuredPass && (gatePassInput === "1234" || isSupabaseOwner));
+      (!configuredPass && gatePassInput === "1234");
 
     if (correct) {
       persistGateAttempts({ count: 0, lockUntil: 0 });
@@ -3680,7 +3688,13 @@ export default function App() {
               <Monitor size={13} style={{ color: "var(--accent)" }} /> 💻 Windows App
             </button>
 
-            <button className="btn sm" onClick={() => setShowCloudAuth(true)} title="Cloud account — email/password, syncs data across all devices (alag hai Owner Device PIN se)"><span className={`status-dot ${cloudStatus}`}></span> {cloudUser ? "Cloud Online" : "Cloud Sign In"}</button>
+            {/* Owner-only: this opens the shared Cloud Account panel (email/password
+                sign-in AND sign-out). Staff must never see or be able to trigger
+                cloud sign-in/sign-out — it's a different, shared account from their
+                own staffAuth login, and signing it out would break sync for everyone. */}
+            {ownerMode && cloudProfile?.role !== "staff" && (
+              <button className="btn sm" onClick={() => setShowCloudAuth(true)} title="Cloud account — email/password, syncs data across all devices (alag hai Owner Device PIN se)"><span className={`status-dot ${cloudStatus}`}></span> {cloudUser ? "Cloud Online" : "Cloud Sign In"}</button>
+            )}
             {/* Step 4.4 — chhota, hamesha visible connection badge (Owner + Staff dono ko
                 dikhta hai). Owner-only bade Status Dashboard (Step 9) se alag purpose:
                 yahan sirf "abhi online hai ya offline" + zaroorat pade to Retry Sync.

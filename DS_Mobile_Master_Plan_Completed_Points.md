@@ -632,6 +632,41 @@ further changes. Also: **please revoke the GitHub token shared in chat for
 this session and issue a new short-lived one for any further work** (this
 file's own Section 5 security note).
 
+## 2026-09-04 (4) — CI deprecation warnings fixed (Node 20 / setup-java v4)
+
+**Requested (owner):** pasted-in Actions job annotations showing
+`actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`
+and `android-actions/setup-android@v3` all being silently force-run on
+Node 24 despite declaring Node 20 (GitHub's Sept 2025 Node 20 sunset), plus
+`actions/setup-java@v4` explicitly flagged "deprecated, migrate to v5".
+
+**Fix (`.github/workflows/build-and-release.yml`, version bumps only, no
+logic changes):**
+- `actions/checkout@v4` → `@v6`
+- `actions/setup-node@v4` → `@v6` (checked `package.json` has no
+  `packageManager` field first — v5+'s new auto-caching-from-packageManager
+  behavior only activates when that field is present, so this bump changes
+  no build behavior here)
+- `actions/upload-artifact@v4` → `@v6` (both the per-variant APK upload and
+  the Windows installer upload)
+- `actions/download-artifact@v4` → `@v6` (release job) — kept in step with
+  the matching upload-artifact major, per that action's own compatibility
+  notes
+- `actions/setup-java@v4` → `@v5` (the one explicitly named in the
+  warning)
+- **Left unchanged, not flagged in the warning:**
+  `android-actions/setup-android@v3`, `dtolnay/rust-toolchain@stable`
+  (not a Node-runtime action), `softprops/action-gh-release@v2`.
+
+**Verified:** workflow YAML re-parsed clean
+(`python3 -c "import yaml; yaml.safe_load(...)"`). Could not run the
+workflow itself in this sandbox (no Actions runner here) — next CI run
+should be watched once to confirm the Node-20-deprecation and
+setup-java-v4 warnings are both gone and the build still succeeds
+end-to-end (these are drop-in version bumps with no known breaking change
+applicable to this workflow's usage, but a live run is the only way to be
+fully sure of a third-party action's own internals).
+
 ## 2026-09-04 (2) — Brand-price auto-fill for "Super X glass"-style accessories + hide Warranty for glass
 
 **Requested:** universal-brand accessories (example given: "Super X" glass —

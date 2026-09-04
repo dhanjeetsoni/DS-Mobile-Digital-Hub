@@ -213,9 +213,32 @@ async function processOperation(row: any, storeId: string) {
 
   if (type === "stock_adjustment") {
     const adj = payload.adjustment || payload;
+
+    // BUG FIX (2026-09-04): adj.productId is the client-local id (e.g.
+    // "p_<uuid>") for any product created offline / not yet synced — never
+    // a real public.products row. atomic_apply_stock_adjustment's
+    // p_product_id is a strict `uuid` column, so passing it straight
+    // through failed at the parameter-cast boundary with "invalid input
+    // syntax for type uuid" on every single retry (one queued row hit 311
+    // attempts, all identical failures) and never actually adjusted stock.
+    // Resolve/find-or-create the real product uuid first, same as "sale".
+    const { data: realProductId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+      p_store_id: storeId,
+      p_local_id: String(adj.productId),
+      p_sku: adj.sku ?? null,
+      p_model: adj.model ?? null,
+      p_brand: adj.brand ?? null,
+      p_category: adj.category ?? null,
+      p_cost_price: adj.costPrice ?? 0,
+      p_selling_price: adj.sellingPrice ?? 0,
+      p_stock_qty: adj.stockQty ?? 0,
+      p_min_stock: adj.minStock ?? 0,
+    });
+    if (resolveError) throw resolveError;
+
     const { data: movementId, error } = await supabase.rpc("atomic_apply_stock_adjustment", {
       p_store_id: storeId,
-      p_product_id: adj.productId,
+      p_product_id: realProductId,
       p_delta: adj.delta,
       p_reason: adj.reason || null,
       p_idempotency_key: row.operation_id,
@@ -407,11 +430,21 @@ export async function flushOfflineQueue() {
   const profile = await getCurrentProfile();
   if (!profile?.store_id) return { processed: 0, failed: 0 };
 
+  // BUG FIX (2026-09-04): a row is marked "syncing" the instant a flush
+  // attempt starts (see markSync below), *before* the RPC call — if the
+  // app/tab closes, crashes, or loses network at exactly that moment, the
+  // row never reaches "processed" or "failed" and was permanently orphaned,
+  // since this query used to only look at "pending"/"failed". Live data
+  // showed 83 rows stuck this way, some untouched for hours. A genuinely
+  // in-flight row's last_attempt_at is only ever a few seconds old, so
+  // treating "syncing" rows stuck for 2+ minutes as abandoned and re-queuing
+  // them is safe — every operation here is idempotent (idempotency_key).
+  const staleThreshold = new Date(Date.now() - 2 * 60 * 1000).toISOString();
   const { data: rows, error } = await supabase
     .from("sync_queue")
-    .select("id,operation_id,operation,operation_type,entity,payload,retry_count,attempts")
+    .select("id,operation_id,operation,operation_type,entity,payload,retry_count,attempts,status,last_attempt_at")
     .eq("store_id", profile.store_id)
-    .in("status", ["pending", "failed"])
+    .or(`status.in.(pending,failed),and(status.eq.syncing,last_attempt_at.lt.${staleThreshold})`)
     .order("created_at", { ascending: true })
     .limit(50);
 

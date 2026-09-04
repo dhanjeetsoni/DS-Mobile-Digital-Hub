@@ -622,8 +622,32 @@ export default function App() {
           try {
             const remote = await loadCloudState();
             if (remote?.state) {
-              setCloudVersion(remote.version);
-              setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
+              // BUG FIX (2026-09-04): this used to overwrite local `db`
+              // with `remote.state` unconditionally, discarding whatever
+              // hadn't been saved yet — e.g. the stock decrement from a
+              // sale that was still in-flight when the conflict hit. With
+              // two+ devices autosaving the whole store every ~650ms, this
+              // collided constantly (live sync_queue showed 8+ conflicts in
+              // under a minute), which is exactly what looked like "stock
+              // shows the new number for a moment, then reverts" — the sale
+              // itself always succeeded (it's committed atomically in
+              // Postgres separately), but the display-facing snapshot kept
+              // losing the local edit that would have shown it.
+              // Retrying the save against the now-current version resolves
+              // a single momentary race (the overwhelmingly common case)
+              // instead of throwing the local edit away immediately; only
+              // fall back to accepting the remote copy if that retry also
+              // collides.
+              try {
+                const retryVersion = await saveCloudState(db, remote.version);
+                setCloudVersion(retryVersion);
+                setCloudStatus("online");
+                return;
+              } catch (retryError) {
+                console.warn("Retry after version conflict also failed; accepting remote state instead", retryError);
+                setCloudVersion(remote.version);
+                setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
+              }
             }
             setCloudStatus("online");
           } catch (refetchError) {

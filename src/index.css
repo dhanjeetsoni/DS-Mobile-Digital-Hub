@@ -61,159 +61,13 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-/* 2. Cyber Blue (Deep dark cyber naval matrix with high-contrast cyan) */
-html[data-theme="cyber-blue"] {
-  --navy: #040916; --navy-2: #08142c; --navy-dark: #02050e; --accent: #00d2ff; --accent-2: #3a7bd5;
-  --blue: #00d2ff; --blue-light: #0b2240; --blue-border: #163660; --paper: #040914; --card: #0c182f;
-  --card-glass: rgba(12, 24, 47, 0.9); --ink: #ffffff; --ink-soft: #a5c2e8; --ink-muted: #6b8bb8;
-  --line: #1b355e; --line-light: #122442; --input-bg: #071021; --input-focus-bg: #0b1a36;
-  --table-hover: rgba(0, 210, 255, 0.08); --red: #ff4b60; --red-light: #381119; --red-border: #631926;
-  --green: #00e5a3; --green-light: #062d22; --green-border: #0a4f3c; --amber: #ffb300; --amber-light: #382705;
-  --amber-border: #5e4108; --purple: #9d7aff; --purple-light: #22174a;
-  --glow: #00d2ff; --glow-2: #3a7bd5; --glow-soft: rgba(0, 210, 255, 0.2);
-  --sidebar-bg: #030712; --sidebar-border: #162c52; --sidebar-text: #a5c2e8; --sidebar-hover-bg: #0b2240;
-  --sidebar-active-bg: #00d2ff; --sidebar-footer-bg: #02050e;
-}
-
-/* 3. Neon Purple (Dark midnight synthwave with electric violet & pink) */
-html[data-theme="neon-purple"] {
-  --navy: #0c041c; --navy-2: #160933; --navy-dark: #070211; --accent: #d843ff; --accent-2: #892cdc;
-  --blue: #a960ff; --blue-light: #240c42; --blue-border: #461b78; --paper: #090214; --card: #190938;
-  --card-glass: rgba(25, 9, 56, 0.9); --ink: #ffffff; --ink-soft: #cbb4ea; --ink-muted: #8e6fb8;
-  --line: #351763; --line-light: #220c42; --input-bg: #0f0421; --input-focus-bg: #1e0a42;
-  --table-hover: rgba(216, 67, 255, 0.08); --red: #ff3d81; --red-light: #380e1e; --red-border: #631532;
-  --green: #00e6a8; --green-light: #052e22; --green-border: #094f3b; --amber: #ffb834; --amber-light: #382806;
-  --amber-border: #614209; --purple: #d843ff; --purple-light: #350c4a;
-  --glow: #d843ff; --glow-2: #892cdc; --glow-soft: rgba(216, 67, 255, 0.22);
-  --sidebar-bg: #070112; --sidebar-border: #2f145c; --sidebar-text: #cbb4ea;
-  --sidebar-hover-bg: #240c42; --sidebar-active-bg: #d843ff; --sidebar-footer-bg: #04000a;
-}
-
-/* 4. Emerald Tech (Cyber matrix forest with bright neon green) */
-html[data-theme="emerald-tech"] {
-  --navy: #021710; --navy-2: #052d20; --navy-dark: #010e0a; --accent: #00f5a0; --accent-2: #00b875;
-  --blue: #00d9ff; --blue-light: #07282b; --blue-border: #124d52; --paper: #02120d; --card: #092b1f;
-  --card-glass: rgba(9, 43, 31, 0.9); --ink: #ffffff; --ink-soft: #a7dcc4; --ink-muted: #6aa88d;
-  --line: #174f3b; --line-light: #0e3326; --input-bg: #041710; --input-focus-bg: #0b3627;
-  --table-hover: rgba(0, 245, 160, 0.08); --red: #ff4d67; --red-light: #381017; --red-border: #631825;
-  --green: #00f5a0; --green-light: #053825; --green-border: #0a573a; --amber: #ffbe3b; --amber-light: #382907;
-  --amber-border: #61440a; --purple: #967aff; --purple-light: #1f1947;
-  --glow: #00f5a0; --glow-2: #00b875; --glow-soft: rgba(0, 245, 160, 0.22);
-  --sidebar-bg: #010d09; --sidebar-border: #134533; --sidebar-text: #a7dcc4;
-  --sidebar-hover-bg: #052d20; --sidebar-active-bg: #00f5a0; --sidebar-footer-bg: #000705;
-}
-
-/* 5. AMOLED Pure Black (Infinite contrast #000000 with neon turquoise) */
-html[data-theme="amoled"] {
-  --navy: #000000; --navy-2: #0e0e11; --navy-dark: #000000; --accent: #00ffcc; --accent-2: #3b82f6;
-  --blue: #00e5ff; --blue-light: #091a24; --blue-border: #123447; --paper: #000000; --card: #0c0c0e;
-  --card-glass: rgba(12, 12, 14, 0.95); --ink: #ffffff; --ink-soft: #b0b0b8; --ink-muted: #787880;
-  --line: #26262b; --line-light: #18181c; --input-bg: #050506; --input-focus-bg: #121216;
-  --table-hover: rgba(0, 255, 204, 0.08); --red: #ff4055; --red-light: #29080c; --red-border: #521019;
-  --green: #00ff9d; --green-light: #042617; --green-border: #07472c; --amber: #ffb81c; --amber-light: #291d04;
-  --amber-border: #4d3809; --purple: #a77bff; --purple-light: #1a1033;
-  --glow: #00ffcc; --glow-2: #3b82f6; --glow-soft: rgba(0, 255, 204, 0.2);
-  --sidebar-bg: #000000; --sidebar-border: #222227; --sidebar-text: #b0b0b8;
-  --sidebar-hover-bg: #131317; --sidebar-active-bg: #00ffcc; --sidebar-footer-bg: #000000;
-}
-
-/* 6. Titanium Slate (Dark zinc graphite with indigo/violet highlights) */
-html[data-theme="titanium"] {
-  --navy: #18181b; --navy-2: #27272a; --navy-dark: #09090b; --accent: #6366f1; --accent-2: #4f46e5;
-  --blue: #6366f1; --blue-light: #1e1b4b; --blue-border: #312e81; --paper: #0c0c0e; --card: #18181b;
-  --card-glass: rgba(24, 24, 27, 0.92); --ink: #ffffff; --ink-soft: #b8b8c2; --ink-muted: #71717a;
-  --line: #2e2e33; --line-light: #1f1f23; --input-bg: #101013; --input-focus-bg: #222227;
-  --table-hover: rgba(99, 102, 241, 0.08); --red: #f43f5e; --red-light: #330b14; --red-border: #631224;
-  --green: #10b981; --green-light: #062f20; --green-border: #0d543b; --amber: #f59e0b; --amber-light: #331f06;
-  --amber-border: #5c3809; --purple: #a855f7; --purple-light: #2e0f4f;
-  --glow: #6366f1; --glow-2: #4f46e5; --glow-soft: rgba(99, 102, 241, 0.2);
-  --sidebar-bg: #101012; --sidebar-border: #27272a; --sidebar-text: #b8b8c2;
-  --sidebar-hover-bg: #27272a; --sidebar-active-bg: #6366f1; --sidebar-footer-bg: #09090b;
-}
-
-/* 7. Light Future (Ultra-clean bright white & royal electric blue) */
-html[data-theme="light-future"] {
-  --navy: #0f172a; --navy-2: #1e293b; --navy-dark: #020617; --accent: #0284c7; --accent-2: #0369a1;
-  --blue: #0284c7; --blue-light: #f0f9ff; --blue-border: #bae6fd; --paper: #f8fafc; --card: #ffffff;
-  --card-glass: rgba(255, 255, 255, 0.96); --ink: #0f172a; --ink-soft: #475569; --ink-muted: #64748b;
-  --line: #e2e8f0; --line-light: #f1f5f9; --input-bg: #ffffff; --input-focus-bg: #ffffff;
-  --table-hover: rgba(240, 249, 255, 0.9); --red: #e11d48; --red-light: #fff1f2; --red-border: #fecdd3;
-  --green: #059669; --green-light: #ecfdf5; --green-border: #a7f3d0; --amber: #d97706; --amber-light: #fffbeb;
-  --amber-border: #fde68a; --purple: #7c3aed; --purple-light: #f5f3ff;
-  --glow: #0284c7; --glow-2: #0369a1; --glow-soft: rgba(2, 132, 199, 0.15);
-  --sidebar-bg: #0c4a6e; --sidebar-border: #075985; --sidebar-text: #e0f2fe;
-  --sidebar-hover-bg: #0369a1; --sidebar-active-bg: #38bdf8; --sidebar-footer-bg: #082f49;
-}
-
-/* 8. Red Dark (Crimson red & deep black charcoal) */
-html[data-theme="red-dark"] {
-  --navy: #18080a; --navy-2: #2b0d12; --navy-dark: #0d0305; --accent: #ff334b; --accent-2: #d9142e;
-  --blue: #ff334b; --blue-light: #330b12; --blue-border: #5e1320; --paper: #0f0406; --card: #1c090c;
-  --card-glass: rgba(28, 9, 12, 0.92); --ink: #ffffff; --ink-soft: #e2b4bb; --ink-muted: #a36b75;
-  --line: #3d141b; --line-light: #290b10; --input-bg: #140507; --input-focus-bg: #260b10;
-  --table-hover: rgba(255, 51, 75, 0.08); --red: #ff334b; --red-light: #380b12; --red-border: #691421;
-  --green: #00e699; --green-light: #062e20; --green-border: #0b543b; --amber: #ffb834; --amber-light: #382806;
-  --amber-border: #5c3f07; --purple: #d459ff; --purple-light: #300f3d;
-  --glow: #ff334b; --glow-2: #d9142e; --glow-soft: rgba(255, 51, 75, 0.22);
-  --sidebar-bg: #0d0305; --sidebar-border: #3d141b; --sidebar-text: #e2b4bb;
-  --sidebar-hover-bg: #2b0d12; --sidebar-active-bg: #ff334b; --sidebar-footer-bg: #060102;
-}
-
-/* 9. Red White (Crisp white with ruby red brand accent) */
-html[data-theme="red-white"] {
-  --navy: #1c1917; --navy-2: #292524; --navy-dark: #0c0a09; --accent: #dc2626; --accent-2: #b91c1c;
-  --blue: #dc2626; --blue-light: #fef2f2; --blue-border: #fecaca; --paper: #fafaf9; --card: #ffffff;
-  --card-glass: rgba(255, 255, 255, 0.96); --ink: #1c1917; --ink-soft: #57534e; --ink-muted: #78716c;
-  --line: #e7e5e4; --line-light: #f5f5f4; --input-bg: #ffffff; --input-focus-bg: #ffffff;
-  --table-hover: rgba(254, 242, 242, 0.9); --red: #dc2626; --red-light: #fef2f2; --red-border: #fecaca;
-  --green: #16a34a; --green-light: #f0fdf4; --green-border: #bbf7d0; --amber: #d97706; --amber-light: #fffbeb;
-  --amber-border: #fde68a; --purple: #9333ea; --purple-light: #faf5ff;
-  --glow: #dc2626; --glow-2: #b91c1c; --glow-soft: rgba(220, 38, 38, 0.15);
-  --sidebar-bg: #7f1d1d; --sidebar-border: #991b1b; --sidebar-text: #fecaca;
-  --sidebar-hover-bg: #991b1b; --sidebar-active-bg: #ef4444; --sidebar-footer-bg: #450a0a;
-}
-
-/* 10. Ocean Teal (Deep sea midnight navy with vibrant turquoise teal) */
-html[data-theme="ocean-teal"] {
-  --navy: #041c24; --navy-2: #082d38; --navy-dark: #020f14; --accent: #06b6d4; --accent-2: #0891b2;
-  --blue: #06b6d4; --blue-light: #082d38; --blue-border: #0e4e61; --paper: #03131a; --card: #082633;
-  --card-glass: rgba(8, 38, 51, 0.92); --ink: #ffffff; --ink-soft: #9ed5e3; --ink-muted: #5e96a3;
-  --line: #124357; --line-light: #0b2d3b; --input-bg: #041a24; --input-focus-bg: #0c3647;
-  --table-hover: rgba(6, 182, 212, 0.08); --red: #f43f5e; --red-light: #330b14; --red-border: #5e1324;
-  --green: #10b981; --green-light: #052e20; --green-border: #0a4f38; --amber: #f59e0b; --amber-light: #331f06;
-  --amber-border: #5c3809; --purple: #8b5cf6; --purple-light: #21153d;
-  --glow: #06b6d4; --glow-2: #0891b2; --glow-soft: rgba(6, 182, 212, 0.22);
-  --sidebar-bg: #021217; --sidebar-border: #124357; --sidebar-text: #9ed5e3;
-  --sidebar-hover-bg: #082d38; --sidebar-active-bg: #06b6d4; --sidebar-footer-bg: #010a0d;
-}
-
-/* 11. Sunset Amber (Warm charcoal dark with gold & amber glow) */
-html[data-theme="sunset-amber"] {
-  --navy: #1f1406; --navy-2: #332109; --navy-dark: #120b02; --accent: #f59e0b; --accent-2: #d97706;
-  --blue: #f59e0b; --blue-light: #382407; --blue-border: #633f0d; --paper: #120b02; --card: #241708;
-  --card-glass: rgba(36, 23, 8, 0.92); --ink: #ffffff; --ink-soft: #e8caa0; --ink-muted: #a68656;
-  --line: #452c0d; --line-light: #2e1c07; --input-bg: #170e03; --input-focus-bg: #301f09;
-  --table-hover: rgba(245, 158, 11, 0.08); --red: #ef4444; --red-light: #330d0d; --red-border: #5e1717;
-  --green: #10b981; --green-light: #062f20; --green-border: #0a5439; --amber: #f59e0b; --amber-light: #382407;
-  --amber-border: #633f0d; --purple: #a855f7; --purple-light: #290f45;
-  --glow: #f59e0b; --glow-2: #d97706; --glow-soft: rgba(245, 158, 11, 0.22);
-  --sidebar-bg: #120b02; --sidebar-border: #452c0d; --sidebar-text: #e8caa0;
-  --sidebar-hover-bg: #332109; --sidebar-active-bg: #f59e0b; --sidebar-footer-bg: #0a0601;
-}
-
-/* 12. Mono Slate (Clean monochrome graphite & diamond white) */
-html[data-theme="mono-slate"] {
-  --navy: #18181b; --navy-2: #27272a; --navy-dark: #09090b; --accent: #e4e4e7; --accent-2: #a1a1aa;
-  --blue: #e4e4e7; --blue-light: #27272a; --blue-border: #3f3f46; --paper: #09090b; --card: #18181b;
-  --card-glass: rgba(24, 24, 27, 0.94); --ink: #ffffff; --ink-soft: #d4d4d8; --ink-muted: #71717a;
-  --line: #3f3f46; --line-light: #27272a; --input-bg: #101013; --input-focus-bg: #222227;
-  --table-hover: rgba(255, 255, 255, 0.06); --red: #f87171; --red-light: #331313; --red-border: #5c1e1e;
-  --green: #4ade80; --green-light: #0d3319; --green-border: #185e2e; --amber: #fbbf24; --amber-light: #332608;
-  --amber-border: #59420b; --purple: #c084fc; --purple-light: #2c1642;
-  --glow: #e4e4e7; --glow-2: #a1a1aa; --glow-soft: rgba(228, 228, 231, 0.15);
-  --sidebar-bg: #09090b; --sidebar-border: #27272a; --sidebar-text: #d4d4d8;
-  --sidebar-hover-bg: #27272a; --sidebar-active-bg: #ffffff; --sidebar-footer-bg: #040405;
-}
+/* Part 2 (theme cleanup): the old 22 `html[data-theme="..."]` palette blocks
+   (Cyber Blue, Neon Purple, Obsidian Orange, Arctic White, ...) that used to
+   live here — plus their sidebar-contrast overrides further down — have been
+   removed. Theming is now owned entirely by Appearance Studio's 10 themes
+   (theme/themes.ts + styles/themes.css), bridged onto these same variable
+   names via src/theme-bridge.css (wired in Part 1, src/main.tsx). The
+   :root defaults above remain as the base/fallback values. */
 
 /* ==========================================================================
    BASE & STRUCTURAL ELEMENTS
@@ -505,28 +359,6 @@ html[data-font-style="mono"] {
   background: var(--sidebar-footer-bg);
   border-top: 1px solid var(--sidebar-border);
   flex-shrink: 0;
-}
-
-.theme-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 800;
-  color: var(--sidebar-text);
-  margin-bottom: 6px;
-}
-
-.theme-toggle {
-  width: 100%;
-  background: var(--sidebar-hover-bg);
-  border: 1px solid var(--sidebar-border);
-  color: var(--sidebar-text-hover);
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  outline: none;
-  cursor: pointer;
 }
 
 .mode-pill {
@@ -1324,51 +1156,10 @@ tr:last-child td {
 
 /* DSMDH NEXT: 10 production themes + high-refresh motion */
 :root{--motion-fast:120ms cubic-bezier(.2,.8,.2,1);--motion-smooth:420ms cubic-bezier(.16,1,.3,1)}
-html[data-theme="obsidian-orange"]{--paper:#090909;--card:#111;--card-glass:rgba(17,17,17,.92);--ink:#f7f7f5;--ink-soft:#b6b6b2;--ink-muted:#777;--line:#2b2b29;--line-light:#1b1b19;--input-bg:#0f0f0e;--accent:#ff5a00;--accent-2:#ff7a2f;--blue:#ff7a2f;--blue-light:#21130c;--blue-border:#633017;--sidebar-bg:#050505;--sidebar-border:#252525;--sidebar-text:#d2d2ce;--sidebar-hover-bg:#171717;--sidebar-active-bg:#ff5a00;--sidebar-footer-bg:#020202;--glow:#ff5a00;--glow-soft:rgba(255,90,0,.2)}
-html[data-theme="arctic-white"]{--paper:#f6f8fb;--card:#fff;--card-glass:rgba(255,255,255,.88);--ink:#111827;--ink-soft:#475569;--ink-muted:#64748b;--line:#dfe5ec;--line-light:#edf1f5;--input-bg:#fff;--accent:#111827;--accent-2:#334155;--blue:#2563eb;--blue-light:#eff6ff;--blue-border:#dbeafe;--sidebar-bg:#fff;--sidebar-border:#e5e7eb;--sidebar-text:#475569;--sidebar-hover-bg:#f3f4f6;--sidebar-active-bg:#111827;--sidebar-footer-bg:#f8fafc;--glow:#2563eb;--glow-soft:rgba(37,99,235,.12)}
-html[data-theme="sand-sage"]{--paper:#f5efe4;--card:#fffaf1;--card-glass:rgba(255,250,241,.9);--ink:#26312b;--ink-soft:#66736b;--ink-muted:#89938d;--line:#ded5c5;--line-light:#eee7da;--input-bg:#fffdf8;--accent:#6d8067;--accent-2:#849b7b;--blue:#6d8067;--blue-light:#eef2ea;--blue-border:#d5dfcf;--sidebar-bg:#26312b;--sidebar-border:#354239;--sidebar-text:#dfe7db;--sidebar-hover-bg:#344238;--sidebar-active-bg:#849b7b;--sidebar-footer-bg:#1e2722;--glow:#c56b56;--glow-soft:rgba(197,107,86,.13)}
-html[data-theme="monograph"]{--paper:#f1eee7;--card:#faf8f3;--card-glass:rgba(250,248,243,.92);--ink:#141414;--ink-soft:#555;--ink-muted:#777;--line:#d6d2c9;--line-light:#e8e5de;--input-bg:#fffdf8;--accent:#111;--accent-2:#555;--blue:#111;--blue-light:#ece9e1;--blue-border:#cbc6bb;--sidebar-bg:#151515;--sidebar-border:#303030;--sidebar-text:#eee;--sidebar-hover-bg:#272727;--sidebar-active-bg:#eee;--sidebar-footer-bg:#0b0b0b;--glow:#111;--glow-soft:rgba(17,17,17,.12);--radius:2px}
-html[data-theme="platinum-white"]{--paper:#eef0f2;--card:#fff;--card-glass:rgba(255,255,255,.9);--ink:#18202a;--ink-soft:#53606d;--ink-muted:#7b8794;--line:#d9dfe5;--line-light:#edf0f3;--input-bg:#fff;--accent:#64748b;--accent-2:#94a3b8;--blue:#475569;--blue-light:#f1f5f9;--blue-border:#e2e8f0;--sidebar-bg:#20252b;--sidebar-border:#353c44;--sidebar-text:#e4e8ec;--sidebar-hover-bg:#303740;--sidebar-active-bg:#94a3b8;--sidebar-footer-bg:#171b20;--glow:#94a3b8;--glow-soft:rgba(100,116,139,.13)}
-html[data-theme="pearl-blue"]{--paper:#f4f8fc;--card:#fff;--card-glass:rgba(255,255,255,.9);--ink:#102033;--ink-soft:#52677d;--ink-muted:#7890a8;--line:#d9e4ee;--line-light:#edf3f8;--input-bg:#fff;--accent:#1769aa;--accent-2:#3b82c4;--blue:#1769aa;--blue-light:#eef7ff;--blue-border:#d6eaff;--sidebar-bg:#0e2237;--sidebar-border:#1d3852;--sidebar-text:#dcecff;--sidebar-hover-bg:#173451;--sidebar-active-bg:#3b82c4;--sidebar-footer-bg:#091725;--glow:#3b82c4;--glow-soft:rgba(59,130,196,.13)}
-html[data-theme="graphite-silver"]{--paper:#151617;--card:#1c1d1f;--card-glass:rgba(28,29,31,.94);--ink:#f1f2f2;--ink-soft:#b0b3b5;--ink-muted:#7b7f82;--line:#343638;--line-light:#242628;--input-bg:#18191a;--accent:#c7ccd0;--accent-2:#eef0f2;--blue:#c7ccd0;--blue-light:#292c2f;--blue-border:#454a4e;--sidebar-bg:#0d0e0f;--sidebar-border:#292b2d;--sidebar-text:#d5d7d9;--sidebar-hover-bg:#1b1d1f;--sidebar-active-bg:#e5e7e9;--sidebar-footer-bg:#080909;--glow:#d5d7d9;--glow-soft:rgba(213,215,217,.12)}
-html[data-theme="linen-studio"]{--paper:#f2eee6;--card:#fbf8f1;--card-glass:rgba(251,248,241,.92);--ink:#272421;--ink-soft:#6b655e;--ink-muted:#8d877f;--line:#ddd5ca;--line-light:#eee9e1;--input-bg:#fffdf9;--accent:#9b5948;--accent-2:#b97562;--blue:#668071;--blue-light:#edf2ee;--blue-border:#d8e2db;--sidebar-bg:#272421;--sidebar-border:#3c3834;--sidebar-text:#e9e2d8;--sidebar-hover-bg:#3a3631;--sidebar-active-bg:#b97562;--sidebar-footer-bg:#1b1917;--glow:#b97562;--glow-soft:rgba(183,117,98,.13)}
-html[data-theme="minimal-white"]{--paper:#fff;--card:#fff;--card-glass:rgba(255,255,255,.94);--ink:#0a0a0a;--ink-soft:#4a4a4a;--ink-muted:#777;--line:#e5e5e5;--line-light:#f3f3f3;--input-bg:#fff;--accent:#000;--accent-2:#333;--blue:#000;--blue-light:#f5f5f5;--blue-border:#ddd;--sidebar-bg:#fff;--sidebar-border:#e8e8e8;--sidebar-text:#444;--sidebar-hover-bg:#f4f4f4;--sidebar-active-bg:#000;--sidebar-footer-bg:#fafafa;--glow:#000;--glow-soft:rgba(0,0,0,.08)}
-html[data-theme="studio-contrast"]{--paper:#f7f7f4;--card:#fff;--card-glass:rgba(255,255,255,.9);--ink:#161616;--ink-soft:#555;--ink-muted:#777;--line:#deded9;--line-light:#eeeeea;--input-bg:#fff;--accent:#e84a22;--accent-2:#f06a48;--blue:#242424;--blue-light:#f0f0ed;--blue-border:#d5d5d0;--sidebar-bg:#161616;--sidebar-border:#2e2e2e;--sidebar-text:#eee;--sidebar-hover-bg:#282828;--sidebar-active-bg:#f06a48;--sidebar-footer-bg:#0c0c0c;--glow:#e84a22;--glow-soft:rgba(232,74,34,.14)}
 *,*::before,*::after{backface-visibility:hidden}button,a,.card,.navitem,input,select,textarea{transition:transform var(--motion-fast),box-shadow var(--motion-fast),border-color var(--motion-fast),background-color var(--motion-fast),color var(--motion-fast)}button:hover,.navitem:hover{transform:translate3d(0,-1px,0)}button:active{transform:scale(.985)}.card,.panel,.stat-card{will-change:transform}.kinetic-title{display:inline-block;animation:kineticIn .7s cubic-bezier(.16,1,.3,1) both}@keyframes kineticIn{from{opacity:0;transform:translate3d(0,22px,0) skewX(-3deg);letter-spacing:.08em}to{opacity:1;transform:none;letter-spacing:normal}}.money-float{position:fixed;z-index:30;pointer-events:none;font-size:22px;opacity:0;animation:moneyFloat 2.8s cubic-bezier(.2,.8,.2,1) forwards}@keyframes moneyFloat{0%{opacity:0;transform:translate3d(0,20px,0) rotate(-8deg) scale(.75)}12%{opacity:.85}100%{opacity:0;transform:translate3d(var(--money-x,30px),-120px,0) rotate(18deg) scale(1.12)}}.cute-pop{animation:cutePop .5s cubic-bezier(.16,1.4,.3,1) both}@keyframes cutePop{from{opacity:0;transform:scale(.7) rotate(-5deg)}to{opacity:1;transform:none}}.status-dot{width:7px;height:7px;border-radius:50%;display:inline-block;box-shadow:0 0 0 3px var(--glow-soft);background:#94a3b8}.status-dot.online{background:#16a34a}.status-dot.connecting{background:#f59e0b;animation:pulseDot 1s infinite}.status-dot.error{background:#dc2626}.status-dot.offline{background:#dc2626;animation:pulseDot 1.4s infinite}@keyframes pulseDot{50%{opacity:.35;transform:scale(.75)}}.link-btn{border:0;background:transparent;color:var(--accent);cursor:pointer;font-weight:700;padding:8px 0}.notice{border:1px solid var(--line);background:var(--paper);border-radius:10px;padding:10px;color:var(--ink-soft)}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}}
 
 .app-surface,.card,.stat-card,.panel{transform:translateZ(0);}
 @media (min-width: 900px){.card:hover,.stat-card:hover,.job-card:hover{transform:translate3d(0,-2px,0) perspective(900px) rotateX(.35deg);box-shadow:var(--shadow-lg),0 0 28px var(--glow-soft);}}
-
-/* ==========================================================================
-   THEME CONTRAST FIX (computed via WCAG contrast ratio, not guesswork)
-   Several themes use a bright/neon or light --sidebar-active-bg or
-   --sidebar-hover-bg (e.g. cyan, mint, near-white). The shared default of
-   white --sidebar-text-active / --sidebar-text-hover becomes invisible or
-   very low-contrast against those backgrounds. Each override below was
-   chosen by comparing WCAG contrast of white-vs-dark text against that
-   theme's actual background color and keeping whichever text color reads
-   clearly, so every theme's selected/hovered sidebar item stays legible.
-   ========================================================================== */
-html[data-theme="cyber-blue"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="neon-purple"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="emerald-tech"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="amoled"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="light-future"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="red-dark"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="red-white"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="ocean-teal"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="sunset-amber"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="mono-slate"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="obsidian-orange"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="arctic-white"] { --sidebar-text-hover: #0a0a0a; --sidebar-heading: #111827; }
-html[data-theme="sand-sage"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="monograph"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="platinum-white"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="pearl-blue"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="graphite-silver"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="linen-studio"] { --sidebar-text-active: #0a0a0a; }
-html[data-theme="minimal-white"] { --sidebar-text-hover: #0a0a0a; --sidebar-heading: #0a0a0a; }
-html[data-theme="studio-contrast"] { --sidebar-text-active: #0a0a0a; }
 
 /* ==========================================================================
    ACCESS GATE — Staff / Owner Confidential entry screen

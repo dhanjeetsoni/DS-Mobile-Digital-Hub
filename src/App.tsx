@@ -990,12 +990,14 @@ export default function App() {
     showToast(`${saleIds.length} purane invoice record${saleIds.length > 1 ? "s" : ""} clear kar diye gaye (PDF export ke baad).`, "green");
   };
 
-  // NOTE (Part 1 — global Appearance Studio wiring): html[data-theme] is now
-  // owned entirely by the new theme system (theme/applyAppearance.ts, started
-  // once in main.tsx via startAppearanceSync()). The old settings-driven write
-  // here was removed so the two systems stop fighting over the same DOM
-  // attribute. db.settings.theme / the Sidebar "Theme" dropdown are left as-is
-  // for now and get retired in Part 2.
+  // NOTE (theme system): html[data-theme] is owned entirely by the
+  // Appearance Studio theme system (theme/applyAppearance.ts, started once
+  // in main.tsx via startAppearanceSync()). The old settings-driven write
+  // that used to live here, the old 22-theme CSS, and the Sidebar's old
+  // "Theme" dropdown have all been retired (Part 2) — Appearance Studio
+  // (owner section) is now the only theme control, and it applies app-wide.
+  // db.settings.theme is kept in the data model only for exportStandaloneHtml.ts's
+  // offline export, which still ships its own small embedded palette.
 
   // Apply text size + font style preference to html element (item: "text change options")
   useEffect(() => {
@@ -1015,12 +1017,6 @@ export default function App() {
       return;
     }
     action();
-  };
-
-  const handleThemeChange = (t: string) => {
-    const updated = { ...db, settings: { ...db.settings, theme: t } };
-    saveState(updated);
-    showToast(`Theme changed to ${t}`, "green");
   };
 
   const handleTextScaleChange = (scale: "sm" | "md" | "lg" | "xl") => {
@@ -3526,7 +3522,6 @@ export default function App() {
           if (!ownerMode) setIsOwnerLoginOpen(true);
           else setOwnerMode(false);
         }}
-        onThemeChange={handleThemeChange}
         onOpenQuickScan={() => setIsCameraScannerOpen(true)}
       />
 

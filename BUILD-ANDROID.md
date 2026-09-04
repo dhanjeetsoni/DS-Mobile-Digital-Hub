@@ -12,8 +12,13 @@ par kuch bhi install karne ki zaroorat nahi.
 ## Option A — GitHub Actions se (Recommended, kuch install nahi karna)
 
 1. Is poore project ko GitHub repo mein push karo (agar already nahi kiya).
-2. Repo ke **Settings → Secrets and variables → Actions** mein jaake (agar
-   Play Store / production ke liye signed APK chahiye) yeh 4 secrets add karo:
+2. Repo ke **Settings → Secrets and variables → Actions** mein jaake do
+   secrets **zaroor** add karo (in ke bina Android build banega toh, par
+   app cloud se connect nahi hoga — blank/offline app milega):
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_PUBLISHABLE_KEY`
+
+   Play Store / production ke liye signed APK chahiye toh ye 4 secrets bhi add karo:
    - `ANDROID_KEYSTORE_BASE64` — apne release keystore file ko
      `base64 -w0 your-release.keystore` command se convert karke uska output
      yahan paste karo.
@@ -21,20 +26,23 @@ par kuch bhi install karne ki zaroorat nahi.
    - `ANDROID_KEY_ALIAS`
    - `ANDROID_KEY_PASSWORD`
 
-   _(Agar abhi sirf testing karni hai, yeh secrets skip kar sakte ho — workflow
-   khud ek unsigned/debug APK bana dega jo test-install ke liye kaam karega.)_
+   _(Agar keystore secrets abhi skip karte ho, workflow khud ek
+   debug-signed APK bana dega jo test-install ke liye kaam karega.)_
 
-3. GitHub repo ke **Actions** tab mein jaao → **"Build Android Apps"**
-   workflow select karo → **"Run workflow"** button dabao.
-   - Yeh khud-ba-khud bhi chalega jab bhi `main` branch par `src/`,
-     `src-tauri/`, ya `package.json` mein koi change push hoga.
+3. GitHub repo ke **Actions** tab mein jaao → **"Build & Release (Step 12)"**
+   workflow select karo → **"Run workflow"** button dabao (ye is repo ka
+   asli workflow file hai: `.github/workflows/build-and-release.yml`).
+   - Yeh khud-ba-khud bhi chalega jab tum `v1.2.3` jaisa git tag push karoge.
 4. Build complete hone ke baad (~10-15 minute), us workflow-run ke andar
-   **Artifacts** section mein 2 alag APK milenge:
-   - `ds-mobile-staff-apk` → Staff Android App
-   - `ds-mobile-owner-apk` → Owner Android App
+   **Artifacts** section mein alag-alag APK milenge:
+   - `staff-android-apk` → Staff Android App
+   - `owner-android-apk` → Owner Android App
+   - `windows-installer` → Windows `.exe`
+   (Ek "release" job in sabko ek GitHub Release mein bhi jod deta hai.)
 5. Download karke seedha kisi bhi Android phone par install kar do
    (pehli baar "Unknown apps install" permission dena hoga, jaisa kisi bhi
-   sideloaded app ke liye lagta hai).
+   sideloaded app ke liye lagta hai). Agar staff/owner ka purana APK pehle
+   se installed hai, use uninstall karke naya install karo.
 
 ## Option B — Apne Computer Par Manually (agar CI use nahi karna)
 

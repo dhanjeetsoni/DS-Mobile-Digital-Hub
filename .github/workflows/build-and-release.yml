@@ -137,14 +137,27 @@ jobs:
           fi
 
       - name: Write .env (${{ matrix.variant }} Android build)
+        # IMPORTANT: this must be plain ".env", not ".env.${{ matrix.variant }}".
+        # `npm run build` (invoked below via `npm run android:*:build` ->
+        # `tauri android build` -> tauri.conf.json's beforeBuildCommand)
+        # runs a plain `vite build` with no --mode flag, so Vite only ever
+        # loads .env / .env.local / .env.production / .env.production.local
+        # — it silently ignores a file named .env.staff or .env.owner.
+        # Writing to those names meant every Android build (both variants)
+        # shipped with VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY and
+        # VITE_APP_VARIANT completely unset, so both APKs fell back to the
+        # "full" (Windows-style chooser) variant with no cloud config at
+        # all. Each matrix job (staff, owner) runs on its own fresh runner
+        # checkout, so writing straight to .env here is safe — there's no
+        # cross-variant collision.
         shell: bash
         run: |
-          echo "VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }}" >> .env.${{ matrix.variant }}
-          echo "VITE_SUPABASE_PUBLISHABLE_KEY=${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}" >> .env.${{ matrix.variant }}
-          echo "VITE_APP_VARIANT=${{ matrix.variant }}" >> .env.${{ matrix.variant }}
-          echo "VITE_APP_PLATFORM=${{ matrix.variant }}-android" >> .env.${{ matrix.variant }}
-          echo "VITE_APP_VERSION=${{ env.APP_VERSION }}" >> .env.${{ matrix.variant }}
-          echo "VITE_APP_BUILD=${{ github.run_number }}" >> .env.${{ matrix.variant }}
+          echo "VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }}" >> .env
+          echo "VITE_SUPABASE_PUBLISHABLE_KEY=${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}" >> .env
+          echo "VITE_APP_VARIANT=${{ matrix.variant }}" >> .env
+          echo "VITE_APP_PLATFORM=${{ matrix.variant }}-android" >> .env
+          echo "VITE_APP_VERSION=${{ env.APP_VERSION }}" >> .env
+          echo "VITE_APP_BUILD=${{ github.run_number }}" >> .env
 
       - name: tauri android init (safe to repeat; regenerates gen/android from scratch every run)
         # Must use the same per-variant config as the build step below.

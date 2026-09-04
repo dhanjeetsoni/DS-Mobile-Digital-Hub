@@ -172,39 +172,22 @@ async function markKeyResult(
   failureStatus: "exhausted" | "invalid" = "exhausted"
 ) {
   if (!storeId || !supabaseAdmin) return; // env-var pool has no DB row to update
+  // FIX (2026-09-04): previously did a select-then-update of usage_count_today,
+  // which races when multiple staff trigger AI calls concurrently (two requests
+  // can read the same count and both write count+1, losing an increment).
+  // record_gemini_key_usage() does the equivalent work in one atomic
+  // UPDATE ... SET usage_count_today = usage_count_today + 1 statement inside
+  // Postgres, so concurrent calls can no longer clobber each other.
   try {
-    if (ok) {
-      const today = new Date().toISOString().slice(0, 10);
-      const { data } = await supabaseAdmin
-        .from("gemini_api_keys")
-        .select("usage_count_today, usage_date")
-        .eq("store_id", storeId)
-        .eq("slot", slot)
-        .maybeSingle();
-      const sameDay = data?.usage_date === today;
-      await supabaseAdmin
-        .from("gemini_api_keys")
-        .update({
-          status: "active",
-          cooldown_until: null,
-          last_error: null,
-          last_used_at: new Date().toISOString(),
-          usage_date: today,
-          usage_count_today: sameDay ? (data?.usage_count_today || 0) + 1 : 1,
-        })
-        .eq("store_id", storeId)
-        .eq("slot", slot);
-    } else {
-      await supabaseAdmin
-        .from("gemini_api_keys")
-        .update({
-          status: failureStatus,
-          cooldown_until: failureStatus === "exhausted" ? new Date(Date.now() + 60_000).toISOString() : null,
-          last_error: (errMsg || "").slice(0, 300),
-        })
-        .eq("store_id", storeId)
-        .eq("slot", slot);
-    }
+    const { error } = await supabaseAdmin.rpc("record_gemini_key_usage", {
+      p_store_id: storeId,
+      p_slot: slot,
+      p_success: ok,
+      p_status: ok ? "active" : failureStatus,
+      p_cooldown_until: ok ? null : (failureStatus === "exhausted" ? new Date(Date.now() + 60_000).toISOString() : null),
+      p_error: ok ? null : (errMsg || "").slice(0, 300),
+    });
+    if (error) console.warn("markKeyResult: record_gemini_key_usage RPC failed", error);
   } catch (e) {
     console.warn("markKeyResult: non-fatal status write-back failed", e);
   } finally {
@@ -690,24 +673,26 @@ async function requireSupabaseUser(req: express.Request, res: express.Response) 
 
 // Short in-memory cache of user -> store_id, so every AI request doesn't
 // need an extra round trip to Postgres just to find which key pool to use.
-const storeIdByUserCache = new Map<string, { storeId: string | null; at: number }>();
+const storeIdByUserCache = new Map<string, { storeId: string | null; role: string | null; at: number }>();
 const STORE_ID_CACHE_MS = 60_000;
 
 // Same auth check as requireSupabaseUser, but also resolves the caller's
 // store_id (Step 2.1) using the service-role client, so a STAFF member's AI
 // request can draw from their own shop's key pool — staff can never read
 // the keys themselves (see the migration), but they can trigger AI calls
-// that use them, same as the Owner.
+// that use them, same as the Owner. Also resolves `role`, needed by the
+// /api/business-insights owner/manager gate (fix, 2026-09-04).
 async function requireSupabaseUserAndStore(req: express.Request, res: express.Response) {
   const user = await requireSupabaseUser(req, res);
   if (!user) return null;
-  if (!supabaseAdmin) return { user, storeId: null as string | null }; // legacy env-pool fallback
+  if (!supabaseAdmin) return { user, storeId: null as string | null, role: null as string | null }; // legacy env-pool fallback
   const cached = storeIdByUserCache.get(user.id);
-  if (cached && Date.now() - cached.at < STORE_ID_CACHE_MS) return { user, storeId: cached.storeId };
-  const { data } = await supabaseAdmin.from("profiles").select("store_id").eq("id", user.id).maybeSingle();
+  if (cached && Date.now() - cached.at < STORE_ID_CACHE_MS) return { user, storeId: cached.storeId, role: cached.role };
+  const { data } = await supabaseAdmin.from("profiles").select("store_id, role").eq("id", user.id).maybeSingle();
   const storeId = data?.store_id || null;
-  storeIdByUserCache.set(user.id, { storeId, at: Date.now() });
-  return { user, storeId };
+  const role = data?.role || null;
+  storeIdByUserCache.set(user.id, { storeId, role, at: Date.now() });
+  return { user, storeId, role };
 }
 
 app.get("/api/health", (_req, res) => {
@@ -806,7 +791,15 @@ app.post("/api/screen-size-lookup", rateLimit(60_000, 30), async (req, res) => {
 app.post("/api/business-insights", rateLimit(60_000, 6), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
   if (!ctx) return;
-  const { storeId } = ctx;
+  const { storeId, role } = ctx;
+  // FIX (2026-09-04): this endpoint returns the Owner's full P&L (profit,
+  // margins) but was previously login-only — any authenticated staff member
+  // who discovered the route could read confidential financial data. Gate it
+  // to owner/manager, matching the "owner-only, full P&L" intent already
+  // documented above and the same check the record_gemini_key_usage() RPC uses.
+  if (role !== "owner" && role !== "manager") {
+    return res.status(403).json({ success: false, error: "Not authorized." });
+  }
   try {
     const summary = req.body?.summary;
     if (!summary || typeof summary !== "object") {

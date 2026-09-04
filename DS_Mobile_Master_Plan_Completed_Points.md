@@ -550,6 +550,88 @@ screen, signed in as owner or staff, what the button/screen shows) to
 diagnose further — nothing in the current code path explains it being
 permanently hidden for a real Owner account.
 
+## 2026-09-04 (3) — Investigation of Owner's 5 reported issues (permanent login, Telegram, AI errors, Android black screen, theme colours) + one real new bug found & fixed
+
+**Requested (owner, Hinglish):** (1) permanent cloud login, never logs out,
+same for staff+owner on Android; (2) same permanence for Telegram bot
+connection; (3) AI features erroring/slow everywhere; (4) Android app
+installs but shows a black/blank screen; (5) theme colours not applying
+correctly.
+
+**Investigation before writing any new code (per this file's own Section 3
+rule):**
+- **(1) Permanent login:** already confirmed done in the 2026-09-04 (1)
+  entry above — `persistSession`/`autoRefreshToken` are `true` in
+  `supabaseClient.ts`, so Owner/Staff email sessions persist indefinitely
+  on their own. The Cloud Sign In / Cloud Online status button already
+  exists in the status/top-actions bar (`App.tsx`, next to Telegram
+  Connect) — not missing. **Not changed:** storing the raw
+  email/password permanently in plain text was NOT implemented — that
+  would be a real security regression (anyone with the device gets the
+  Owner's cloud password) and Supabase's own token-based persistence
+  already gives the same "never have to log in again" result safely.
+- **(2) Telegram permanence:** already confirmed working + a real
+  duplicate-send bug already fixed in the 2026-09-04 (1) entry above (see
+  that entry) — the trigger+outbox+cron path is permanent/always-on by
+  design, independent of the app being open.
+- **(3), (4), (5):** the last ~15 commits on `main` (checked via `git log`)
+  already directly target these exact three symptoms — `ai-gateway` Edge
+  Function migration (server.ts's Express-only AI/OCR routes were
+  unreachable from the packaged apps — this alone explains "AI kahi bhi
+  kaam nahi kar raha, error hi aata hai"), the Android-CI-never-got-env-vars
+  fix (root cause of a black/blank screen on install — app booted with no
+  Supabase config at all), and the Appearance Studio theme-bridge
+  specificity-bug fix + Parts 1–3 global wiring (root cause of theme
+  colours not applying). **Confirmed live, not just "should be fixed":**
+  `ai-gateway` is deployed (v4) on the connected Supabase project and its
+  live source matches this ZIP's `supabase/functions/ai-gateway/index.ts`;
+  the connected project's `gemini_api_keys` table has 10 active keys.
+  `gh actions` run history shows the very latest commit
+  (`6bef81c`) already built successfully today (run `33844413261`,
+  Windows + both Android variants + Release, all green) — a fixed build
+  already exists, this session didn't need to trigger a new one.
+- **Real, new bug found while checking that latest Release
+  (`manual-1.2-run11`):** it contains only **one** Android `.apk`
+  (`app-universal-release.apk`), not two. Root cause: `tauri android
+  build` names its output APK identically regardless of which
+  `tauri.<variant>-android.conf.json` built it (e.g. always
+  `app-universal-release.apk`) — fine as separate `actions/upload-artifact`
+  artifacts (distinguished by artifact *name*, not file name), but the
+  `release` job downloads every artifact into one shared
+  `dist-artifacts/` folder and attaches every file it finds to one GitHub
+  Release. GitHub Release assets must have unique filenames, so whichever
+  variant's identically-named `.apk` got attached second silently
+  replaced the first — **one whole variant (Staff or Owner) has been
+  missing from every Release since Step 12 first shipped**, even though
+  both always built successfully. This alone is a very plausible
+  explanation for "Android app install ho raha hai lekin black screen" if
+  the Owner had actually been sideloading the Staff-variant APK (wrong
+  `VITE_APP_VARIANT`/`VITE_APP_PLATFORM`, wrong Supabase role expectations)
+  believing it was the Owner build, or vice versa.
+
+**Fix:** `.github/workflows/build-and-release.yml` — added a "Rename APK
+with variant name" step right after each matrix job's own build step
+(before the shared `dist-artifacts` folder ever exists), renaming e.g.
+`app-universal-release.apk` → `app-universal-release-staff.apk` /
+`...-owner.apk`. Both variants now keep distinct filenames all the way
+through to the Release, so both actually get attached.
+
+**Verified:** YAML re-parsed clean (`python3 -c "import yaml;
+yaml.safe_load(open(...))"`). **Could not verify by actually running the
+workflow** (no GitHub Actions runner in this sandbox) — next tag/manual
+run should be checked to confirm the Release now shows 2 distinct `.apk`
+files (`*-staff.apk` and `*-owner.apk`) alongside the Windows installer.
+
+**Owner action needed next:** once this fix's build finishes, download
+BOTH new `.apk` files from the new Release, confirm which one is which by
+filename (no more guessing), install the correct one on each device, and
+report back specifically which of issues (3)/(4)/(5) still reproduce on
+that fresh install — all three already have code-level fixes in this
+exact commit, so a fresh correct-variant install may resolve them without
+further changes. Also: **please revoke the GitHub token shared in chat for
+this session and issue a new short-lived one for any further work** (this
+file's own Section 5 security note).
+
 ## 2026-09-04 (2) — Brand-price auto-fill for "Super X glass"-style accessories + hide Warranty for glass
 
 **Requested:** universal-brand accessories (example given: "Super X" glass —

@@ -203,6 +203,23 @@ jobs:
       - name: Build ${{ matrix.variant }} Android APK
         run: npm run android:${{ matrix.variant }}:build
 
+      - name: Rename APK with variant name (Tauri gives Staff and Owner builds the identical filename otherwise)
+        # Both matrix jobs produce a file literally named e.g. "app-universal-release.apk"
+        # under their own outputs/apk folder — fine as separate build artifacts (different
+        # artifact NAME above keeps them apart), but the release job below downloads every
+        # artifact into one shared "dist-artifacts" folder and attaches every file to one
+        # GitHub Release. GitHub Release assets must have unique filenames, so whichever
+        # variant's identically-named .apk uploads second silently overwrites/replaces the
+        # first — one whole variant (Staff or Owner) has been missing from every Release,
+        # even though both built successfully. Renaming here (each variant's own build
+        # step, before either touches the shared folder) is the fix.
+        shell: bash
+        run: |
+          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -print0 | while IFS= read -r -d '' f; do
+            dir=$(dirname "$f"); base=$(basename "$f" .apk)
+            mv "$f" "$dir/${base}-${{ matrix.variant }}.apk"
+          done
+
       - name: Upload ${{ matrix.variant }} APK
         uses: actions/upload-artifact@v4
         with:

@@ -990,10 +990,18 @@ export default function App() {
     showToast(`${saleIds.length} purane invoice record${saleIds.length > 1 ? "s" : ""} clear kar diye gaye (PDF export ke baad).`, "green");
   };
 
-  // Apply theme to html element
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", db.settings.theme || "obsidian-orange");
-  }, [db.settings.theme]);
+  // NOTE (theme system): html[data-theme] is owned entirely by the
+  // Appearance Studio theme system (theme/applyAppearance.ts, started once
+  // in main.tsx via startAppearanceSync()). The old settings-driven write
+  // that used to live here, the old 22-theme CSS, and the Sidebar's old
+  // "Theme" dropdown have all been retired (Part 2) — Appearance Studio
+  // (owner section) is now the only theme control, and it applies app-wide.
+  // db.settings.theme is still in the data model, but nothing reads or writes
+  // it anymore as of Part 3: exportStandaloneHtml.ts now derives its export
+  // palette live from the Appearance Studio store (useAppearance) instead,
+  // so the offline export follows whichever theme is active automatically.
+  // The field is kept only as a legacy fallback inside exportStandaloneHtml.ts
+  // for the unlikely case the appearance store isn't available.
 
   // Apply text size + font style preference to html element (item: "text change options")
   useEffect(() => {
@@ -1013,12 +1021,6 @@ export default function App() {
       return;
     }
     action();
-  };
-
-  const handleThemeChange = (t: string) => {
-    const updated = { ...db, settings: { ...db.settings, theme: t } };
-    saveState(updated);
-    showToast(`Theme changed to ${t}`, "green");
   };
 
   const handleTextScaleChange = (scale: "sm" | "md" | "lg" | "xl") => {
@@ -3524,7 +3526,6 @@ export default function App() {
           if (!ownerMode) setIsOwnerLoginOpen(true);
           else setOwnerMode(false);
         }}
-        onThemeChange={handleThemeChange}
         onOpenQuickScan={() => setIsCameraScannerOpen(true)}
       />
 

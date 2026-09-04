@@ -1,9 +1,85 @@
 import { Database } from "../types";
+import { useAppearance, getTheme, type ThemeId, type ThemeMode } from "@/theme";
+
+/** Hue (0-360) of the four accent colours the export template ships. */
+const EXPORT_PALETTE_HUES: Record<string, number> = {
+  "cyber-blue": 189,
+  "neon-purple": 292,
+  "emerald-tech": 156,
+};
+
+function hexToHue(hex: string): number {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d === 0) return -1; // achromatic (grey) — no meaningful hue
+  let h: number;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h *= 60;
+  return h < 0 ? h + 360 : h;
+}
+
+function isNearBlack(hex: string): boolean {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return r <= 10 && g <= 10 && b <= 10;
+}
+
+function circularHueDistance(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+/**
+ * The offline export is a single static HTML file with no React/zustand at
+ * runtime, so it can't just read the live 10-theme Appearance Studio system —
+ * it ships its own small, self-contained 4-theme palette (Part 2 kept this
+ * separate on purpose). To still have the export "follow" whichever
+ * Appearance Studio theme is active, without duplicating all 10 themes'
+ * CSS into the export template, this picks whichever of the 4 export
+ * palettes is the closest hue match to the live theme's brand colour.
+ * Light mode always falls back to the export's built-in light default
+ * (empty string — none of the 4 export palettes has a light variant).
+ */
+function pickExportPalette(themeId: ThemeId, mode: ThemeMode): string {
+  if (mode === "light") return "";
+  const [canvas, , brand] = getTheme(themeId).swatch.dark;
+  if (isNearBlack(canvas)) return "amoled";
+  const hue = hexToHue(brand);
+  if (hue < 0) return "amoled"; // grey/neutral brand colour (e.g. Slate)
+  let best = "cyber-blue";
+  let bestDist = Infinity;
+  for (const [key, refHue] of Object.entries(EXPORT_PALETTE_HUES)) {
+    const dist = circularHueDistance(hue, refHue);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = key;
+    }
+  }
+  return best;
+}
 
 export function exportStandaloneHtml(db: Database) {
+  // Follow whatever theme is live in Appearance Studio right now; only fall
+  // back to the old db.settings.theme field (or the original default) if
+  // the appearance store is somehow unavailable.
+  let exportTheme = "";
+  try {
+    const appearance = useAppearance.getState();
+    exportTheme = pickExportPalette(appearance.themeId, appearance.mode);
+  } catch {
+    exportTheme = db.settings.theme || "cyber-blue";
+  }
+
   // Generate standalone HTML representation containing embedded database and self-contained scripts
   const htmlContent = `<!DOCTYPE html>
-<html lang="en" data-theme="${db.settings.theme || "cyber-blue"}">
+<html lang="en" data-theme="${exportTheme}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">

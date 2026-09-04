@@ -44,7 +44,6 @@ interface SidebarProps {
   onNavigate: (page: string) => void;
   ownerMode: boolean;
   onToggleOwnerMode: () => void;
-  onThemeChange: (theme: string) => void;
   onOpenQuickScan: () => void;
   onOpenWindowsModal?: () => void;
 }
@@ -172,26 +171,12 @@ if (import.meta.env.DEV) {
   console.assert(extra.length === 0, "Sidebar 9.2: SECONDARY_NAV_GROUPS references unknown keys ->", extra);
 }
 
-export const THEME_OPTIONS = [
-  { value: "obsidian-orange", label: "Obsidian Orange" },
-  { value: "arctic-white", label: "Arctic White" },
-  { value: "sand-sage", label: "Sand & Sage" },
-  { value: "monograph", label: "Editorial Monograph" },
-  { value: "platinum-white", label: "Platinum White" },
-  { value: "pearl-blue", label: "Pearl Blue" },
-  { value: "graphite-silver", label: "Graphite Silver" },
-  { value: "linen-studio", label: "Linen Studio" },
-  { value: "minimal-white", label: "Minimal White" },
-  { value: "studio-contrast", label: "Studio Contrast" },
-];
-
 export const Sidebar: React.FC<SidebarProps> = ({
   db,
   currentPage,
   onNavigate,
   ownerMode,
   onToggleOwnerMode,
-  onThemeChange,
   onOpenQuickScan,
   onOpenWindowsModal,
 }) => {
@@ -490,22 +475,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-          <div className="theme-label" style={{ margin: 0 }}>Theme</div>
-          <select
-            className="theme-toggle"
-            id="btnThemeToggle"
-            style={{ width: "auto", padding: "3px 6px", fontSize: "11px" }}
-            value={db.settings.theme || "obsidian-orange"}
-            onChange={(e) => onThemeChange(e.target.value)}
-          >
-            {THEME_OPTIONS.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <button
+          type="button"
+          id="btnThemeToggle"
+          onClick={() => onNavigate("appearanceStudio")}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            width: "100%",
+            marginBottom: "6px",
+            background: "transparent",
+            border: "1px solid var(--sidebar-border)",
+            borderRadius: "8px",
+            padding: "6px 8px",
+            color: "var(--sidebar-text)",
+            cursor: "pointer",
+            fontSize: "11px",
+            fontWeight: 700,
+          }}
+        >
+          <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <Sparkles size={12} /> Theme
+          </span>
+          <span style={{ opacity: 0.7 }}>Appearance Studio →</span>
+        </button>
 
         <div className="mode-pill">
           <button

@@ -75,6 +75,7 @@ import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendT
 import { buildWeeklyReport, isWeeklyReportDue } from "./utils/weeklyReport";
 import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./services/whatsapp";
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
+import { celebrate } from "./utils/celebrate";
 import {
   Search,
   Plus,
@@ -918,6 +919,7 @@ export default function App() {
   const showToast = (msg: string, kind?: string) => {
     const id = uid("t");
     setToasts((prev) => [...prev, { id, msg, kind }]);
+    if (kind === "green") celebrate();
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 3200);
@@ -1838,22 +1840,22 @@ export default function App() {
           <div>
             {/* 4 Core Essential Metrics */}
             <div className="grid cols-4" style={{ marginBottom: "16px" }}>
-              <div className="card accent">
+              <div className="card accent fx-tilt">
                 <h3>Today's Total Sales</h3>
                 <div className="big blue">{inr(todayNetSales)}</div>
                 <div className="foot">{todaySales.length} Bill(s) Generated Today</div>
               </div>
-              <div className="card">
+              <div className="card fx-tilt">
                 <h3>Estimated Cash in Galla</h3>
                 <div className="big green">{inr(currentGallaEst)}</div>
                 <div className="foot">Opening + Cash Sales + Xerox</div>
               </div>
-              <div className="card">
+              <div className="card fx-tilt">
                 <h3>Customer Udhaar</h3>
                 <div className="big red">{inr(totalDue)}</div>
                 <div className="foot">{db.customers.filter((c) => (c.totalDue || 0) > 0).length} Customers Pending</div>
               </div>
-              <div className="card">
+              <div className="card fx-tilt">
                 <h3>Active Repairs</h3>
                 <div className="big purple">{openJobs}</div>
                 <div className="foot">Pending Delivery</div>
@@ -1874,7 +1876,7 @@ export default function App() {
                     "Dashboard, POS ke left mein" placement — it used to be
                     two tiles to the right of POS, which didn't satisfy that. */}
                 <button
-                  className="card"
+                  className="card fx-tilt"
                   onClick={() => setCurrentPage("photoFinder")}
                   style={{
                     padding: "16px",
@@ -1886,7 +1888,7 @@ export default function App() {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-                    <span style={{ fontSize: "24px" }}>📷</span>
+                    <span className="fx-icon-bounce" style={{ fontSize: "24px" }}>📷</span>
                     <span style={{ background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: "999px", fontSize: "10px", fontWeight: 800 }}>
                       Snap &amp; Sell
                     </span>
@@ -1896,7 +1898,7 @@ export default function App() {
                 </button>
 
                 <button
-                  className="card"
+                  className="card fx-tilt"
                   onClick={() => setCurrentPage("sell")}
                   style={{
                     padding: "16px",
@@ -1908,7 +1910,7 @@ export default function App() {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-                    <span style={{ fontSize: "24px" }}>🛒</span>
+                    <span className="fx-icon-bounce" style={{ fontSize: "24px" }}>🛒</span>
                     <span style={{ background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: "999px", fontSize: "10px", fontWeight: 800 }}>
                       Fast POS
                     </span>
@@ -1918,7 +1920,7 @@ export default function App() {
                 </button>
 
                 <button
-                  className="card"
+                  className="card fx-tilt"
                   onClick={() => setCurrentPage("xeroxGrid")}
                   style={{
                     padding: "16px",
@@ -1930,7 +1932,7 @@ export default function App() {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-                    <span style={{ fontSize: "24px" }}>🖨️</span>
+                    <span className="fx-icon-bounce" style={{ fontSize: "24px" }}>🖨️</span>
                     <span style={{ background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: "999px", fontSize: "10px", fontWeight: 800 }}>
                       1-Tap
                     </span>
@@ -1940,7 +1942,7 @@ export default function App() {
                 </button>
 
                 <button
-                  className="card"
+                  className="card fx-tilt"
                   onClick={() => setIsGallaModalOpen(true)}
                   style={{
                     padding: "16px",
@@ -1952,7 +1954,7 @@ export default function App() {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-                    <span style={{ fontSize: "24px" }}>💰</span>
+                    <span className="fx-icon-bounce" style={{ fontSize: "24px" }}>💰</span>
                     <span style={{ background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: "999px", fontSize: "10px", fontWeight: 800 }}>
                       Day-End
                     </span>

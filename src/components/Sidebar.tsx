@@ -231,7 +231,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside id="sidebar">
       {/* Brand Header */}
       <div className="brand" style={{ cursor: "pointer" }} onClick={() => onNavigate("dashboard")}>
-        <div className="logo-badge" id="brandLogoBadge">
+        <div className="logo-badge fx-flip-3d" id="brandLogoBadge">
           {db.settings.logo ? (
             <img src={db.settings.logo} alt="Logo" />
           ) : (

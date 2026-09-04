@@ -9,6 +9,7 @@ import './index.css';
 // Appearance Studio page) repaints when the theme changes.
 import '../styles/index.css';
 import './theme-bridge.css';
+import './fx.css';
 import { startAppearanceSync } from '../theme';
 
 // Owns html[data-theme] / html[data-mode] for the entire app from now on.

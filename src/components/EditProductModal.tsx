@@ -381,6 +381,10 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
               </div>
             </div>
 
+            {/* Step 2026-09-04: same as AddProductModal — glass items never
+                carry a warranty in this business, so hide the section for
+                these two categories (kept in sync with the Add form). */}
+            {category !== "Tempered Glass" && category !== "Curved Glass" && (
             <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
               <label><ShieldCheck size={13} style={{ verticalAlign: "middle", marginRight: "4px" }} /> Warranty</label>
               <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 600, fontSize: "13px" }}>
@@ -402,6 +406,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 </label>
               )}
             </div>
+            )}
           </div>
 
           <p className="hint" style={{ marginTop: "10px" }}>

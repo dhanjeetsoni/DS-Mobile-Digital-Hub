@@ -549,3 +549,31 @@ option missing" issue recurs, it needs a screenshot/exact repro (which
 screen, signed in as owner or staff, what the button/screen shows) to
 diagnose further — nothing in the current code path explains it being
 permanently hidden for a real Owner account.
+
+## 2026-09-04 (2) — Brand-price auto-fill for "Super X glass"-style accessories + hide Warranty for glass
+
+**Requested:** universal-brand accessories (example given: "Super X" glass —
+`AddProductModal` already used exactly this brand as its placeholder
+example) sell every phone-model variant at the same 4-tier price. Adding a
+new model under an already-known Brand + Category shouldn't need retyping
+Purchase/Confidential/Selling/MRP by hand. Also: glass items never carry a
+warranty in this shop, so stop showing the Warranty section for them.
+
+**Added (Add Product + Edit Product):**
+- `AddProductModal.tsx`: on Brand field blur, and again if Category is
+  changed afterwards, looks up the most recent existing product with the
+  same Brand (case/whitespace-insensitive) + Category. If found *and* the
+  4 price fields are still blank (never retyped in this form session yet),
+  auto-fills Purchase/Confidential/Selling/MRP from it, shows a green
+  confirmation hint under the pricing block, and a toast. Never overwrites
+  a price the shop has already typed — purely a convenience pre-fill,
+  always editable after.
+- Warranty section is now hidden outright (in both Add and Edit) when
+  Category is "Tempered Glass" or "Curved Glass" — `warrantyEnabled`/
+  `requireCustomerDetails` simply stay at their existing default `false`,
+  identical to a shop owner manually leaving the checkbox unticked, so no
+  other logic needed changing. "Back Covers" deliberately left showing the
+  section — some cover brands genuinely do offer a warranty.
+
+**Verified:** `npx tsc --noEmit` (zero errors) → `npm run build` (clean) →
+`node scripts/static-audit.mjs` (all 16 PASS).

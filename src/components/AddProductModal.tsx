@@ -107,6 +107,30 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [confidentialPrice, setConfidentialPrice] = useState<number>(0);
   const [sellingPrice, setSellingPrice] = useState<number>(0);
   const [mrp, setMrp] = useState<number>(0);
+  // Step 2026-09-04 — "Super X glass" style brand-price auto-fill: many
+  // accessory brands (a universal tempered-glass brand, a cable brand, etc)
+  // sell every model at the exact same 4-tier price — only the Model name
+  // changes per catalog entry. Once the shop has entered that brand's price
+  // once for this category, every next model under the same
+  // Brand + Category should not need retyping it. Purely a convenience
+  // pre-fill: always editable, and never overwrites a price the shop has
+  // already typed in this form.
+  const [priceAutoFilledHint, setPriceAutoFilledHint] = useState<string>("");
+  const priceFieldsAreBlank = () => !purchasePrice && !confidentialPrice && !sellingPrice && !mrp;
+  const tryAutoFillPriceFromBrand = (brandValue: string, categoryValue: string) => {
+    const brandKey = brandValue.trim().toLowerCase();
+    if (!brandKey || !priceFieldsAreBlank()) return;
+    const match = [...db.products]
+      .filter((p) => p.brand?.trim().toLowerCase() === brandKey && p.category === categoryValue)
+      .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+    if (!match) { setPriceAutoFilledHint(""); return; }
+    setPurchasePrice(match.purchasePrice || 0);
+    setConfidentialPrice(match.confidentialPrice || 0);
+    setSellingPrice(match.sellingPrice || 0);
+    setMrp(match.mrp || 0);
+    setPriceAutoFilledHint(`"${brandValue.trim()}" (${categoryValue}) ke pichhle products se price auto-fill ho gaya — chaho to edit kar sakte ho.`);
+    toast(`Price "${brandValue.trim()}" brand se auto-fill ho gaya`, "green");
+  };
   const [stock, setStock] = useState<number>(0);
   const [minStock, setMinStock] = useState<number>(2);
   const [supplier, setSupplier] = useState("");
@@ -422,7 +446,16 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 
               <div className="field">
                 <label>1. Brand / Company <span className="req">*</span></label>
-                <input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="e.g. Super X" required />
+                <input
+                  value={brand}
+                  onChange={(e) => { setBrand(e.target.value); setPriceAutoFilledHint(""); }}
+                  onBlur={() => tryAutoFillPriceFromBrand(brand, category)}
+                  placeholder="e.g. Super X"
+                  required
+                />
+                <div className="hint">
+                  Same Brand + Category ka pehle se koi product ho (e.g. "Super X" Tempered Glass, jisme har model ka price same rehta hai), to niche 4-Tier Pricing khud bhar jayegi.
+                </div>
               </div>
 
               <div className="field">
@@ -436,7 +469,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                   <div style={{ display: "flex", gap: "6px" }}>
                     <select
                       value={category}
-                      onChange={(e) => { setCategory(e.target.value); setCategoryTouched(true); }}
+                      onChange={(e) => { setCategory(e.target.value); setCategoryTouched(true); tryAutoFillPriceFromBrand(brand, e.target.value); }}
                       style={{ flex: 1 }}
                     >
                       {categoryOptions.map((c) => (
@@ -630,6 +663,11 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                 <div className="hint" style={{ marginTop: "2px" }}>
                   Original (aapki kharidari) → Confidential (staff sirf Telegram-approval ke baad) → Selling (sab ko dikhta hai) → MRP (sirf display ke liye). Confidential aur MRP optional hain — khali chhod sakte hain.
                 </div>
+                {priceAutoFilledHint && (
+                  <div className="hint" style={{ marginTop: "4px", color: "var(--glow)", fontWeight: 600 }}>
+                    ✓ {priceAutoFilledHint}
+                  </div>
+                )}
               </div>
 
               <div className="field">
@@ -684,6 +722,14 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                 </div>
               </div>
 
+              {/* Step 2026-09-04: glass items (Tempered/Curved) never carry a
+                  warranty in this business — showing the checkbox every time
+                  just invites accidentally ticking it. Hidden outright for
+                  these two categories; warrantyEnabled/requireCustomerDetails
+                  stay at their default `false`, same as never ticking it by
+                  hand, so nothing else needs to change. Back Covers is left
+                  out on purpose — some cover brands do offer one. */}
+              {category !== "Tempered Glass" && category !== "Curved Glass" && (
               <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
                 <label><ShieldCheck size={13} style={{ verticalAlign: "middle", marginRight: "4px" }} /> Warranty</label>
                 <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 600, fontSize: "13px" }}>
@@ -712,6 +758,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                   </>
                 )}
               </div>
+              )}
             </div>
 
             <div className="modal-actions" style={{ marginTop: "16px" }}>

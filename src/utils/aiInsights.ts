@@ -1,4 +1,9 @@
-import { supabase } from "../services/supabaseClient";
+import { supabase, SUPABASE_URL } from "../services/supabaseClient";
+
+// See aiOcr.ts for why this points at the ai-gateway Edge Function instead
+// of a relative "/api/..." path (that path only ever existed on a local
+// `npm start` Express server, never in the packaged Tauri .exe).
+const AI_GATEWAY_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/ai-gateway` : "";
 
 export interface BusinessInsightsSummary {
   monthLabel: string;
@@ -15,10 +20,11 @@ export interface BusinessInsightsSummary {
 // Calls the Gemini-powered /api/business-insights endpoint with an aggregated,
 // non-sensitive numeric summary (no raw customer/IMEI/personal data is sent).
 export async function getBusinessInsights(summary: BusinessInsightsSummary): Promise<string> {
+  if (!AI_GATEWAY_URL) throw new Error("AI insights unavailable — cloud not configured.");
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData?.session?.access_token;
 
-  const res = await fetch("/api/business-insights", {
+  const res = await fetch(`${AI_GATEWAY_URL}/business-insights`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -45,10 +51,11 @@ export interface StaffAdviceSummary {
 // sends or asks for profit/margin/cost/expense figures — only sales-count and
 // stock-level data a staff member is already allowed to see.
 export async function getStaffAdvice(summary: StaffAdviceSummary): Promise<string> {
+  if (!AI_GATEWAY_URL) throw new Error("AI advice unavailable — cloud not configured.");
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData?.session?.access_token;
 
-  const res = await fetch("/api/staff-advice", {
+  const res = await fetch(`${AI_GATEWAY_URL}/staff-advice`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

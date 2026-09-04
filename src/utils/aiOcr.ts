@@ -1,10 +1,18 @@
-import { supabase } from "../services/supabaseClient";
+import { supabase, SUPABASE_URL } from "../services/supabaseClient";
 
-// Every AI endpoint on the server requires a logged-in Supabase user
-// (requireSupabaseUser in server.ts). Earlier this file's fetch calls never
-// attached the session token, so every AI scan silently 401'd and the app
-// fell back to "AI unavailable — enter manually." even with valid API keys
-// configured. This helper is now used by every call in this file.
+// These AI/OCR calls used to hit a relative "/api/..." path, which only ever
+// worked when the Express server.ts (npm start, local machine only) was also
+// serving the frontend. The packaged Tauri .exe bundles ONLY the static
+// frontend (no backend), so "/api/..." resolved to the app's own index.html
+// there — "Unexpected token '<'" when the client tried to JSON.parse it.
+// AI/OCR now lives in the ai-gateway Supabase Edge Function, so these calls
+// go to a real, always-on HTTPS endpoint in every environment (browser,
+// Windows .exe, Android) instead of a path that only exists on localhost.
+const AI_GATEWAY_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/ai-gateway` : "";
+
+// Every AI endpoint requires a logged-in Supabase user (requireUserAndStore
+// in ai-gateway/index.ts). This helper attaches the session token to every
+// call in this file.
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data?.session?.access_token;
@@ -53,7 +61,8 @@ export interface OcrAccessoryResult {
 // stays instantly matchable — including across server restarts/instances —
 // without hitting Gemini again.
 export async function lookupScreenSize(modelName: string): Promise<number> {
-  const res = await fetch("/api/screen-size-lookup", {
+  if (!AI_GATEWAY_URL) return 0;
+  const res = await fetch(`${AI_GATEWAY_URL}/screen-size-lookup`, {
     method: "POST",
     headers: await authHeaders(),
     body: JSON.stringify({ modelName }),
@@ -71,7 +80,8 @@ export async function lookupScreenSize(modelName: string): Promise<number> {
 // "Add New Product" form so one photo -> one catalog item with many models,
 // instead of the staff typing every model by hand.
 export async function processAccessoryOcr(imageDataUrl: string): Promise<OcrAccessoryResult> {
-  const res = await fetch("/api/ocr-accessory", {
+  if (!AI_GATEWAY_URL) throw new Error("AI unavailable — cloud not configured.");
+  const res = await fetch(`${AI_GATEWAY_URL}/ocr-accessory`, {
     method: "POST",
     headers: await authHeaders(),
     body: JSON.stringify({ image: imageDataUrl }),
@@ -110,7 +120,8 @@ export interface ProductPhotoResult {
 // "Photo Stock Finder" so a staff member can snap a photo of something and
 // jump straight to matching in-stock items to sell, instead of typing.
 export async function identifyProductPhoto(imageDataUrl: string): Promise<ProductPhotoResult> {
-  const res = await fetch("/api/product-photo-search", {
+  if (!AI_GATEWAY_URL) throw new Error("AI unavailable — cloud not configured.");
+  const res = await fetch(`${AI_GATEWAY_URL}/product-photo-search`, {
     method: "POST",
     headers: await authHeaders(),
     body: JSON.stringify({ image: imageDataUrl }),
@@ -138,7 +149,8 @@ export async function processPhoneOcr(
   imageType: "box" | "about_screen" | "auto" = "auto"
 ): Promise<OcrPhoneResult> {
   try {
-    const res = await fetch("/api/ocr-phone", {
+    if (!AI_GATEWAY_URL) throw new Error("AI unavailable — cloud not configured.");
+    const res = await fetch(`${AI_GATEWAY_URL}/ocr-phone`, {
       method: "POST",
       headers: await authHeaders(),
       body: JSON.stringify({ image: imageDataUrl, imageType }),

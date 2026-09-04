@@ -71,7 +71,7 @@ import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOf
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
 import { sqliteList } from "./services/localSqlite";
-import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert, sendTelegramReport, sendWeeklyReportToTelegram } from "./services/telegram";
+import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert, sendWeeklyReportToTelegram } from "./services/telegram";
 import { buildWeeklyReport, isWeeklyReportDue } from "./utils/weeklyReport";
 import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./services/whatsapp";
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
@@ -1484,44 +1484,24 @@ export default function App() {
     setViewingSale(saleRecord);
     setIsInvoiceViewerOpen(true);
 
-    // Every completed sale gets its invoice pushed to the shop's Telegram
-    // bot automatically — with customer details when available and the
-    // payment mode (Cash/UPI/etc). Never blocks or fails the sale itself.
-    sendInvoiceToTelegram(saleRecord);
-  };
-
-  // Formats and fires the invoice off to Telegram. Best-effort: if the
-  // owner hasn't connected Telegram yet, or the send fails/is offline, the
-  // outbox worker (server-side) will retry — this call never blocks the
-  // sale UI or throws back into the caller.
-  const sendInvoiceToTelegram = (sale: Sale) => {
-    if (!cloudUser) return; // Telegram delivery needs a signed-in cloud store.
-    try {
-      const lines: string[] = [];
-      lines.push(`🧾 New Invoice: ${sale.invoiceNo}`);
-      lines.push(`📅 ${sale.date} ${sale.time}`);
-      lines.push("");
-      sale.items.forEach((it) => {
-        lines.push(`• ${it.name} x${it.qty} — ${inr(it.price * it.qty)}`);
-      });
-      lines.push("");
-      if (sale.discount) lines.push(`Discount: -${inr(sale.discount)}`);
-      if (sale.taxAmount) lines.push(`Tax: +${inr(sale.taxAmount)}`);
-      lines.push(`💰 Total: ${inr(sale.total)}`);
-      lines.push(`💳 Payment Mode: ${sale.payment}`);
-      if (sale.dueAmount > 0) lines.push(`⚠️ Due: ${inr(sale.dueAmount)}`);
-      if (sale.customer && sale.customer.phone) {
-        lines.push("");
-        lines.push(`👤 Customer: ${sale.customer.name || "-"}`);
-        lines.push(`📞 Phone: ${sale.customer.phone}`);
-        if (sale.customer.address) lines.push(`📍 Address: ${sale.customer.address}`);
-      }
-      sendTelegramReport(lines.join("\n")).catch((e) => {
-        console.warn("Telegram invoice send failed (will not block sale)", e);
-      });
-    } catch (e) {
-      console.warn("Telegram invoice formatting failed", e);
-    }
+    // NOTE (2026-09-04): invoice delivery to the owner's Telegram bot is
+    // handled entirely server-side now — see the `enqueue_invoice_telegram`
+    // trigger on `public.invoices` (supabase/migrations) which enqueues into
+    // `telegram_outbox`, and the `telegram-outbox-worker` function which a
+    // pg_cron job sweeps every 2 minutes regardless of whether any device's
+    // app is open. That path always resolves the shop's Owner/Manager chat
+    // (not the specific signed-in user), includes "Sold By", and works for
+    // staff sales made while fully offline, once the sale syncs to cloud.
+    //
+    // A previous version of this function also fired an *immediate*
+    // client-side send via the `telegram-connect` Edge Function's
+    // `send_report` action. That action is intentionally Owner/Manager-only
+    // (Telegram connect/send is "sirf Owner ka kaam" — see App.tsx comment
+    // near the Telegram Connect button), so for a Staff-made sale it always
+    // failed silently with 403, and for an Owner-made sale it produced a
+    // *second, duplicate* invoice message a couple of minutes later once the
+    // outbox trigger also delivered it. It has been removed — the reliable
+    // trigger+outbox path already covers every case, without duplicates.
   };
 
   // Quick POS Customer Checkout Modal State

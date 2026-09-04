@@ -495,3 +495,57 @@ _(Har entry: date, kaunsa point complete hua, chhota summary)_
   - **Part C** collects the five explicitly-out-of-scope/deferred items named across Steps 3.2, 3.4, 9.3, 10.2, 10.3, and 2's dead-code note into one place, so they're not lost between sessions but also clearly marked as non-blocking for go-live.
   - **No code changes this session** — investigation confirmed nothing was broken; Step 13's own deliverable (the checklist) was the actual work item, per the plan's own wording ("Final end-to-end checklist, sab steps complete hone ke baad").
   - **✅ ALL 13 STEPS OF THE MASTER PLAN NOW MARKED COMPLETE.** What's left before a real go-live is entirely the Part B manual-device checklist above (needs a real browser/phone/CI runner, which this sandbox has never had) plus the Part B1 one-time secrets/tokens only the Owner can create. No further AI-buildable code work is currently outstanding against the v3 plan unless new gaps turn up during that manual pass — in which case, exactly as every prior step's notes say, bring back what failed and it'll be fixed the same session.
+## 2026-09-04 — Duplicate/silently-failing Telegram invoice send removed
+
+**Requested (owner, Hinglish):** staff sales ka invoice offline/online dono
+hi hamesha bot par aana chahiye, owner Telegram permanently connected rahe
+app open ho ya na ho, stock sab jagah auto-sync ho.
+
+**Investigation (live Supabase project `vjimgnmbgghtsfafamye` checked
+directly, not just source code):**
+- Owner's Telegram was already connected (`telegram_connections` row,
+  connected today). Email/staff login sessions already persist indefinitely
+  (`persistSession`/`autoRefreshToken` already `true` in
+  `src/services/supabaseClient.ts`) — no change needed for either.
+- Stock sync + invoice generation is already atomic/server-authoritative
+  (`atomic_complete_sale`) and already fully offline-safe (existing local
+  queue + background sync) — no change needed.
+- **Real bug found:** every completed sale, `App.tsx` also fired an
+  *immediate* client-side Telegram send via
+  `telegram-connect`'s `send_report` action. That action is
+  Owner/Manager-only by design (see its own comment: "Telegram is sirf Owner
+  ka kaam"), so a Staff-made sale always hit it and got a silent 403 (no
+  user-visible error — caught and swallowed). For an Owner-made sale it
+  fired successfully immediately, **and then the existing
+  `enqueue_invoice_telegram` DB trigger → `telegram_outbox` → pg_cron
+  (`*/2 * * * *`) → `telegram-outbox-worker`** path *also* delivered the
+  same invoice ~≤2 minutes later — i.e. the Owner was getting every one of
+  their own sale invoices **twice**, while Staff sales relied entirely on
+  the (correct, reliable) trigger+outbox path, just without the instant
+  client-side attempt.
+
+**Fix:** removed the redundant/buggy immediate client-side
+`sendInvoiceToTelegram()` call and function from `App.tsx` (and its
+now-unused `sendTelegramReport` import). The trigger+outbox path was already
+correct, complete (includes "Sold By", full item/PDF detail), store-wide
+(resolves the shop's Owner/Manager chat regardless of which signed-in user
+made the sale), and already worked for fully-offline Staff devices once
+their queued sale syncs — cron sweeps every 2 minutes independent of any
+app being open. No duplicate messages for Owner sales anymore; Staff sales
+now behave identically to Owner sales (both go through the one reliable
+path) instead of silently 403'ing on a redundant path.
+
+**Verified:** `npm install` (277 packages, clean) → `npx tsc --noEmit`
+(zero errors) → `npm run build` (clean, only the pre-existing >500kB chunk
+size advisory, not an error) → `node scripts/static-audit.mjs` (all 16
+checks PASS). Live DB/edge-function/cron state checked directly via the
+connected Supabase project before concluding what was actually broken vs.
+already working, to avoid re-implementing things that already worked.
+
+**Not changed / no bug found:** the Owner's "Telegram Connect" button
+(`ownerMode`-gated, as designed) — the Owner's account shows as connected
+in the live `telegram_connections` table as of today. If the "connect
+option missing" issue recurs, it needs a screenshot/exact repro (which
+screen, signed in as owner or staff, what the button/screen shows) to
+diagnose further — nothing in the current code path explains it being
+permanently hidden for a real Owner account.

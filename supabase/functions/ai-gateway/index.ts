@@ -223,7 +223,7 @@ function clientForKey(key: string): GoogleGenAI {
 
 const activeKeyIndexByPool = new Map<string, number>();
 
-function classifyGeminiFailure(err: any): "quota" | "invalid" | null {
+function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | null {
   const msg = String(err?.message || err || "").toLowerCase();
   const status = err?.status || err?.code;
 
@@ -251,7 +251,26 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | null {
     return "invalid";
   }
 
+  // Google's own model-overload error ("This model is currently
+  // experiencing high demand... usually temporary"). Nothing wrong with
+  // the key or the request — a short retry on the SAME key almost always
+  // succeeds, so this must not be treated like "quota"/"invalid" (which
+  // cool the key down / remove it from rotation).
+  if (
+    status === 503 ||
+    msg.includes("503") ||
+    msg.includes("unavailable") ||
+    msg.includes("overloaded") ||
+    msg.includes("high demand")
+  ) {
+    return "unavailable";
+  }
+
   return null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function hasAI(): boolean {
@@ -268,23 +287,31 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
   for (let attempt = 0; attempt < keys.length; attempt++) {
     const idx = (activeIdx + attempt) % keys.length;
     const entry = keys[idx];
-    try {
-      const result = await fn(clientForKey(entry.apiKey));
-      activeKeyIndexByPool.set(poolId, idx);
-      void markKeyResult(storeId, entry.slot, true);
-      return result;
-    } catch (err) {
-      lastError = err;
-      const failure = classifyGeminiFailure(err);
-      if (failure) {
+    // Up to 2 quick retries on the SAME key for a transient "model
+    // overloaded" error (Google's own message says these are usually a
+    // few seconds, not a real outage) before treating it like any other
+    // failure and rotating to the next key.
+    for (let overloadRetry = 0; overloadRetry <= 2; overloadRetry++) {
+      try {
+        const result = await fn(clientForKey(entry.apiKey));
+        activeKeyIndexByPool.set(poolId, idx);
+        void markKeyResult(storeId, entry.slot, true);
+        return result;
+      } catch (err) {
+        lastError = err;
+        const failure = classifyGeminiFailure(err);
+        if (failure === "unavailable" && overloadRetry < 2) {
+          await sleep(600 * (overloadRetry + 1));
+          continue;
+        }
+        if (!failure) throw err; // Not a key problem (bad input, etc) — fail fast, don't burn other keys retrying it.
         console.warn(
           `Gemini key (store=${poolId}, slot=${entry.slot}) failed (${failure}) — ` +
             (failure === "invalid" ? "marking invalid, removing from rotation." : "cooling down, rotating to next key.")
         );
         void markKeyResult(storeId, entry.slot, false, err?.message, failure === "invalid" ? "invalid" : "exhausted");
-        continue;
+        break;
       }
-      throw err;
     }
   }
   throw lastError || new Error("All Gemini API keys exhausted");

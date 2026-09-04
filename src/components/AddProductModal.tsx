@@ -4,7 +4,7 @@ import { Database, Product } from "../types";
 import { uid, genSku, genBarcode } from "../utils/fifoEngine";
 import { processAccessoryOcr, lookupScreenSize } from "../utils/aiOcr";
 import { compressImageToDataUrl } from "../utils/imageCompress";
-import { uploadProductPhotoOrFallback } from "../services/photoStorage";
+import { uploadProductPhotoOrFallback, isStorageUrl } from "../services/photoStorage";
 import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 
@@ -230,6 +230,34 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     }
   };
 
+  // Re-scans the currently selected/uploaded photo. `photo` starts as a
+  // data: URL right after picking a file, but the background upload in
+  // handleImageSelected can replace it with a plain Storage https:// URL
+  // before the user taps this button — sending that URL straight to the AI
+  // gateway as if it were base64 image bytes fails server-side ("Base64
+  // decoding failed for https://...") because it's a link, not the actual
+  // photo. Fetch it back into a data: URL first when that's happened, same
+  // as EditProductModal's handleRescan.
+  const rescanCurrentPhoto = async () => {
+    if (!photo) return;
+    try {
+      let imgData = photo;
+      if (isStorageUrl(photo)) {
+        const res = await fetch(photo);
+        const blob = await res.blob();
+        imgData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Saved photo load nahi ho payi"));
+          reader.readAsDataURL(blob);
+        });
+      }
+      await runScan(imgData);
+    } catch (err: any) {
+      toast(err?.message || "Photo load nahi ho payi, dobara try karein", "red");
+    }
+  };
+
   const runScan = async (imgData: string) => {
     setIsScanning(true);
     setScanError("");
@@ -434,7 +462,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
             </div>
 
             {photo && !isScanning && (
-              <button type="button" className="btn sm" style={{ width: "100%", marginTop: "10px" }} onClick={() => runScan(photo)}>
+              <button type="button" className="btn sm" style={{ width: "100%", marginTop: "10px" }} onClick={rescanCurrentPhoto}>
                 <RefreshCw size={13} /> Re-scan with AI
               </button>
             )}

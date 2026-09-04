@@ -17,7 +17,7 @@
    unmapped for now — tracked for Part 3 refinement.
    ========================================================================== */
 
-html {
+:root {
   /* Surfaces */
   --paper: var(--canvas);
   --card: var(--surface);

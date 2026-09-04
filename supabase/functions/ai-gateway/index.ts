@@ -37,11 +37,26 @@ import { GoogleGenAI, Type } from "npm:@google/genai@2";
 //   POST /staff-advice
 //   POST /product-photo-search
 //   GET  /health
+//
+// AI feature batch (v36) — same auth/rate-limit/failover pattern as above:
+//   POST /resale-price-advisor  — second-hand phone resale price range
+//   POST /customer-reply-draft  — WhatsApp/Telegram reply draft assistant
+//   POST /demand-forecast       — reorder suggestions from sales velocity
+//   POST /ocr-expense           — expense receipt/bill photo -> category+amount
+//   POST /churn-risk            — loyalty churn risk + win-back message drafts
+//   POST /cron-daily-digest     — cron-only (x-cron-secret), queues an AI
+//                                 daily digest into telegram_outbox per store
 // ---------------------------------------------------------------------------
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SECRET_KEY") || "";
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-3.7-flash";
+// Speed: disable Gemini's extended "thinking" step for every call in this
+// gateway. None of these prompts need multi-step reasoning (OCR fields,
+// short Hinglish summaries, JSON-schema extraction) — thinking only adds
+// latency here, so every request below asks for the fastest possible
+// response instead of paying for a reasoning pass it doesn't need.
+const FAST_MODE_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
 
 const supabaseAdmin = SUPABASE_URL && SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } })
@@ -343,6 +358,7 @@ Image type: ${imageType}.`;
       model: GEMINI_MODEL,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
+        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -424,6 +440,7 @@ Never invent a model that is not printed on the pack.`;
       model: GEMINI_MODEL,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
+        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -497,6 +514,7 @@ Reply with ONLY the number rounded to 1 decimal place (e.g. "6.7"). If you are n
     ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: { parts: [{ text: prompt }] },
+      config: FAST_MODE_CONFIG,
     })
   );
   const size = parseFloat(String(response.text || "0").trim().match(/[\d.]+/)?.[0] || "0") || 0;
@@ -543,6 +561,7 @@ Never invent details not visible in the photo.`;
       model: GEMINI_MODEL,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
+        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -582,6 +601,7 @@ ${JSON.stringify(summary)}`;
     ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: { parts: [{ text: prompt }] },
+      config: FAST_MODE_CONFIG,
     })
   );
   return (response.text || "").trim();
@@ -606,9 +626,330 @@ ${JSON.stringify(summary)}`;
     ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: { parts: [{ text: prompt }] },
+      config: FAST_MODE_CONFIG,
     })
   );
   return (response.text || "").trim();
+}
+
+// ---------------------------------------------------------------------------
+// AI Feature: Resale Price Advisor (second-hand phones)
+// ---------------------------------------------------------------------------
+async function runResalePriceAdvisor(storeId: string | null, input: Record<string, unknown>) {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You are a pricing advisor for a small Indian second-hand mobile phone shop.
+All amounts are in INR (₹). Based ONLY on the device details below, suggest a fair resale
+price RANGE for reselling this phone, plus a single recommended list price. Consider brand,
+model, RAM/storage, condition grade, battery health, and any market reference price given.
+Respond ONLY as compact JSON with keys: minPrice (number), maxPrice (number), listPrice (number),
+reasoning (a short Hinglish explanation, under 60 words, no markdown).
+Never invent facts not present below.
+
+DEVICE DATA:
+${JSON.stringify(input)}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        ...FAST_MODE_CONFIG,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            minPrice: { type: Type.NUMBER },
+            maxPrice: { type: Type.NUMBER },
+            listPrice: { type: Type.NUMBER },
+            reasoning: { type: Type.STRING },
+          },
+        },
+      },
+    })
+  );
+  const parsed = JSON.parse(response.text || "{}");
+  return {
+    minPrice: Number(parsed.minPrice) || 0,
+    maxPrice: Number(parsed.maxPrice) || 0,
+    listPrice: Number(parsed.listPrice) || 0,
+    reasoning: String(parsed.reasoning || "").trim(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// AI Feature: Customer Reply Draft (WhatsApp/Telegram inquiry assistant)
+// ---------------------------------------------------------------------------
+async function runCustomerReplyDraft(storeId: string | null, input: Record<string, unknown>) {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You are a friendly counter staff member at a small Indian mobile phone &
+digital accessories shop, replying to a customer's WhatsApp/Telegram message. Using ONLY the
+customer's message and the matched product/stock info given below, write ONE short, warm,
+ready-to-send reply in simple Hinglish (Hindi+English mix). Mention price/stock ONLY if given
+below — never invent a price or stock count. If nothing matched, politely ask the customer for
+more detail (model name, photo, etc.) instead of guessing. Keep it under 55 words, no markdown,
+no bullet points — just the message text as it should be sent.
+
+CUSTOMER MESSAGE:
+${String(input.customerMessage || "")}
+
+MATCHED PRODUCTS/STOCK (may be empty):
+${JSON.stringify(input.matchedProducts || [])}
+
+SHOP NAME: ${String(input.shopName || "our shop")}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
+  );
+  return (response.text || "").trim();
+}
+
+// ---------------------------------------------------------------------------
+// AI Feature: Demand Forecast & Reorder Suggestions
+// ---------------------------------------------------------------------------
+async function runDemandForecast(storeId: string | null, products: unknown[]) {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You are an inventory planner for a small Indian mobile phone & digital
+accessories shop. Below is a list of products with their recent sales velocity and current
+stock. For EACH product likely to run out soon (based on velocity vs current stock), suggest a
+reorder quantity and mark urgency as "high", "medium", or "low". Ignore products with healthy
+stock relative to their velocity. Respond ONLY as compact JSON: { "items": [ { "productName":
+string, "suggestedReorderQty": number, "urgency": "high"|"medium"|"low", "reason": short
+Hinglish phrase } ], "summary": short Hinglish overview under 50 words }. Never invent products
+not present below.
+
+PRODUCTS (name, last30DaysQtySold, currentStock, minStock):
+${JSON.stringify(products)}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        ...FAST_MODE_CONFIG,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  productName: { type: Type.STRING },
+                  suggestedReorderQty: { type: Type.NUMBER },
+                  urgency: { type: Type.STRING },
+                  reason: { type: Type.STRING },
+                },
+              },
+            },
+            summary: { type: Type.STRING },
+          },
+        },
+      },
+    })
+  );
+  const parsed = JSON.parse(response.text || "{}");
+  const items = Array.isArray(parsed.items) ? parsed.items : [];
+  return {
+    items: items.map((it: any) => ({
+      productName: String(it.productName || "").trim(),
+      suggestedReorderQty: Math.max(0, Math.round(Number(it.suggestedReorderQty) || 0)),
+      urgency: ["high", "medium", "low"].includes(it.urgency) ? it.urgency : "low",
+      reason: String(it.reason || "").trim(),
+    })),
+    summary: String(parsed.summary || "").trim(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// AI Feature: Expense Receipt OCR
+// ---------------------------------------------------------------------------
+function normalizeExpenseOcr(input: any) {
+  const base = input || {};
+  const allowedCategories = ["Rent", "Electricity", "Internet/Phone", "Salary", "Transport", "Supplier Payment", "Maintenance", "Stationery", "Food", "Other"];
+  const category = allowedCategories.includes(base.category) ? base.category : "Other";
+  return {
+    description: String(base.description || "").trim().slice(0, 200),
+    amount: Number(base.amount) || 0,
+    category,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(String(base.date || "")) ? base.date : "",
+    method: ["Cash", "UPI", "Bank Transfer", "Cheque"].includes(base.method) ? base.method : "Cash",
+  };
+}
+
+async function runExpenseOcr(storeId: string | null, base64Data: string, mimeType: string) {
+  if (!hasAI()) return null;
+  const prompt = `Read this shop expense receipt/bill photo (electricity bill, rent receipt,
+supplier bill, maintenance bill, etc. for a small Indian mobile phone shop). Extract ONLY
+information visibly printed/supported by the image. Return JSON fields:
+- description: a short 3-6 word description of what this expense is for.
+- amount: the total amount paid, as a plain number (no currency symbol/commas).
+- category: best single match from exactly: "Rent", "Electricity", "Internet/Phone", "Salary",
+  "Transport", "Supplier Payment", "Maintenance", "Stationery", "Food", "Other".
+- date: the bill/payment date in YYYY-MM-DD format if visible, else empty string.
+- method: best guess of payment method from exactly "Cash", "UPI", "Bank Transfer", "Cheque" if
+  indicated on the receipt, else "Cash".
+Never invent an amount or date not visibly supported by the image.`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
+      config: {
+        ...FAST_MODE_CONFIG,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            description: { type: Type.STRING },
+            amount: { type: Type.NUMBER },
+            category: { type: Type.STRING },
+            date: { type: Type.STRING },
+            method: { type: Type.STRING },
+          },
+        },
+      },
+    })
+  );
+  return normalizeExpenseOcr(JSON.parse(response.text || "{}"));
+}
+
+// ---------------------------------------------------------------------------
+// AI Feature: Loyalty Churn Risk Predictor
+// ---------------------------------------------------------------------------
+async function runChurnRisk(storeId: string | null, customers: unknown[]) {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You are a customer-retention advisor for a small Indian mobile phone &
+digital accessories shop. Below is a list of repeat customers with their purchase history.
+Identify customers who are at risk of churn (used to buy regularly, haven't come back in a
+while, relative to their own past frequency) — do NOT flag customers with little/no history as
+at-risk. For each at-risk customer, suggest a short, warm, personal win-back WhatsApp message
+in Hinglish (under 40 words), mentioning a small loyalty incentive ONLY if loyaltyPoints > 0.
+Respond ONLY as compact JSON: { "atRisk": [ { "name": string, "phone": string, "reason": short
+Hinglish phrase, "suggestedMessage": string } ], "summary": short Hinglish overview under 50
+words }. Never invent a customer not present below.
+
+CUSTOMERS (name, phone, lastPurchaseDate, totalSpent, purchaseCount, avgDaysBetweenPurchases, loyaltyPoints):
+${JSON.stringify(customers)}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        ...FAST_MODE_CONFIG,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            atRisk: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  phone: { type: Type.STRING },
+                  reason: { type: Type.STRING },
+                  suggestedMessage: { type: Type.STRING },
+                },
+              },
+            },
+            summary: { type: Type.STRING },
+          },
+        },
+      },
+    })
+  );
+  const parsed = JSON.parse(response.text || "{}");
+  const atRisk = Array.isArray(parsed.atRisk) ? parsed.atRisk : [];
+  return {
+    atRisk: atRisk.map((c: any) => ({
+      name: String(c.name || "").trim(),
+      phone: String(c.phone || "").trim(),
+      reason: String(c.reason || "").trim(),
+      suggestedMessage: String(c.suggestedMessage || "").trim(),
+    })),
+    summary: String(parsed.summary || "").trim(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// AI Feature: Scheduled Daily AI Digest (Telegram) — cron-only, no user
+// session. Reads each opted-in store's mirrored app state from `store_state`
+// (same JSON shape the client itself displays, already used this way by the
+// Confidential Price flow above in telegram-connect), builds a one-day
+// summary, asks Gemini for a short Hinglish digest, and queues it into
+// `telegram_outbox` for the existing telegram-outbox-worker to actually send
+// — reusing that delivery pipeline instead of duplicating Telegram API calls.
+// ---------------------------------------------------------------------------
+async function runDailyDigestSweep(): Promise<{ queued: number; skipped: number; errors: number }> {
+  if (!supabaseAdmin) return { queued: 0, skipped: 0, errors: 0 };
+  let queued = 0, skipped = 0, errors = 0;
+
+  const { data: stores, error: storesErr } = await supabaseAdmin
+    .from("stores").select("id").eq("ai_digest_enabled", true);
+  if (storesErr || !stores?.length) return { queued: 0, skipped: 0, errors: storesErr ? 1 : 0 };
+
+  for (const store of stores) {
+    try {
+      const { data: conn } = await supabaseAdmin
+        .from("telegram_connections").select("chat_id").eq("store_id", store.id).maybeSingle();
+      if (!conn?.chat_id) { skipped++; continue; }
+
+      const { data: stateRow } = await supabaseAdmin
+        .from("store_state").select("state").eq("store_id", store.id).maybeSingle();
+      const state = (stateRow?.state || {}) as {
+        sales?: any[]; expenses?: { shop?: any[] }; products?: any[]; settings?: { shopName?: string };
+      };
+
+      const today = new Date().toISOString().slice(0, 10);
+      const todaySales = (state.sales || []).filter((s) => s?.date === today && s?.status !== "Cancelled");
+      const totalSalesToday = todaySales.reduce((a, s) => a + (Number(s.total) || 0), 0);
+      const todayExpenses = (state.expenses?.shop || []).filter((e) => e?.date === today);
+      const totalExpensesToday = todayExpenses.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+      const lowStockCount = (state.products || []).filter((p) => (Number(p.stock) || 0) <= (Number(p.minStock) || 0)).length;
+      const topProductQty: Record<string, number> = {};
+      todaySales.forEach((s) => (s.items || []).forEach((i: any) => {
+        topProductQty[i.name] = (topProductQty[i.name] || 0) + (Number(i.qty) || 0);
+      }));
+      const topProducts = Object.entries(topProductQty).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, qty]) => `${name} x${qty}`);
+
+      if (todaySales.length === 0 && todayExpenses.length === 0) { skipped++; continue; }
+
+      const message = await runBusinessDigestText(store.id, {
+        shopName: state.settings?.shopName || "Shop",
+        date: today,
+        invoiceCount: todaySales.length,
+        totalSalesToday: Math.round(totalSalesToday),
+        totalExpensesToday: Math.round(totalExpensesToday),
+        lowStockCount,
+        topProducts,
+      });
+
+      await supabaseAdmin.from("telegram_outbox").insert({
+        store_id: store.id,
+        chat_id: conn.chat_id,
+        message,
+        status: "pending",
+      });
+      queued++;
+    } catch (e) {
+      console.error("daily digest failed for store", store.id, e);
+      errors++;
+    }
+  }
+  return { queued, skipped, errors };
+}
+
+async function runBusinessDigestText(storeId: string | null, summary: Record<string, unknown>): Promise<string> {
+  const prompt = `You are writing a short end-of-day WhatsApp/Telegram-style digest for the
+owner of a small Indian mobile phone & digital services shop, in simple Hinglish. Using ONLY
+the numbers below, write 3-5 short lines (use "-" per line, no markdown headers/bold). Cover:
+today's sales total and invoice count, today's shop expenses if any, which product(s) sold most
+today if any, and a low-stock item count reminder if > 0. Keep it warm and under 90 words total.
+Do not invent numbers not present below.
+
+DATA:
+${JSON.stringify(summary)}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
+  );
+  return `📊 ${summary.shopName} — Daily AI Digest (${summary.date})\n\n${(response.text || "").trim()}`;
 }
 
 function decodeImage(image: unknown): { mimeType: string; base64Data: string } | null {
@@ -776,6 +1117,117 @@ Deno.serve(async (req: Request) => {
         } catch (error) {
           console.error("Product photo search endpoint error", error);
           return json({ success: false, error: "AI photo search failed. Search manually." }, 500);
+        }
+      }
+
+      case "resale-price-advisor": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`resale-price-advisor:${ip}`, 60_000, 10)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const device = body?.device;
+        if (!device || typeof device !== "object") return json({ success: false, error: "No device details provided." }, 400);
+
+        try {
+          const result = await runResalePriceAdvisor(ctx.storeId, device);
+          return json({ success: true, data: result });
+        } catch (error) {
+          console.error("Resale price advisor error", error);
+          return json({ success: false, error: "AI price suggestion failed. Enter manually." }, 500);
+        }
+      }
+
+      case "customer-reply-draft": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`customer-reply-draft:${ip}`, 60_000, 15)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        if (!body?.customerMessage || typeof body.customerMessage !== "string") {
+          return json({ success: false, error: "No customer message provided." }, 400);
+        }
+
+        try {
+          const draft = await runCustomerReplyDraft(ctx.storeId, body);
+          if (!draft) return json({ success: false, error: "AI unavailable — write manually." }, 503);
+          return json({ success: true, draft });
+        } catch (error) {
+          console.error("Customer reply draft error", error);
+          return json({ success: false, error: "AI reply draft failed. Write manually." }, 500);
+        }
+      }
+
+      case "demand-forecast": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`demand-forecast:${ip}`, 60_000, 6)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const products = Array.isArray(body?.products) ? body.products : null;
+        if (!products || products.length === 0) return json({ success: false, error: "No product sales data provided." }, 400);
+
+        try {
+          const result = await runDemandForecast(ctx.storeId, products.slice(0, 150));
+          return json({ success: true, data: result });
+        } catch (error) {
+          console.error("Demand forecast error", error);
+          return json({ success: false, error: "AI forecast failed. Try again shortly." }, 500);
+        }
+      }
+
+      case "ocr-expense": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`ocr-expense:${ip}`)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const decoded = decodeImage(body?.image);
+        if (!body?.image) return json({ success: false, error: "No image provided." }, 400);
+        if (!decoded) return json({ success: false, error: "Unsupported image type." }, 415);
+
+        try {
+          const data = await runExpenseOcr(ctx.storeId, decoded.base64Data, decoded.mimeType);
+          if (!data) return json({ success: false, error: "AI unavailable — enter manually." }, 503);
+          return json({ success: true, provider: "gemini", data });
+        } catch (error) {
+          console.error("Expense OCR error", error);
+          return json({ success: false, error: "AI scan failed. Enter manually." }, 500);
+        }
+      }
+
+      case "churn-risk": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`churn-risk:${ip}`, 60_000, 6)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const customers = Array.isArray(body?.customers) ? body.customers : null;
+        if (!customers || customers.length === 0) return json({ success: false, error: "No customer data provided." }, 400);
+
+        try {
+          const result = await runChurnRisk(ctx.storeId, customers.slice(0, 200));
+          return json({ success: true, data: result });
+        } catch (error) {
+          console.error("Churn risk error", error);
+          return json({ success: false, error: "AI churn analysis failed. Try again shortly." }, 500);
+        }
+      }
+
+      case "cron-daily-digest": {
+        // No user session in cron context — same shared-secret pattern as
+        // telegram-outbox-worker-sweep / telegram-connect's weekly report.
+        const cronSecret = Deno.env.get("CRON_SECRET") || "";
+        const provided = req.headers.get("x-cron-secret") || "";
+        const isCronSweep = cronSecret.length > 0 && provided.length > 0 && provided === cronSecret;
+        if (!isCronSweep) return json({ success: false, error: "Unauthorized." }, 401);
+
+        try {
+          const result = await runDailyDigestSweep();
+          return json({ success: true, ...result });
+        } catch (error) {
+          console.error("Daily digest sweep error", error);
+          return json({ success: false, error: "Digest sweep failed." }, 500);
         }
       }
 

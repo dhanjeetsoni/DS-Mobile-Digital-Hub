@@ -1982,6 +1982,33 @@ export default function App() {
                   <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--ink)" }}>Customer Khata ()</div>
                   <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>View pending balances &amp; WhatsApp</div>
                 </button>
+
+                {/* Dashboard "Add Stock" shortcut — opens the Add New Product
+                    modal directly from here, so a new item/stock entry never
+                    needs a detour through the Products page first. */}
+                {ownerMode && (
+                  <button
+                    className="card fx-tilt"
+                    onClick={() => requireOwner(() => setIsAddProductOpen(true))}
+                    style={{
+                      padding: "16px",
+                      background: "linear-gradient(135deg, #ec4899, #be185d)",
+                      color: "#ffffff",
+                      border: "none",
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                      <span className="fx-icon-bounce" style={{ fontSize: "24px" }}>📦</span>
+                      <span style={{ background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: "999px", fontSize: "10px", fontWeight: 800 }}>
+                        1-Tap
+                      </span>
+                    </div>
+                    <div style={{ fontSize: "15px", fontWeight: 800 }}>Add Stock / Product</div>
+                    <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "2px" }}>Naya glass, cover ya item seedha yahin se add karein</div>
+                  </button>
+                )}
               </div>
             </div>
 

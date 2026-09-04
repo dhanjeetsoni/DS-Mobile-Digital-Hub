@@ -600,11 +600,34 @@ export default function App() {
     if (!cloudReady || !cloudProfile?.store_id) return;
     const timer = window.setTimeout(async () => {
       try { const v = await saveCloudState(db, cloudVersion); setCloudVersion(v); setCloudStatus("online"); }
-      catch (error) {
-        console.warn("Cloud state save failed; queueing an idempotent snapshot bridge operation", error);
-        setCloudStatus("error");
-        try { await queueOfflineOperation("snapshot", "store_state", db); }
-        catch (queueError) { console.warn("Snapshot queue failed", queueError); }
+      catch (error: any) {
+        const isVersionConflict = String(error?.message || error || "").includes("VERSION_CONFLICT");
+        if (isVersionConflict) {
+          // Another device (owner/staff) already saved a newer version.
+          // Re-queuing OUR stale copy with the old version number would just
+          // fail the same way forever (this was the bug behind the
+          // permanent red "Sync Issue" badge and a growing pile of stuck
+          // sync_queue rows). Instead, pull the latest state so the local
+          // copy — and the version number used by the *next* autosave — is
+          // correct again.
+          console.warn("Cloud save hit a version conflict; refreshing from server instead of re-queuing stale data", error);
+          try {
+            const remote = await loadCloudState();
+            if (remote?.state) {
+              setCloudVersion(remote.version);
+              setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
+            }
+            setCloudStatus("online");
+          } catch (refetchError) {
+            console.warn("Refetching latest state after version conflict failed", refetchError);
+            setCloudStatus("error");
+          }
+        } else {
+          console.warn("Cloud state save failed; queueing an idempotent snapshot bridge operation", error);
+          setCloudStatus("error");
+          try { await queueOfflineOperation("snapshot", "store_state", db); }
+          catch (queueError) { console.warn("Snapshot queue failed", queueError); }
+        }
       }
     }, 650);
     return () => window.clearTimeout(timer);
@@ -1388,6 +1411,16 @@ export default function App() {
         mrp: item.mrp ?? null,
         isGift: item.isGift || false,
         giftSellingPrice: item.giftSellingPrice ?? null,
+        // Reconciliation fields for the relational public.products table —
+        // see resolve_product_for_sale(). Locally-created products only ever
+        // get a client id like "p_<uuid>", never a row in public.products,
+        // so the cloud sale RPC needs enough info to find-or-create the real
+        // row by SKU before it can attach the sale to a real product uuid.
+        sku: prod?.sku ?? null,
+        brand: prod?.brand ?? null,
+        minStock: prod?.minStock ?? 0,
+        costPrice: prod?.purchasePrice ?? avgCost,
+        stockAtSale: prod ? prod.stock + item.qty : item.qty,
       };
     });
     } catch (error) {
@@ -1424,6 +1457,28 @@ export default function App() {
         if (reserveError) throw reserveError;
         invoiceNo = String(reservedInvoice);
 
+        // Local products only ever carry a client-generated id (e.g. "p_<uuid>")
+        // — atomic_complete_sale needs a real row in public.products. Resolve
+        // (find-or-create) each item's real product id before selling, or
+        // every sale of a locally-created product fails with an invalid-uuid
+        // error and never reaches the server (see resolve_product_for_sale()).
+        const resolvedItems = await Promise.all(saleItems.map(async (i) => {
+          const { data: realId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+            p_store_id: cloudProfile.store_id,
+            p_local_id: String(i.productId),
+            p_sku: i.sku,
+            p_model: i.name,
+            p_brand: i.brand,
+            p_category: i.category,
+            p_cost_price: i.costPrice,
+            p_selling_price: i.price,
+            p_stock_qty: i.stockAtSale,
+            p_min_stock: i.minStock,
+          });
+          if (resolveError) throw resolveError;
+          return { product_id: realId, quantity: i.qty, unit_price: i.price };
+        }));
+
         const { data: atomicSaleId, error: atomicError } = await supabase.rpc("atomic_complete_sale", {
           p_store_id: cloudProfile.store_id,
           p_invoice_no: invoiceNo,
@@ -1433,7 +1488,7 @@ export default function App() {
           p_discount: cartDiscount,
           p_tax: taxAmount,
           p_idempotency_key: idempotencyKey,
-          p_items: saleItems.map(i => ({ product_id: i.productId, quantity: i.qty, unit_price: i.price })),
+          p_items: resolvedItems,
         });
         if (atomicError) throw atomicError;
         if (atomicSaleId) showToast("Cloud transaction committed atomically", "green");

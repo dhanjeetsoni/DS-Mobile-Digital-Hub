@@ -155,6 +155,27 @@ async function processOperation(row: any, storeId: string) {
       invoiceNo = String(reserved);
     }
 
+    // Locally-created products only ever have a client id (e.g. "p_<uuid>"),
+    // never a row in public.products — resolve (find-or-create) the real
+    // product id before replaying the sale, or it fails permanently with an
+    // invalid-uuid error (see resolve_product_for_sale()).
+    const resolvedItems = await Promise.all((sale.items || []).map(async (item: any) => {
+      const { data: realId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+        p_store_id: storeId,
+        p_local_id: String(item.productId),
+        p_sku: item.sku ?? null,
+        p_model: item.name ?? null,
+        p_brand: item.brand ?? null,
+        p_category: item.category ?? null,
+        p_cost_price: item.costPrice ?? item.purchasePrice ?? 0,
+        p_selling_price: item.price,
+        p_stock_qty: item.stockAtSale ?? 0,
+        p_min_stock: item.minStock ?? 0,
+      });
+      if (resolveError) throw resolveError;
+      return { product_id: realId, quantity: item.qty, unit_price: item.price };
+    }));
+
     const { data: saleId, error } = await supabase.rpc("atomic_complete_sale", {
       p_store_id: storeId,
       p_invoice_no: invoiceNo,
@@ -164,11 +185,7 @@ async function processOperation(row: any, storeId: string) {
       p_discount: Number(sale.discount || 0),
       p_tax: Number(sale.taxAmount || 0),
       p_idempotency_key: row.operation_id,
-      p_items: (sale.items || []).map((item: any) => ({
-        product_id: item.productId,
-        quantity: item.qty,
-        unit_price: item.price,
-      })),
+      p_items: resolvedItems,
     });
     if (error) throw error;
     return { serverId: saleId, invoiceNo };

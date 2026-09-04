@@ -1,0 +1,127 @@
+/* ==========================================================================
+   fx.css — small, reusable "fun" animations
+   --------------------------------------------------------------------------
+   Opt-in utility classes, not global overrides — nothing here touches
+   every `.card` in the app (there are hundreds, in dense list screens
+   where extra motion would just be noise). Apply `.fx-tilt` etc. only to
+   spots that are meant to feel playful: the dashboard's summary cards and
+   the big 1-tap action buttons.
+
+   All of it responds to user action (hover/tap) or a real event (a
+   success toast) rather than animating on page load, and all of it is
+   disabled under prefers-reduced-motion.
+   ========================================================================== */
+
+/* ---- 3D tilt-and-lift, for dashboard cards & the big 1-tap buttons ---- */
+.fx-tilt {
+  transition: transform 0.35s var(--motion-fast, cubic-bezier(0.16, 1, 0.3, 1)),
+    box-shadow 0.35s ease;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.fx-tilt:hover,
+.fx-tilt:focus-visible {
+  transform: perspective(700px) rotateX(5deg) rotateY(-5deg) translateY(-4px) scale(1.015);
+  box-shadow: 0 20px 40px -18px rgba(0, 0, 0, 0.35);
+}
+.fx-tilt:active {
+  transform: perspective(700px) rotateX(2deg) rotateY(-2deg) translateY(-1px) scale(0.99);
+  transition-duration: 0.1s;
+}
+
+/* A little icon inside a .fx-tilt card gets its own pop on hover */
+.fx-icon-bounce {
+  display: inline-block;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.fx-tilt:hover .fx-icon-bounce {
+  transform: scale(1.22) rotate(-8deg) translateZ(20px);
+}
+
+/* ---- Sidebar brand mark: a small 3D flip when you hover it ---- */
+.fx-flip-3d {
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-style: preserve-3d;
+}
+.fx-flip-3d:hover {
+  transform: perspective(400px) rotateY(180deg);
+}
+
+/* ---- Success toast: a springier entrance + a little sparkle ---- */
+.toast.green {
+  animation: fxToastPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.toast.green::before {
+  content: "✨";
+  margin-right: 6px;
+}
+@keyframes fxToastPop {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.8) rotate(-3deg);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1.04) rotate(1deg);
+  }
+  100% {
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+/* ---- Confetti burst, spawned by src/utils/celebrate.ts ---- */
+#fx-confetti-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 300;
+  overflow: hidden;
+}
+.fx-confetti-piece {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  opacity: 0;
+  animation-name: fxConfettiFall;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation-fill-mode: forwards;
+}
+.fx-confetti-piece.round {
+  border-radius: 50%;
+}
+@keyframes fxConfettiFall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(0.6);
+  }
+  8% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--fx-x, 40px), var(--fx-y, 160px), 0) rotate(var(--fx-rot, 260deg)) scale(1);
+  }
+}
+
+/* ---- Reduced motion: turn every fx animation into a plain, instant state ---- */
+@media (prefers-reduced-motion: reduce) {
+  .fx-tilt,
+  .fx-tilt:hover,
+  .fx-tilt:focus-visible,
+  .fx-tilt:active,
+  .fx-icon-bounce,
+  .fx-tilt:hover .fx-icon-bounce,
+  .fx-flip-3d,
+  .fx-flip-3d:hover {
+    transition: none !important;
+    transform: none !important;
+  }
+  .toast.green {
+    animation: none !important;
+  }
+  #fx-confetti-layer {
+    display: none !important;
+  }
+}

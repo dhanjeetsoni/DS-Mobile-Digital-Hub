@@ -430,6 +430,116 @@ html[data-font-style="mono"] {
   gap: 10px;
 }
 
+/* ==========================================================================
+   2026-09-04 — Android / narrow-window layout
+   Everything above this block is the unchanged desktop layout (sidebar
+   always docked in the flow, fixed-height topbar). Below ~900px — a phone
+   in portrait, or BlueStacks/an Android window — the sidebar becomes an
+   off-canvas drawer instead of trying to squeeze a 260px rail permanently
+   onto a ~380-550px screen, and the topbar is allowed to wrap onto two
+   lines instead of overlapping when the shop name + subtitle + action
+   buttons no longer fit one 64px-tall row.
+   ========================================================================== */
+.mobile-hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .mobile-hamburger {
+    display: inline-flex;
+  }
+
+  #sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    transform: translate3d(-100%, 0, 0);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: none;
+  }
+
+  #sidebar.mobile-open {
+    transform: translate3d(0, 0, 0);
+    box-shadow: 20px 0 48px rgba(0, 0, 0, 0.35);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 12, 20, 0.55);
+    z-index: 95; /* under #sidebar (z-index 30 already, raise via same stacking context is fine since sidebar becomes fixed) */
+    animation: fadeInBackdrop 0.2s ease both;
+  }
+
+  #sidebar {
+    z-index: 100;
+  }
+
+  @keyframes fadeInBackdrop {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  #main {
+    width: 100%;
+  }
+
+  #topbar {
+    height: auto;
+    min-height: 56px;
+    padding: 8px 12px;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  #topbar h1 {
+    font-size: 15px !important;
+    max-width: 56vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #topbar .sub {
+    max-width: 56vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #topbar > .topbar-title {
+    gap: 10px !important;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .top-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 6px;
+  }
+
+  #page {
+    padding: 14px 12px 32px;
+  }
+}
+
+
 #page {
   flex: 1;
   padding: 24px 28px 48px;

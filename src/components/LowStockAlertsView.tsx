@@ -1,8 +1,9 @@
-import React from "react";
-import { AlertTriangle, MessageCircle } from "lucide-react";
+import React, { useState } from "react";
+import { AlertTriangle, MessageCircle, Sparkles } from "lucide-react";
 import { Database } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { buildLowStockReorderMessage, openWhatsApp } from "../services/whatsapp";
+import { getReorderSuggestion } from "../services/aiOps";
 import { ProductThumb } from "./ProductThumb";
 
 interface LowStockAlertsViewProps {
@@ -12,6 +13,45 @@ interface LowStockAlertsViewProps {
 
 export const LowStockAlertsView: React.FC<LowStockAlertsViewProps> = ({ db, showToast }) => {
   const multiplier = db.settings.reorderMultiplier || 2;
+  // 2026-09-04: per-product AI reorder suggestion (loading / text), keyed by
+  // product id — a real sale-velocity-aware suggestion alongside the
+  // existing static minStock*multiplier formula, not a replacement for it
+  // (the static one still works instantly/offline; AI is an optional extra
+  // opinion fetched on demand).
+  const [aiSuggestions, setAiSuggestions] = useState<Record<string, { loading: boolean; text: string; error: string }>>({});
+
+  const salesInWindow = (productId: string, days: number): number => {
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    let qty = 0;
+    for (const sale of db.sales) {
+      if (sale.status === "Cancelled") continue;
+      const t = new Date(sale.createdAt || sale.date).getTime();
+      if (Number.isNaN(t) || t < cutoff) continue;
+      for (const item of sale.items) {
+        if (item.productId === productId) qty += item.qty;
+      }
+    }
+    return qty;
+  };
+
+  const handleAiSuggest = async (row: { product: Database["products"][number]; suggestedQty: number }) => {
+    setAiSuggestions((prev) => ({ ...prev, [row.product.id]: { loading: true, text: "", error: "" } }));
+    try {
+      const text = await getReorderSuggestion({
+        productName: row.product.name,
+        category: row.product.category,
+        currentStock: row.product.stock,
+        minStock: row.product.minStock,
+        unitsSoldLast7Days: salesInWindow(row.product.id, 7),
+        unitsSoldLast30Days: salesInWindow(row.product.id, 30),
+        currentStaticSuggestion: row.suggestedQty,
+      });
+      setAiSuggestions((prev) => ({ ...prev, [row.product.id]: { loading: false, text, error: "" } }));
+    } catch (e) {
+      setAiSuggestions((prev) => ({ ...prev, [row.product.id]: { loading: false, text: "", error: e instanceof Error ? e.message : "AI suggestion failed." } }));
+    }
+  };
+
   const lowStock = db.products
     .filter((p) => p.stock <= p.minStock)
     .map((p) => ({

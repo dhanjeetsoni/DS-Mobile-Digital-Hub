@@ -626,6 +626,72 @@ function decodeImage(image: unknown): { mimeType: string; base64Data: string } |
 }
 
 // ---------------------------------------------------------------------------
+// 2026-09-04 additions — Due-payment reminder / Repair diagnosis / Reorder
+// suggestion. Same shape as business-insights/staff-advice above: a plain
+// Hinglish text reply built ONLY from the numbers/text the client sends,
+// never inventing figures, never touching cost/confidential prices (those
+// never leave the client for these three routes).
+// ---------------------------------------------------------------------------
+
+async function runDueReminder(storeId: string | null, input: Record<string, unknown>): Promise<string> {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You write a short, polite WhatsApp payment-reminder message in simple Hinglish (Hindi+English mix)
+for a small Indian mobile & digital accessories shop to send a customer who has an outstanding due balance.
+Tone: respectful, friendly, never threatening or rude — this is an ongoing customer relationship. Use ONLY the
+details given below; never invent a name, amount, or date not present. If a detail is missing, simply omit that
+part of the message instead of guessing. Keep it under 60 words, no markdown, ready to paste directly into
+WhatsApp (can use 1-2 emoji naturally, not excessive).
+
+DETAILS:
+${JSON.stringify(input)}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] } })
+  );
+  return (response.text || "").trim();
+}
+
+async function runRepairDiagnosis(storeId: string | null, input: Record<string, unknown>): Promise<string> {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You are a helpful assistant for a mobile phone repair counter in India, helping the technician/staff
+think through a customer's reported problem BEFORE they open the device. Using ONLY the device and reported-issue
+text given below, in simple Hinglish (Hindi+English mix), give:
+1) 2-4 most likely causes, ordered most-likely first (short bullet points, "-" per line).
+2) 1-2 quick, SAFE checks to try first (e.g. restart, check charging port for lint, try another cable/charger,
+   check for visible screen/back-glass cracks, check if issue happens in Safe Mode) — never suggest opening the
+   device, removing the battery, or anything requiring disassembly or specialised tools; that judgement call stays
+   with the technician once the device is actually opened.
+3) End with exactly one line: "Yeh sirf ek prathmik AI sujhav hai — final diagnosis technician khud device khol kar hi karega."
+No markdown headers/bold, keep the whole reply under 130 words. Do not invent symptoms not mentioned below.
+
+DEVICE: ${String(input.device || "").slice(0, 200)}
+REPORTED ISSUE: ${String(input.issue || "").slice(0, 500)}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] } })
+  );
+  return (response.text || "").trim();
+}
+
+async function runReorderSuggestion(storeId: string | null, input: Record<string, unknown>): Promise<string> {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You help a small Indian mobile accessories shop decide how much stock to reorder for one product.
+Using ONLY the numbers given below (current stock, minimum stock level, units sold in the last 7 and last 30 days,
+and the shop's own simple formula-based suggestion for comparison), in simple Hinglish (Hindi+English mix):
+1) One line: suggested reorder quantity (a single number), based on actual recent sale-speed, not just the static
+   formula — e.g. if it's selling fast, suggest more than the static number; if it's barely selling, suggest less
+   or say "abhi zaroori nahi".
+2) One short line explaining why (recent sale trend in plain words).
+Keep the whole reply under 50 words, no markdown, no bullet symbols needed — 2 short lines is enough. Do not
+invent any sales numbers not present below.
+
+DATA:
+${JSON.stringify(input)}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] } })
+  );
+  return (response.text || "").trim();
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 Deno.serve(async (req: Request) => {
@@ -776,6 +842,65 @@ Deno.serve(async (req: Request) => {
         } catch (error) {
           console.error("Product photo search endpoint error", error);
           return json({ success: false, error: "AI photo search failed. Search manually." }, 500);
+        }
+      }
+
+      case "due-reminder": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`due-reminder:${ip}`, 60_000, 15)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const input = body?.input;
+        if (!input || typeof input !== "object") return json({ success: false, error: "No details provided." }, 400);
+
+        try {
+          const message = await runDueReminder(ctx.storeId, input);
+          if (!message) return json({ success: false, error: "AI unavailable — try again shortly." }, 503);
+          return json({ success: true, message });
+        } catch (error) {
+          console.error("Due reminder endpoint error", error);
+          return json({ success: false, error: "AI reminder failed. Try again shortly." }, 500);
+        }
+      }
+
+      case "repair-diagnosis": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`repair-diagnosis:${ip}`, 60_000, 15)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const input = body?.input;
+        if (!input?.issue || typeof input.issue !== "string" || input.issue.trim().length < 3) {
+          return json({ success: false, error: "Issue description missing." }, 400);
+        }
+
+        try {
+          const diagnosis = await runRepairDiagnosis(ctx.storeId, input);
+          if (!diagnosis) return json({ success: false, error: "AI unavailable — try again shortly." }, 503);
+          return json({ success: true, diagnosis });
+        } catch (error) {
+          console.error("Repair diagnosis endpoint error", error);
+          return json({ success: false, error: "AI diagnosis failed. Try again shortly." }, 500);
+        }
+      }
+
+      case "reorder-suggestion": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`reorder-suggestion:${ip}`, 60_000, 20)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const input = body?.input;
+        if (!input || typeof input !== "object") return json({ success: false, error: "No product data provided." }, 400);
+
+        try {
+          const suggestion = await runReorderSuggestion(ctx.storeId, input);
+          if (!suggestion) return json({ success: false, error: "AI unavailable — try again shortly." }, 503);
+          return json({ success: true, suggestion });
+        } catch (error) {
+          console.error("Reorder suggestion endpoint error", error);
+          return json({ success: false, error: "AI reorder suggestion failed. Try again shortly." }, 500);
         }
       }
 

@@ -104,6 +104,7 @@ import {
   Loader2,
   Barcode,
   Gift,
+  Menu,
 } from "lucide-react";
 
 const LS_KEY = "dsmdh_db_v2";
@@ -212,6 +213,12 @@ export default function App() {
 
   // Modals
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+  // 2026-09-04 — Android/narrow-screen nav drawer. Sidebar is fixed-width and
+  // always in the document flow at desktop widths (unchanged); below the
+  // 900px breakpoint (see index.css) it becomes an off-canvas drawer that
+  // this state toggles, closing itself automatically on every navigation so
+  // it never lingers open over the page like a modal would.
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [confidentialPriceProduct, setConfidentialPriceProduct] = useState<Product | null>(null);
   const [isAddGiftOpen, setIsAddGiftOpen] = useState(false);
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
@@ -3502,6 +3509,7 @@ export default function App() {
             return;
           }
           setCurrentPage(page);
+          setIsMobileNavOpen(false);
         }}
         ownerMode={ownerMode}
         onToggleOwnerMode={() => {
@@ -3509,11 +3517,20 @@ export default function App() {
           else setOwnerMode(false);
         }}
         onOpenQuickScan={() => setIsCameraScannerOpen(true)}
+        isMobileOpen={isMobileNavOpen}
+        onCloseMobile={() => setIsMobileNavOpen(false)}
       />
 
       <div id="main">
         <div id="topbar">
-          <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+          <button
+            className="mobile-hamburger"
+            aria-label="Menu kholo"
+            onClick={() => setIsMobileNavOpen(true)}
+          >
+            <Menu size={20} />
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "20px" }} className="topbar-title">
             <div>
               <h1 style={{ fontSize: "17px", margin: 0, fontWeight: 800, letterSpacing: "-0.02em", color: "var(--ink)" }}>
                 {db.settings.shopName || "MOBILE HUB"} <span style={{ color: "var(--accent)" }}>PRO</span>

@@ -665,6 +665,48 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [db, cloudReady, cloudProfile?.store_id]);
 
+  // Stock-flicker fix: product.stock inside the shared JSON snapshot is
+  // fought over by every device that autosaves (owner + staff can each
+  // overwrite the other's copy of the *entire* inventory blob within
+  // seconds of each other — that's what caused stock to visibly bounce
+  // between values). atomic_complete_sale / atomic_apply_stock_adjustment
+  // already maintain a race-free stock_qty in the relational products
+  // table (row-locked, one writer at a time). Treat that as the one source
+  // of truth for the stock *number* and periodically pull it into the local
+  // copy (matched by sku) instead of letting devices race each other.
+  useEffect(() => {
+    if (!cloudUser || !cloudProfile?.store_id) return;
+    let cancelled = false;
+    const reconcileStock = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("products")
+          .select("sku, stock_qty")
+          .eq("store_id", cloudProfile.store_id);
+        if (error || !data || cancelled) return;
+        const bySku = new Map<string, number>();
+        for (const row of data) if (row.sku) bySku.set(row.sku, Number(row.stock_qty));
+        if (bySku.size === 0) return;
+        setDb((prev) => {
+          let changed = false;
+          const products = prev.products.map((p) => {
+            if (p.sku && bySku.has(p.sku)) {
+              const real = bySku.get(p.sku)!;
+              if (real !== p.stock) { changed = true; return { ...p, stock: real }; }
+            }
+            return p;
+          });
+          return changed ? { ...prev, products } : prev;
+        });
+      } catch (error) {
+        console.warn("Stock reconciliation pull failed", error);
+      }
+    };
+    reconcileStock();
+    const t = window.setInterval(reconcileStock, 20000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, [cloudUser, cloudProfile?.store_id]);
+
   useEffect(() => {
     if (!cloudUser) return;
     const timer = window.setInterval(async () => {

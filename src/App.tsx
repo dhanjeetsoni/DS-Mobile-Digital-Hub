@@ -14,7 +14,7 @@ import {
   MobileFinanceDetails,
 } from "./types";
 import { inr, round2, numberToWordsIndian, computeSaleTotals, computeDiscountPercent } from "./utils/indianCurrency";
-import { uid, todayStr, nowTimeStr, genSku, addStockBatch, consumeFIFO, fifoCostTotal, getAvailableStock } from "./utils/fifoEngine";
+import { uid, todayStr, nowTimeStr, genSku, backfillMissingSkus, addStockBatch, consumeFIFO, fifoCostTotal, getAvailableStock } from "./utils/fifoEngine";
 import { naturalMatch } from "./utils/naturalSearch";
 import { Sidebar, SECONDARY_NAV_ITEMS } from "./components/Sidebar";
 import AppearanceStudioView from "./components/AppearanceStudioView";
@@ -927,6 +927,24 @@ export default function App() {
     // which is enough to eventually catch every legacy photo.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudUser, cloudProfile?.store_id, cloudStatus]);
+
+  // One-time legacy-sku backfill: resolve_product_for_sale() (used by both
+  // the sale flow and stock adjustments) refuses to resolve a product that
+  // has no sku, since minting one there could create an untraceable
+  // duplicate row — by design, that's the server's job to guard, not to fix
+  // silently. Instead, give every legacy product a sku locally, the same
+  // way AddProductModal generates one for a brand-new product, so it stops
+  // hitting that guard entirely. Purely local (no network call); the
+  // regular autosave picks up the change afterwards.
+  useEffect(() => {
+    const { products, changed } = backfillMissingSkus(db.products);
+    if (changed) saveState({ ...db, products });
+    // Deliberately only depends on the product count, not the whole `db` —
+    // this only needs to run again when a new legacy-shaped product could
+    // have appeared (e.g. right after the cloud state loads), not on every
+    // keystroke elsewhere in the app.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db.products.length]);
 
   // Automatic weekly report → Telegram. There is no always-on server here,
   // so this runs the check whenever an owner/manager opens the app (at most

@@ -4194,7 +4194,25 @@ export default function App() {
         try {
           const { data } = await supabase.auth.getUser();
           setCloudUser(data.user ?? null);
-          setCloudProfile(await getCurrentProfile());
+          const profile = await getCurrentProfile();
+          setCloudProfile(profile);
+          // CRITICAL: must pull the real store_state down here, the exact
+          // same way the initial bootstrap effect does on app load. Without
+          // this, `db` stays whatever it already was in this session — on
+          // a fresh install/reinstall that's an empty defaultDB() — and the
+          // save-effect below (which fires the moment cloudReady flips back
+          // to true) then pushes that EMPTY state up to the cloud,
+          // permanently overwriting the real synced data. This was
+          // confirmed live: store_state had a high version number (many
+          // past syncs) but 0 products/0 sales — i.e. a sign-in had already
+          // wiped it this way before this fix.
+          if (profile?.store_id) {
+            const remote = await loadCloudState();
+            if (remote?.state) {
+              setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
+              setCloudVersion(remote.version);
+            }
+          }
         } finally {
           setCloudReady(true);
         }

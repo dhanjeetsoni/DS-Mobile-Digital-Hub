@@ -693,6 +693,21 @@ html[data-font-style="mono"] {
   .storage-meter-grid {
     grid-template-columns: 1fr !important;
   }
+
+  /* .section-head is the title+action-buttons header row used at the top
+     of ~37 different screens across the app (every list/CRUD view:
+     Staff Access, Products, Sales History, Returns, Purchases, etc.). It
+     had no flex-wrap, so a longer title plus 2+ buttons had nowhere to
+     go on a phone-width screen except overflow or squeeze unreadably
+     thin. One fix here reaches every one of those screens at once. */
+  .section-head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .section-head h2 {
+    font-size: 15px;
+    max-width: 100%;
+  }
 }
 
 /* Any element carrying data-android-safe-bottom (bottom-fixed bars, e.g.

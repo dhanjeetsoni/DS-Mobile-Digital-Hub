@@ -46,31 +46,17 @@ import { GoogleGenAI, Type } from "npm:@google/genai@2";
 //   POST /churn-risk            — loyalty churn risk + win-back message drafts
 //   POST /cron-daily-digest     — cron-only (x-cron-secret), queues an AI
 //                                 daily digest into telegram_outbox per store
-//
-// 2026-09-04 speed pass: every text-only (non-vision) route below now uses
-// GEMINI_MODEL_TEXT (gemini-3.5-flash-lite — Google's fastest/cheapest Flash
-// tier, ~2s typical vs ~4.5s+ for the 3.7/3.6 workhorse models) instead of
-// the heavier vision model. OCR/photo routes stay on GEMINI_MODEL_VISION
-// (gemini-3.7-flash) since IMEI/MRP/brand accuracy matters more than shaving
-// a couple seconds off a scan a staff member does once per product. Every
-// Gemini call is also now wrapped in a hard per-attempt timeout (see
-// GEMINI_TIMEOUT_MS / callWithTimeout below) so a single slow/hung key can no
-// longer make the whole request "hang forever" — it now fails fast and
-// rotates to the next key in the pool instead, which is what most of the
-// "kitna time lag ja raha hai" reports actually were (one bad/throttled key
-// silently eating the entire request timeout with no failover).
 // ---------------------------------------------------------------------------
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SECRET_KEY") || "";
-// Vision (image-input) routes: accuracy-first, still fast for a Flash-tier model.
-const GEMINI_MODEL_VISION = Deno.env.get("GEMINI_MODEL_VISION") || Deno.env.get("GEMINI_MODEL") || "gemini-3.7-flash";
-// Text-only routes: speed/cost-first — Google's fastest Flash-Lite tier.
-const GEMINI_MODEL_TEXT = Deno.env.get("GEMINI_MODEL_TEXT") || "gemini-3.5-flash-lite";
-// Hard per-attempt timeout so one slow/throttled key can't stall the whole
-// request — on timeout we treat it exactly like a "quota" failure and
-// rotate to the next key in the pool immediately.
-const GEMINI_TIMEOUT_MS = Number(Deno.env.get("GEMINI_TIMEOUT_MS")) || 20_000;
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-3.7-flash";
+// Speed: disable Gemini's extended "thinking" step for every call in this
+// gateway. None of these prompts need multi-step reasoning (OCR fields,
+// short Hinglish summaries, JSON-schema extraction) — thinking only adds
+// latency here, so every request below asks for the fastest possible
+// response instead of paying for a reasoning pass it doesn't need.
+const FAST_MODE_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
 
 const supabaseAdmin = SUPABASE_URL && SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } })
@@ -84,21 +70,6 @@ const CORS_HEADERS: Record<string, string> = {
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: CORS_HEADERS });
-}
-
-// A per-attempt timeout wrapper — races the real Gemini call against a timer
-// so a hung/slow key can never block failover to the next key in the pool.
-class GeminiTimeoutError extends Error {
-  constructor() { super("Gemini call timed out"); this.name = "GeminiTimeoutError"; }
-}
-function callWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new GeminiTimeoutError()), ms);
-    promise.then(
-      (v) => { clearTimeout(t); resolve(v); },
-      (e) => { clearTimeout(t); reject(e); }
-    );
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -252,9 +223,7 @@ function clientForKey(key: string): GoogleGenAI {
 
 const activeKeyIndexByPool = new Map<string, number>();
 
-function classifyGeminiFailure(err: any): "quota" | "invalid" | null {
-  if (err instanceof GeminiTimeoutError) return "quota"; // timeout: rotate, don't invalidate the key
-
+function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | null {
   const msg = String(err?.message || err || "").toLowerCase();
   const status = err?.status || err?.code;
 
@@ -282,7 +251,26 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | null {
     return "invalid";
   }
 
+  // Google's own model-overload error ("This model is currently
+  // experiencing high demand... usually temporary"). Nothing wrong with
+  // the key or the request — a short retry on the SAME key almost always
+  // succeeds, so this must not be treated like "quota"/"invalid" (which
+  // cool the key down / remove it from rotation).
+  if (
+    status === 503 ||
+    msg.includes("503") ||
+    msg.includes("unavailable") ||
+    msg.includes("overloaded") ||
+    msg.includes("high demand")
+  ) {
+    return "unavailable";
+  }
+
   return null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function hasAI(): boolean {
@@ -299,23 +287,31 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
   for (let attempt = 0; attempt < keys.length; attempt++) {
     const idx = (activeIdx + attempt) % keys.length;
     const entry = keys[idx];
-    try {
-      const result = await callWithTimeout(fn(clientForKey(entry.apiKey)), GEMINI_TIMEOUT_MS);
-      activeKeyIndexByPool.set(poolId, idx);
-      void markKeyResult(storeId, entry.slot, true);
-      return result;
-    } catch (err) {
-      lastError = err;
-      const failure = classifyGeminiFailure(err);
-      if (failure) {
+    // Up to 2 quick retries on the SAME key for a transient "model
+    // overloaded" error (Google's own message says these are usually a
+    // few seconds, not a real outage) before treating it like any other
+    // failure and rotating to the next key.
+    for (let overloadRetry = 0; overloadRetry <= 2; overloadRetry++) {
+      try {
+        const result = await fn(clientForKey(entry.apiKey));
+        activeKeyIndexByPool.set(poolId, idx);
+        void markKeyResult(storeId, entry.slot, true);
+        return result;
+      } catch (err) {
+        lastError = err;
+        const failure = classifyGeminiFailure(err);
+        if (failure === "unavailable" && overloadRetry < 2) {
+          await sleep(600 * (overloadRetry + 1));
+          continue;
+        }
+        if (!failure) throw err; // Not a key problem (bad input, etc) — fail fast, don't burn other keys retrying it.
         console.warn(
           `Gemini key (store=${poolId}, slot=${entry.slot}) failed (${failure}) — ` +
             (failure === "invalid" ? "marking invalid, removing from rotation." : "cooling down, rotating to next key.")
         );
-        void markKeyResult(storeId, entry.slot, false, err?.message || (err instanceof GeminiTimeoutError ? "Timed out" : String(err)), failure === "invalid" ? "invalid" : "exhausted");
-        continue;
+        void markKeyResult(storeId, entry.slot, false, err?.message, failure === "invalid" ? "invalid" : "exhausted");
+        break;
       }
-      throw err;
     }
   }
   throw lastError || new Error("All Gemini API keys exhausted");
@@ -386,9 +382,10 @@ Never invent or infer an absent value. An IMEI is valid only when a real 15-digi
 Image type: ${imageType}.`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_VISION,
+      model: GEMINI_MODEL,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
+        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -467,9 +464,10 @@ Extract ONLY information visibly printed/supported by the image. Return JSON fie
 Never invent a model that is not printed on the pack.`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_VISION,
+      model: GEMINI_MODEL,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
+        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -541,8 +539,9 @@ async function runScreenSizeLookup(storeId: string | null, modelName: string): P
 Reply with ONLY the number rounded to 1 decimal place (e.g. "6.7"). If you are not confident which phone this is, reply "0".`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_TEXT,
+      model: GEMINI_MODEL,
       contents: { parts: [{ text: prompt }] },
+      config: FAST_MODE_CONFIG,
     })
   );
   const size = parseFloat(String(response.text || "0").trim().match(/[\d.]+/)?.[0] || "0") || 0;
@@ -586,9 +585,10 @@ image. Return JSON fields:
 Never invent details not visible in the photo.`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_VISION,
+      model: GEMINI_MODEL,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
+        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -626,8 +626,9 @@ DATA:
 ${JSON.stringify(summary)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_TEXT,
+      model: GEMINI_MODEL,
       contents: { parts: [{ text: prompt }] },
+      config: FAST_MODE_CONFIG,
     })
   );
   return (response.text || "").trim();
@@ -650,8 +651,9 @@ DATA:
 ${JSON.stringify(summary)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_TEXT,
+      model: GEMINI_MODEL,
       contents: { parts: [{ text: prompt }] },
+      config: FAST_MODE_CONFIG,
     })
   );
   return (response.text || "").trim();
@@ -674,9 +676,10 @@ DEVICE DATA:
 ${JSON.stringify(input)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_TEXT,
+      model: GEMINI_MODEL,
       contents: { parts: [{ text: prompt }] },
       config: {
+        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -720,7 +723,7 @@ ${JSON.stringify(input.matchedProducts || [])}
 
 SHOP NAME: ${String(input.shopName || "our shop")}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
-    ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] } })
+    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
   );
   return (response.text || "").trim();
 }
@@ -743,9 +746,10 @@ PRODUCTS (name, last30DaysQtySold, currentStock, minStock):
 ${JSON.stringify(products)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_TEXT,
+      model: GEMINI_MODEL,
       contents: { parts: [{ text: prompt }] },
       config: {
+        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -812,9 +816,10 @@ information visibly printed/supported by the image. Return JSON fields:
 Never invent an amount or date not visibly supported by the image.`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_VISION,
+      model: GEMINI_MODEL,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
+        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -851,9 +856,10 @@ CUSTOMERS (name, phone, lastPurchaseDate, totalSpent, purchaseCount, avgDaysBetw
 ${JSON.stringify(customers)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_TEXT,
+      model: GEMINI_MODEL,
       contents: { parts: [{ text: prompt }] },
       config: {
+        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -968,7 +974,7 @@ Do not invent numbers not present below.
 DATA:
 ${JSON.stringify(summary)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
-    ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] } })
+    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
   );
   return `📊 ${summary.shopName} — Daily AI Digest (${summary.date})\n\n${(response.text || "").trim()}`;
 }
@@ -985,6 +991,72 @@ function decodeImage(image: unknown): { mimeType: string; base64Data: string } |
   }
   if (!/^image\/(jpeg|png|webp|jpg)$/i.test(mimeType)) return null;
   return { mimeType, base64Data };
+}
+
+// ---------------------------------------------------------------------------
+// 2026-09-04 additions — Due-payment reminder / Repair diagnosis / Reorder
+// suggestion. Same shape as business-insights/staff-advice above: a plain
+// Hinglish text reply built ONLY from the numbers/text the client sends,
+// never inventing figures, never touching cost/confidential prices (those
+// never leave the client for these three routes).
+// ---------------------------------------------------------------------------
+
+async function runDueReminder(storeId: string | null, input: Record<string, unknown>): Promise<string> {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You write a short, polite WhatsApp payment-reminder message in simple Hinglish (Hindi+English mix)
+for a small Indian mobile & digital accessories shop to send a customer who has an outstanding due balance.
+Tone: respectful, friendly, never threatening or rude — this is an ongoing customer relationship. Use ONLY the
+details given below; never invent a name, amount, or date not present. If a detail is missing, simply omit that
+part of the message instead of guessing. Keep it under 60 words, no markdown, ready to paste directly into
+WhatsApp (can use 1-2 emoji naturally, not excessive).
+
+DETAILS:
+${JSON.stringify(input)}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] } })
+  );
+  return (response.text || "").trim();
+}
+
+async function runRepairDiagnosis(storeId: string | null, input: Record<string, unknown>): Promise<string> {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You are a helpful assistant for a mobile phone repair counter in India, helping the technician/staff
+think through a customer's reported problem BEFORE they open the device. Using ONLY the device and reported-issue
+text given below, in simple Hinglish (Hindi+English mix), give:
+1) 2-4 most likely causes, ordered most-likely first (short bullet points, "-" per line).
+2) 1-2 quick, SAFE checks to try first (e.g. restart, check charging port for lint, try another cable/charger,
+   check for visible screen/back-glass cracks, check if issue happens in Safe Mode) — never suggest opening the
+   device, removing the battery, or anything requiring disassembly or specialised tools; that judgement call stays
+   with the technician once the device is actually opened.
+3) End with exactly one line: "Yeh sirf ek prathmik AI sujhav hai — final diagnosis technician khud device khol kar hi karega."
+No markdown headers/bold, keep the whole reply under 130 words. Do not invent symptoms not mentioned below.
+
+DEVICE: ${String(input.device || "").slice(0, 200)}
+REPORTED ISSUE: ${String(input.issue || "").slice(0, 500)}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] } })
+  );
+  return (response.text || "").trim();
+}
+
+async function runReorderSuggestion(storeId: string | null, input: Record<string, unknown>): Promise<string> {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You help a small Indian mobile accessories shop decide how much stock to reorder for one product.
+Using ONLY the numbers given below (current stock, minimum stock level, units sold in the last 7 and last 30 days,
+and the shop's own simple formula-based suggestion for comparison), in simple Hinglish (Hindi+English mix):
+1) One line: suggested reorder quantity (a single number), based on actual recent sale-speed, not just the static
+   formula — e.g. if it's selling fast, suggest more than the static number; if it's barely selling, suggest less
+   or say "abhi zaroori nahi".
+2) One short line explaining why (recent sale trend in plain words).
+Keep the whole reply under 50 words, no markdown, no bullet symbols needed — 2 short lines is enough. Do not
+invent any sales numbers not present below.
+
+DATA:
+${JSON.stringify(input)}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] } })
+  );
+  return (response.text || "").trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -1138,6 +1210,65 @@ Deno.serve(async (req: Request) => {
         } catch (error) {
           console.error("Product photo search endpoint error", error);
           return json({ success: false, error: "AI photo search failed. Search manually." }, 500);
+        }
+      }
+
+      case "due-reminder": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`due-reminder:${ip}`, 60_000, 15)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const input = body?.input;
+        if (!input || typeof input !== "object") return json({ success: false, error: "No details provided." }, 400);
+
+        try {
+          const message = await runDueReminder(ctx.storeId, input);
+          if (!message) return json({ success: false, error: "AI unavailable — try again shortly." }, 503);
+          return json({ success: true, message });
+        } catch (error) {
+          console.error("Due reminder endpoint error", error);
+          return json({ success: false, error: "AI reminder failed. Try again shortly." }, 500);
+        }
+      }
+
+      case "repair-diagnosis": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`repair-diagnosis:${ip}`, 60_000, 15)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const input = body?.input;
+        if (!input?.issue || typeof input.issue !== "string" || input.issue.trim().length < 3) {
+          return json({ success: false, error: "Issue description missing." }, 400);
+        }
+
+        try {
+          const diagnosis = await runRepairDiagnosis(ctx.storeId, input);
+          if (!diagnosis) return json({ success: false, error: "AI unavailable — try again shortly." }, 503);
+          return json({ success: true, diagnosis });
+        } catch (error) {
+          console.error("Repair diagnosis endpoint error", error);
+          return json({ success: false, error: "AI diagnosis failed. Try again shortly." }, 500);
+        }
+      }
+
+      case "reorder-suggestion": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`reorder-suggestion:${ip}`, 60_000, 20)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const input = body?.input;
+        if (!input || typeof input !== "object") return json({ success: false, error: "No product data provided." }, 400);
+
+        try {
+          const suggestion = await runReorderSuggestion(ctx.storeId, input);
+          if (!suggestion) return json({ success: false, error: "AI unavailable — try again shortly." }, 503);
+          return json({ success: true, suggestion });
+        } catch (error) {
+          console.error("Reorder suggestion endpoint error", error);
+          return json({ success: false, error: "AI reorder suggestion failed. Try again shortly." }, 500);
         }
       }
 

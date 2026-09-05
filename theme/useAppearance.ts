@@ -55,7 +55,7 @@ export const useAppearance = create<AppearanceState>()(
   persist(
     (set, get) => ({
       themeId: "midnight",
-      mode: "dark",
+      mode: "light",
       followSystem: false,
       density: "cosy",
       textSize: "md",

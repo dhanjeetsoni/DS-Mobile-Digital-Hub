@@ -694,3 +694,74 @@ warranty in this shop, so stop showing the Warranty section for them.
 
 **Verified:** `npx tsc --noEmit` (zero errors) → `npm run build` (clean) →
 `node scripts/static-audit.mjs` (all 16 PASS).
+
+## 2026-09-04 (3) — Android/narrow-window responsive layout + light theme default
+
+**Requested:** screenshots showed the app on Android (via BlueStacks) using
+the exact same always-docked 260px sidebar + fixed-height topbar as desktop,
+squeezed into a ~380-550px phone width — causing the topbar's shop-name,
+subtitle, and action buttons to overlap/garble ("DIGITAL HUB PRO" running
+into "COUNTER: Owner Retail OS"). Asked for a separate, workable layout for
+narrow/Android windows (desktop/"totally new window" layout left as-is),
+and light theme as the default on both.
+
+**Root cause confirmed from code (not just the screenshots):** `#sidebar`
+had no small-screen behaviour at all (always `width:260px` in the flex
+row), and `#topbar` was `height:64px` fixed with no wrap — on a ~550px-wide
+BlueStacks viewport that leaves ~290px for the whole topbar row (title +
+subtitle + Dashboard/New Bill/Cloud-status buttons), which cannot fit
+without visually overlapping.
+
+**Fix — `src/index.css` (`@media (max-width: 900px)`), `src/components/Sidebar.tsx`, `src/App.tsx`:**
+- Sidebar becomes an off-canvas drawer below 900px: `position:fixed`,
+  slides in via `transform`, with a dimmed backdrop (click to close). Above
+  900px, completely unchanged (still the normal docked desktop sidebar).
+- A hamburger button (`Menu` icon, hidden entirely above 900px) opens the
+  drawer; picking any nav item auto-closes it (`onNavigate` now also does
+  `setIsMobileNavOpen(false)`), so it behaves like a phone nav drawer, not
+  a modal you have to dismiss separately.
+- Topbar is allowed to wrap/grow (`height:auto`, `flex-wrap:wrap`) below
+  900px instead of a fixed 64px, and the shop name / subtitle get
+  `text-overflow:ellipsis` + a max-width instead of overlapping when there
+  isn't room for the full string.
+- Desktop/large-window layout: zero changes outside the new media query —
+  this was explicitly "leave the existing window design alone, just add an
+  Android one," not a redesign of the whole app.
+- `theme/useAppearance.ts`: fresh-install default flipped from `mode: "dark"`
+  to `mode: "light"` (kept the existing "midnight" default theme id, which
+  already ships both a dark and a light swatch — only the light/dark
+  default changed, not the palette). Applies identically on Windows and
+  Android since it's the same shared appearance store.
+
+**Verified:** `npx tsc --noEmit` (zero errors) → `npm run build` (clean) →
+`node scripts/static-audit.mjs` (all 16 PASS). Not yet visually verified in
+an actual narrow browser/device by a human — please reload the Android
+build and confirm the hamburger + drawer + non-overlapping header look
+right on a real device/BlueStacks before treating this as fully done; CSS
+breakpoints like this often need one round of on-device tweaking (font
+sizes, exact breakpoint width) that's hard to fully nail without seeing it
+render live.
+
+## 2026-09-05 — Merged with parallel remote work; finished the 3 AI features' UI
+
+Remote had 18 new commits from separate work (Android APK blank-screen
+fixes, stock-flicker/sync-loop fixes, telegram invoice worker fix, 6 more
+AI routes: resale-price-advisor, customer-reply-draft, demand-forecast,
+ocr-expense, churn-risk, cron-daily-digest) while this session had 1 local
+commit (Android responsive layout). Merged cleanly — only conflict was
+`ai-gateway/index.ts`'s router switch, resolved by keeping all 9 routes
+(3 from here + 6 from remote) side by side; no logic from either side was
+dropped. Verified with `tsc --noEmit`, `npm run build`,
+`static-audit.mjs` post-merge — all clean.
+
+Also finished wiring the 3 AI features' UI that were only backend+plumbing
+in the previous session (never actually rendered a button):
+- **Low Stock view**: "AI Suggest" button per row, shows a sale-velocity-
+  based suggestion under the existing static formula number.
+- **Customer Directory**: new "Reminder" column — "AI Reminder" button
+  drafts a WhatsApp due-payment message, then "WhatsApp par bhejo" opens
+  it via the existing `openWhatsApp()` helper.
+- **Repair ticket modal**: "AI Diagnosis Suggest karo" button under
+  Reported Issue, shows likely causes + safe first checks. Resets whenever
+  the modal is closed/cancelled (all 4 close paths), so it never carries a
+  stale diagnosis into the next ticket.

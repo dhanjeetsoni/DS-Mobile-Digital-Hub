@@ -21,9 +21,97 @@
         });
       }
     </script>
+    <style>
+      /*
+        Boot-crash fallback (see the two inline <script> blocks below).
+        Without this, any error that happens before React mounts — a bad
+        import, an unsupported JS feature on an older Android WebView, a
+        thrown error inside startAppearanceSync(), etc — leaves the user
+        staring at a plain black screen (html/body's --paper theme
+        variable defaults to a dark colour) with zero feedback and
+        nothing to report back to support. #boot-fallback stays hidden
+        as long as React mounts normally; main.tsx calls
+        window.__dsBootOk() right after createRoot(...).render(...) to
+        cancel the timer and hide it for good.
+      */
+      #boot-fallback {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 999999;
+        background: #0b0f14;
+        color: #f5f5f5;
+        font-family: system-ui, -apple-system, sans-serif;
+        padding: 24px;
+        box-sizing: border-box;
+        overflow: auto;
+      }
+      #boot-fallback.show { display: block; }
+      #boot-fallback h1 { font-size: 18px; margin: 0 0 8px; }
+      #boot-fallback p { font-size: 14px; line-height: 1.5; color: #cbd5e1; margin: 0 0 16px; }
+      #boot-fallback pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #161b22;
+        border: 1px solid #2a2f37;
+        border-radius: 8px;
+        padding: 12px;
+        font-size: 12px;
+        color: #ff8a8a;
+        max-height: 40vh;
+        overflow: auto;
+      }
+      #boot-fallback button {
+        margin-top: 16px;
+        padding: 10px 18px;
+        font-size: 14px;
+        border-radius: 8px;
+        border: none;
+        background: #2563eb;
+        color: white;
+      }
+    </style>
+    <script>
+      // Runs immediately (not a module), so it survives even if the
+      // ES module bundle below fails to parse/load entirely.
+      (function () {
+        var errors = [];
+        function record(message) {
+          errors.push(message);
+          var pre = document.getElementById("boot-fallback-log");
+          if (pre) pre.textContent = errors.join("\n\n");
+        }
+        window.addEventListener("error", function (e) {
+          record((e && (e.error && e.error.stack || e.message)) || "Unknown script error");
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+          var r = e && e.reason;
+          record("Unhandled promise rejection: " + (r && (r.stack || r.message || r) || "unknown"));
+        });
+        window.__dsBootOk = function () {
+          clearTimeout(window.__dsBootTimer);
+          var el = document.getElementById("boot-fallback");
+          if (el) el.classList.remove("show");
+        };
+        // If nothing has told us the app mounted within 6s, assume it
+        // crashed silently and show what we caught (may be empty if the
+        // failure was a network/load error with no JS error event).
+        window.__dsBootTimer = setTimeout(function () {
+          var el = document.getElementById("boot-fallback");
+          if (el) el.classList.add("show");
+          if (errors.length === 0) record("(No JS error was captured — likely a network/asset load failure, or the script never started.)");
+        }, 6000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot-fallback">
+      <h1>App load nahi ho paayi</h1>
+      <p>Kuch technical dikkat aa gayi thi startup mein. Neeche wala message support ko bhej dijiye, isse jaldi fix ho jaayega.</p>
+      <pre id="boot-fallback-log"></pre>
+      <button onclick="location.reload()">Dobara try karein</button>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

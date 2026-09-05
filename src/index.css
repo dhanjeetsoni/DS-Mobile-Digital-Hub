@@ -632,6 +632,57 @@ html[data-font-style="mono"] {
     max-width: 46vw;
     overflow-wrap: break-word;
   }
+
+  /* Sidebar drawer: 260px was sized for a permanently-docked desktop
+     rail, not a drawer meant to be swiped/tapped open on a phone. A
+     little wider is easier to read + tap without feeling cramped, while
+     still leaving the dimmed backdrop visible so it clearly reads as an
+     overlay, not the whole screen. */
+  #sidebar {
+    width: min(300px, 84vw);
+    flex-basis: min(300px, 84vw);
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .brand .name {
+    max-width: 200px;
+  }
+
+  /* Nav items: 8.5px/13px was sized for a mouse pointer with hover
+     states, not a thumb — bump to a comfortable one-handed tap target
+     and slightly bigger icon/text so the drawer reads as a real phone
+     menu instead of a shrunk desktop sidebar. */
+  .nav button.navitem {
+    padding: 12px 14px;
+    font-size: 14.5px;
+    gap: 14px;
+  }
+  .nav button.navitem .ic {
+    width: 22px;
+  }
+  .nav .grp-label {
+    padding: 14px 10px 6px;
+  }
+
+  /* Topbar: account for a phone's status bar / camera cutout when the
+     app runs full-bleed in the Android WebView. */
+  #topbar {
+    padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  }
+
+  /* Native-feeling momentum scrolling for the drawer, the page body, and
+     any scrollable modal — plain `overflow:auto` can feel stiff/laggy
+     in an Android WebView without this. */
+  #page, .nav, .modal {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Removes the ~300ms tap-delay browsers reserve for detecting a
+     double-tap-to-zoom gesture on every button/nav-item/tappable card —
+     on a phone this is the difference between the app feeling instant
+     vs. always slightly laggy to the touch. */
+  .btn, .nav button.navitem, .card, .stat-card, .job-card {
+    touch-action: manipulation;
+  }
 }
 
 /* Any element carrying data-android-safe-bottom (bottom-fixed bars, e.g.

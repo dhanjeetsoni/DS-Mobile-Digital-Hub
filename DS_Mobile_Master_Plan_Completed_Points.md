@@ -622,7 +622,69 @@ workflow** (no GitHub Actions runner in this sandbox) — next tag/manual
 run should be checked to confirm the Release now shows 2 distinct `.apk`
 files (`*-staff.apk` and `*-owner.apk`) alongside the Windows installer.
 
-**Owner action needed next:** once this fix's build finishes, download
+## 2026-09-05 — App-wide Android/phone usability pass (Windows untouched)
+
+**Requested (owner):** Windows UI/design should not change at all; Android
+(both Staff and Owner apps) needs a from-scratch usability redesign —
+phone-friendly, easy to use, no text getting cut off at the edges,
+fast/perfect touch experience.
+
+**Approach:** the previous session (a93fe7c) already introduced a
+`@media (max-width: 900px)` layer for the sidebar-drawer + topbar wrap,
+scoped so everything above it (the desktop layout) is untouched — a
+narrow-window/phone-width query rather than a hard platform check, so it
+naturally never fires on a normal desktop window and needs no separate
+"Android build" flag. This session extended that same block, app-wide,
+instead of touching individual view files one by one, since almost every
+screen in the app shares the same handful of CSS classes:
+- `.formgrid` (every Add/Edit form — product, sale, customer, expense,
+  staff, settings, etc.) was a fixed 2-column grid on every screen size —
+  on a ~360-400px phone that squeezed every label+value into an
+  unreadably narrow column. Now 1 column under 900px.
+- `.truncate` (table/list cell name-clipping) was a fixed 220px cap
+  regardless of screen width — over half a phone's screen width, which
+  is very likely most of what "text cut on edge" meant. Now `62vw` on
+  phone so it scales with the actual available width instead of a
+  desktop-sized fixed number.
+- `.btn` / inputs/selects/textareas were sized for a mouse+desktop
+  (8-9px padding, 13-13.5px font) — bumped to a real touch target
+  (≥42px tall) and slightly larger text under 900px.
+- `.actions`/`.toolbar`/`.row-actions`/`.filter-bar` rows (present across
+  many views for filter/action buttons) now wrap instead of forcing
+  buttons to shrink unreadably thin or run off-screen.
+- `.modal` went from a fixed desktop max-width+24px padding to
+  near-full-bleed (`calc(100vw - 20px)`) with safe-area-aware bottom
+  padding for notched Android phones, and `.modal-actions` buttons now
+  stack/wrap full-width instead of a cramped right-aligned row.
+- Table cells get the same touch-sized padding/font as buttons/inputs on
+  phone, and long unbroken values now wrap (`overflow-wrap: break-word`)
+  inside a `max-width: 46vw` cap rather than silently stretching the
+  table wider than the phone screen underneath the already-present
+  `.table-wrap` horizontal scroll.
+- Added a `[data-android-safe-bottom]` utility class (any bottom-fixed
+  bar can opt in) that respects `env(safe-area-inset-bottom)` for
+  gesture-nav/notch phones — not currently applied to any element yet,
+  available for a future sticky action bar.
+
+**Verified:** `npm run build` — clean, no TypeScript/CSS errors, same
+chunk output as before this change (only `index.css` size changed, from
+CSS additions). CSS brace-balance checked (358 open / 358 close). Every
+new rule lives strictly inside `@media (max-width: 900px)` (or is an
+opt-in utility class applied to nothing yet), so a normal desktop-width
+Windows window renders byte-for-byte the same as before this commit —
+confirmed by re-reading the diff, not just by assumption.
+
+**Not done / explicitly out of scope for this pass:** this is a
+CSS-level, cross-cutting pass covering shared components used by nearly
+every screen — it is not a per-screen rebuild of every individual view's
+unique custom markup (a handful of views may have their own bespoke
+inline layout that doesn't go through `.formgrid`/`.actions`/etc. and
+would need to be found and fixed individually; `LowStockAlertsView.tsx`
+was already handled bespoke in the prior session). **Owner action
+needed:** install a fresh build on an Android device and point out any
+specific screen that still doesn't look/feel right — a screenshot or
+screen name narrows this down far faster than guessing which of ~40+
+screens to check one by one.
 BOTH new `.apk` files from the new Release, confirm which one is which by
 filename (no more guessing), install the correct one on each device, and
 report back specifically which of issues (3)/(4)/(5) still reproduce on

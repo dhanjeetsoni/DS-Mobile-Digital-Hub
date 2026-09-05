@@ -269,15 +269,20 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
         setName([result.brand, result.productName].filter(Boolean).join(" — "));
       }
       if (result.compatibleModels?.length) setCompatibleModels(result.compatibleModels);
+      // Screen size: the packaging-photo OCR guessing a min/max spread by
+      // comparing several models printed on the same pack was unreliable —
+      // slightly-different OCR reads of similar phones (e.g. 6.44" vs
+      // 6.6") were showing up as a manufactured "range" even for a single
+      // universal glass, when in reality every compatible model shares the
+      // same real screen size. Use the OCR's single-value guess only as an
+      // instant placeholder, never its computed max/range, and always
+      // follow up with an authoritative single-model lookup below, which
+      // overwrites this placeholder with the real number.
       if (result.screenSizeInches) setScreenSizeInches(result.screenSizeInches);
-      if (result.screenSizeMaxInches) setScreenSizeMaxInches(result.screenSizeMaxInches);
       if (result.notes) setNotes(result.notes);
       setAiApplied(true);
-      // Packaging photo usually gives the screen size directly above; if it
-      // didn't (0), fall back to looking it up from the first detected
-      // model so this still gets auto-filled rather than left blank.
-      if (result.compatibleModels?.length && !result.screenSizeInches) {
-        void autoFillScreenSizeFromModel(result.compatibleModels[0]);
+      if (result.compatibleModels?.length) {
+        void autoFillScreenSizeFromModel(result.compatibleModels[0], true);
       }
       toast(
         result.compatibleModels?.length
@@ -298,17 +303,26 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   // by hand. Silent/best-effort: on lookup failure the field just stays
   // blank for manual entry, same as before this existed.
   const [isLookingUpSize, setIsLookingUpSize] = useState(false);
-  const autoFillScreenSizeFromModel = async (modelName: string) => {
-    if (!modelName.trim() || screenSizeInches) return; // never overwrite a value already set
+  // authoritative=true (right after an AI packaging scan): this lookup's
+  // result is the real, trusted single screen size for every compatible
+  // model on this item, so it overwrites the OCR's own rough guess and
+  // clears any max/range value — one item, one real screen size, not a
+  // manufactured spread. authoritative=false (e.g. typing a model in by
+  // hand later): keep the old safe behavior of never overwriting a value
+  // the shop already entered.
+  const autoFillScreenSizeFromModel = async (modelName: string, authoritative = false) => {
+    if (!modelName.trim()) return;
+    if (!authoritative && screenSizeInches) return; // never overwrite a value already set
     setIsLookingUpSize(true);
     try {
       const size = await lookupScreenSize(modelName.trim());
       if (size) {
-        setScreenSizeInches((current) => current || size); // guard against a race with manual typing
-        toast(`AI ne "${modelName.trim()}" ka screen size ${size}" pata karke fill kar diya`, "green");
+        setScreenSizeInches(size);
+        setScreenSizeMaxInches(0);
+        toast(`AI ne "${modelName.trim()}" ka original screen size ${size}" pata karke fill kar diya`, "green");
       }
     } catch {
-      // Best-effort only — leave the field blank for manual entry.
+      // Best-effort only — leave the field as-is for manual entry.
     } finally {
       setIsLookingUpSize(false);
     }
@@ -708,7 +722,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                     </label>
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                       <input
-                        type="number" min="0" step="0.1"
+                        type="number" min="0" step="0.01"
                         value={screenSizeInches || ""}
                         onChange={(e) => setScreenSizeInches(Number(e.target.value) || 0)}
                         placeholder="e.g. 6.7"
@@ -716,7 +730,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                       />
                       <span style={{ fontSize: "12px", color: "var(--ink-soft)" }}>se</span>
                       <input
-                        type="number" min="0" step="0.1"
+                        type="number" min="0" step="0.01"
                         value={screenSizeMaxInches || ""}
                         onChange={(e) => setScreenSizeMaxInches(Number(e.target.value) || 0)}
                         placeholder="e.g. 6.9 (agar range)"
@@ -724,7 +738,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                       />
                     </div>
                     <div className="hint" style={{ marginTop: "4px" }}>
-                      Universal-fit / Curved Glass jaisi item ho jo ek se zyada screen-size cover kare, to doosra box (Max) bhi bhar dein — jaise 6.5 se 6.7. Ek hi size ke liye Max khaali chhod dein.
+                      AI ab yahan hamesha ek hi asli size bharta hai (compatible models mein se ek ka real screen size lookup karke) — koi galat range nahi banata. Agar aapko pata hai ki ye item genuinely ek se zyada screen-size cover karta hai, to doosra box (Max) khud se bhar sakte hain — jaise 6.5 se 6.7. Ek hi size ke liye Max khaali chhod dein.
                       Model list mein na milne par bhi, isi screen-size range ke doosre phones staff ko search mein AI se dikh jayenge.
                     </div>
                   </div>

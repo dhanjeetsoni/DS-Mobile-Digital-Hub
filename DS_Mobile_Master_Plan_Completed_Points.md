@@ -827,3 +827,53 @@ in the previous session (never actually rendered a button):
   Reported Issue, shows likely causes + safe first checks. Resets whenever
   the modal is closed/cancelled (all 4 close paths), so it never carries a
   stale diagnosis into the next ticket.
+
+## 2026-09-05 (5) — Screen-size field: fixed decimal rejection + stopped AI auto-computing a false range
+
+**Requested (owner, with screenshot):** Add Product's Screen Size field
+rejected "6.44" with a browser error ("nearest valid values are 6.4 and
+6.5"), and separately: after an accessory packaging scan (27 compatible
+models), AI had filled a "6.44 se 6.6" range — owner said this is wrong:
+all these models actually share the SAME real screen size, so it should
+pick one model, look up its real size, and fill ONE number, not a
+manufactured range.
+
+**Root causes:**
+1. Both screen-size `<input type="number">` had `step="0.1"`, so the
+   browser's native validation only accepts values landing exactly on a
+   0.1 increment from 0 (6.0, 6.1, ... 6.4, 6.5) — 6.44 falls between two
+   valid steps and gets rejected outright.
+2. `runScan()` (`AddProductModal.tsx`) was directly trusting whatever
+   `screenSizeMaxInches` the packaging-photo OCR guessed, and that OCR
+   guess comes from comparing several models' sizes printed/inferred off
+   one photo — small per-model OCR read variance was showing up as a
+   fabricated "range" even when the item is genuinely one universal
+   screen-size glass.
+
+**Fix (`src/components/AddProductModal.tsx`):**
+- `step="0.1"` -> `step="0.01"` on both screen-size inputs (matches the
+  precision already used on the price fields).
+- `runScan()` no longer sets `screenSizeMaxInches` from the OCR result at
+  all — the OCR's own `screenSizeInches` guess is kept only as an instant
+  placeholder.
+- Immediately after every scan, `autoFillScreenSizeFromModel()` is now
+  always called with a new `authoritative` flag on the first detected
+  model — this hits the existing dedicated screen-size-lookup endpoint
+  (a real single-model lookup, backed by the durable
+  `phone_screen_size_cache` table) and its result overwrites the OCR's
+  placeholder and clears any max value, so the field always ends up as
+  one real, trusted number instead of a spread. The old manual-add path
+  (typing a model into the list by hand later) keeps its previous safe
+  behavior (`authoritative=false` — never overwrites a value the shop
+  already entered).
+- Hint text under the field updated to say AI always fills one real size
+  now; a genuine range is still something the shop can type in manually
+  if they know one is actually needed (kept the Max box, just nothing
+  auto-fills it anymore).
+
+**Verified:** `npx tsc --noEmit` clean, `npm run build` clean.
+**Not changed:** the `ai-gateway` accessory-OCR prompt/schema itself still
+returns its own `screenSizeMaxInches` guess in the API response (for any
+other caller) — this fix works entirely on the frontend by simply no
+longer trusting/using that field for this flow, which is the safer,
+smaller change and needed no Edge Function redeploy.

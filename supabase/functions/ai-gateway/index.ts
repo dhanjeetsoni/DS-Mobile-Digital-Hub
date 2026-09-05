@@ -550,6 +550,96 @@ Reply with ONLY the number rounded to 1 decimal place (e.g. "6.7"). If you are n
   return size;
 }
 
+// Step 2026-09-05: batch/accurate variant used by the Add Product form.
+// Instead of trusting a packaging photo's own printed "for 6.5-6.7 inch"
+// text (which is often vague/rounded across a long model list and produced
+// a noisy, wrong-looking range), this looks up each named model's REAL
+// screen size individually — via the same cache as runScreenSizeLookup, so
+// a model looked up once (from any store/product) stays instant — and
+// returns the true min/max across the whole compatible-models list, in a
+// single extra Gemini call for whichever models aren't already cached.
+async function runScreenSizeRangeLookup(
+  storeId: string | null,
+  modelNames: string[]
+): Promise<{ sizes: { modelName: string; size: number }[]; minSize: number; maxSize: number }> {
+  const cleaned = Array.from(new Set(modelNames.map((m) => String(m || "").trim()).filter(Boolean))).slice(0, 40);
+  if (cleaned.length === 0) return { sizes: [], minSize: 0, maxSize: 0 };
+
+  const results: { modelName: string; size: number }[] = [];
+  const uncached: string[] = [];
+  for (const m of cleaned) {
+    const key = m.toLowerCase();
+    const cached = screenSizeCache.get(key);
+    if (cached && Date.now() - cached.at < SCREEN_SIZE_CACHE_MS) {
+      results.push({ modelName: m, size: cached.size });
+      continue;
+    }
+    const fromDb = await getScreenSizeFromSupabase(key);
+    if (fromDb) {
+      screenSizeCache.set(key, { size: fromDb, at: Date.now() });
+      results.push({ modelName: m, size: fromDb });
+      continue;
+    }
+    uncached.push(m);
+  }
+
+  if (uncached.length > 0 && hasAI()) {
+    const prompt = `For EACH of the following mobile phone models, give its real diagonal screen size
+in inches (a single number, e.g. 6.5), based on your knowledge of that specific model — do not
+guess by averaging or copying another model's size. If you genuinely don't recognize a model,
+use 0 for that one instead of a guess.
+Respond ONLY as compact JSON: { "sizes": [ { "modelName": string, "screenSizeInches": number } ] },
+with exactly one entry per model below, in the same order, using the exact modelName given.
+
+MODELS:
+${JSON.stringify(uncached)}`;
+    try {
+      const response = await runWithGeminiFailover(storeId, (ai) =>
+        ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: { parts: [{ text: prompt }] },
+          config: {
+            ...FAST_MODE_CONFIG,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                sizes: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: { modelName: { type: Type.STRING }, screenSizeInches: { type: Type.NUMBER } },
+                  },
+                },
+              },
+            },
+          },
+        })
+      );
+      const parsed = JSON.parse(response.text || "{}");
+      const arr = Array.isArray(parsed.sizes) ? parsed.sizes : [];
+      for (const item of arr) {
+        const modelName = String(item.modelName || "").trim();
+        const size = Number(item.screenSizeInches) || 0;
+        if (!modelName) continue;
+        results.push({ modelName, size });
+        if (size) {
+          const key = modelName.toLowerCase();
+          screenSizeCache.set(key, { size, at: Date.now() });
+          void saveScreenSizeToSupabase(key, modelName, size);
+        }
+      }
+    } catch (e) {
+      console.warn("runScreenSizeRangeLookup: batch AI lookup failed", e);
+    }
+  }
+
+  const validSizes = results.map((r) => r.size).filter((s) => s > 0);
+  const minSize = validSizes.length ? Math.min(...validSizes) : 0;
+  const maxSize = validSizes.length ? Math.max(...validSizes) : 0;
+  return { sizes: results, minSize, maxSize };
+}
+
 // ---------------------------------------------------------------------------
 // Product photo search ("Photo Stock Finder")
 // ---------------------------------------------------------------------------
@@ -1151,6 +1241,27 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, modelName: modelName.trim(), screenSizeInches: size });
         } catch (error) {
           console.error("Screen-size lookup error", error);
+          return json({ success: false, error: "Lookup failed." }, 500);
+        }
+      }
+
+      case "screen-size-range": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`screen-size-range:${ip}`, 60_000, 15)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const modelNames = Array.isArray(body?.modelNames)
+          ? body.modelNames.filter((m: unknown) => typeof m === "string" && m.trim().length > 1)
+          : null;
+        if (!modelNames || modelNames.length === 0) return json({ success: false, error: "No models provided." }, 400);
+
+        try {
+          const result = await runScreenSizeRangeLookup(ctx.storeId, modelNames);
+          if (!result.sizes.length) return json({ success: false, error: "Could not determine display size." }, 503);
+          return json({ success: true, ...result });
+        } catch (error) {
+          console.error("Screen-size range lookup error", error);
           return json({ success: false, error: "Lookup failed." }, 500);
         }
       }

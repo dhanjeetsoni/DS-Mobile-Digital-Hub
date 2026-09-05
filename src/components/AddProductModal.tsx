@@ -1,8 +1,8 @@
 import React, { useRef, useState } from "react";
 import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcode, ShieldCheck, Search } from "lucide-react";
-import { Database, Product } from "../types";
-import { uid, genSku, genBarcode } from "../utils/fifoEngine";
-import { processAccessoryOcr, lookupScreenSize } from "../utils/aiOcr";
+import { Database, Product, StockBatch } from "../types";
+import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
+import { processAccessoryOcr, lookupScreenSizeRange } from "../utils/aiOcr";
 import { compressImageToDataUrl } from "../utils/imageCompress";
 import { uploadProductPhotoOrFallback, isStorageUrl } from "../services/photoStorage";
 import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay";
@@ -162,6 +162,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     setModelInput("");
     setScreenSizeInches(0);
     setScreenSizeMaxInches(0);
+    setSizeManuallyEdited(false);
     setNotes("");
     setPurchasePrice(0);
     setConfidentialPrice(0);
@@ -269,15 +270,14 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
         setName([result.brand, result.productName].filter(Boolean).join(" — "));
       }
       if (result.compatibleModels?.length) setCompatibleModels(result.compatibleModels);
-      if (result.screenSizeInches) setScreenSizeInches(result.screenSizeInches);
-      if (result.screenSizeMaxInches) setScreenSizeMaxInches(result.screenSizeMaxInches);
       if (result.notes) setNotes(result.notes);
       setAiApplied(true);
-      // Packaging photo usually gives the screen size directly above; if it
-      // didn't (0), fall back to looking it up from the first detected
-      // model so this still gets auto-filled rather than left blank.
-      if (result.compatibleModels?.length && !result.screenSizeInches) {
-        void autoFillScreenSizeFromModel(result.compatibleModels[0]);
+      // Don't trust the packaging photo's own screenSizeInches/MaxInches
+      // guess (it reads vague printed pack text like "6.5-6.7 inch" across
+      // many models and can be noisy) — instead look up the real size of
+      // every detected model and fill Display Size from that true min/max.
+      if (result.compatibleModels?.length) {
+        void autoFillDisplaySizeFromModels(result.compatibleModels);
       }
       toast(
         result.compatibleModels?.length
@@ -292,23 +292,38 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     }
   };
 
-  // Step 2026-09-04b — once at least one compatible model is on the list
-  // and no Screen Size has been entered yet, ask AI to look up that one
-  // model's screen size and auto-fill it — the shop never has to type it
-  // by hand. Silent/best-effort: on lookup failure the field just stays
-  // blank for manual entry, same as before this existed.
+  // Step 2026-09-05 — Display Size (renamed from "Screen Size") is always
+  // kept in sync with AI, for BOTH the min and max box, whenever the
+  // Compatible Models list changes. Earlier this trusted whatever number the
+  // packaging-photo OCR guessed from printed pack text (e.g. "6.5-6.7 inch")
+  // — that text is often vague/rounded across many models and produced a
+  // noisy range (a real bug report: 6.44"-6.6" for glass that's actually one
+  // real size). Now it ignores that guess entirely and instead asks AI to
+  // look up the REAL screen size of every compatible model by name (with
+  // server-side caching so repeat models across products are instant), then
+  // takes the true min/max across those — an actual measured range instead
+  // of a guess, and it still fills both boxes with no manual work needed.
+  // `sizeManuallyEdited` stops this from ever overwriting a value the staff
+  // typed themselves.
   const [isLookingUpSize, setIsLookingUpSize] = useState(false);
-  const autoFillScreenSizeFromModel = async (modelName: string) => {
-    if (!modelName.trim() || screenSizeInches) return; // never overwrite a value already set
+  const [sizeManuallyEdited, setSizeManuallyEdited] = useState(false);
+  const autoFillDisplaySizeFromModels = async (models: string[]) => {
+    if (sizeManuallyEdited || !models.length) return;
     setIsLookingUpSize(true);
     try {
-      const size = await lookupScreenSize(modelName.trim());
-      if (size) {
-        setScreenSizeInches((current) => current || size); // guard against a race with manual typing
-        toast(`AI ne "${modelName.trim()}" ka screen size ${size}" pata karke fill kar diya`, "green");
+      const { minSize, maxSize } = await lookupScreenSizeRange(models);
+      if (minSize) {
+        setScreenSizeInches(minSize);
+        setScreenSizeMaxInches(maxSize && maxSize > minSize ? maxSize : 0);
+        toast(
+          maxSize && maxSize > minSize
+            ? `AI ne asli display size range ${minSize}" - ${maxSize}" pata karke fill kar diya`
+            : `AI ne display size ${minSize}" pata karke fill kar diya`,
+          "green"
+        );
       }
     } catch {
-      // Best-effort only — leave the field blank for manual entry.
+      // Best-effort only — leave the fields blank for manual entry.
     } finally {
       setIsLookingUpSize(false);
     }
@@ -325,7 +340,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     }
     setCompatibleModels(merged);
     setModelInput("");
-    if (parts.length && !screenSizeInches) void autoFillScreenSizeFromModel(parts[0]);
+    if (merged.length) void autoFillDisplaySizeFromModels(merged);
   };
 
   const removeModel = (m: string) => {
@@ -405,6 +420,28 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     };
 
     db.products.push(product);
+
+    // A brand-new product's starting stock must also exist as a FIFO batch,
+    // or getAvailableStock (which sums stockBatches, not product.stock) sees
+    // zero and blocks the very first sale with "Insufficient stock /
+    // inventory mismatch" even though the product card shows stock fine.
+    if (stock > 0) {
+      const openingBatch: StockBatch = {
+        id: uid("batch"),
+        productId: product.id,
+        qty: stock,
+        remainingQty: stock,
+        purchasePrice: purchasePrice || 0,
+        date: todayStr(),
+        supplier: supplier.trim(),
+        source: "opening-stock",
+        ref: product.id,
+        createdAt: new Date().toISOString(),
+      };
+      if (!db.stockBatches) db.stockBatches = [];
+      db.stockBatches.push(openingBatch);
+    }
+
     onCreated(product);
     toast(`${product.name} added — ${compatibleModels.length || 0} model(s) linked, stock ${stock}`, "green");
     runClosing(() => {
@@ -462,7 +499,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
             </div>
 
             {photo && !isScanning && (
-              <button type="button" className="btn sm" style={{ width: "100%", marginTop: "10px" }} onClick={rescanCurrentPhoto}>
+              <button type="button" className="btn sm" style={{ width: "100%", marginTop: "10px" }} onClick={() => { setSizeManuallyEdited(false); void rescanCurrentPhoto(); }}>
                 <RefreshCw size={13} /> Re-scan with AI
               </button>
             )}
@@ -676,34 +713,45 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 
                   <div style={{ marginTop: "10px" }}>
                     <label>
-                      Screen Size (inches) — optional, for AI matching
+                      Display Size (inches) — optional, for AI matching
                       {isLookingUpSize && (
                         <span style={{ marginLeft: "8px", fontWeight: 700, color: "var(--glow)", fontSize: "11px" }}>
                           <Sparkles size={11} style={{ verticalAlign: "middle", marginRight: "2px" }} />
-                          AI screen size pata kar raha hai...
+                          AI display size pata kar raha hai...
                         </span>
                       )}
                     </label>
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                       <input
-                        type="number" min="0" step="0.1"
+                        type="number" min="0" step="0.01"
                         value={screenSizeInches || ""}
-                        onChange={(e) => setScreenSizeInches(Number(e.target.value) || 0)}
+                        onChange={(e) => { setSizeManuallyEdited(true); setScreenSizeInches(Number(e.target.value) || 0); }}
                         placeholder="e.g. 6.7"
                         style={{ maxWidth: "110px" }}
                       />
                       <span style={{ fontSize: "12px", color: "var(--ink-soft)" }}>se</span>
                       <input
-                        type="number" min="0" step="0.1"
+                        type="number" min="0" step="0.01"
                         value={screenSizeMaxInches || ""}
-                        onChange={(e) => setScreenSizeMaxInches(Number(e.target.value) || 0)}
+                        onChange={(e) => { setSizeManuallyEdited(true); setScreenSizeMaxInches(Number(e.target.value) || 0); }}
                         placeholder="e.g. 6.9 (agar range)"
                         style={{ maxWidth: "140px" }}
                       />
+                      {sizeManuallyEdited && (
+                        <button
+                          type="button"
+                          className="btn sm"
+                          style={{ padding: "4px 8px", fontSize: "11px" }}
+                          onClick={() => { setSizeManuallyEdited(false); void autoFillDisplaySizeFromModels(compatibleModels); }}
+                          title="Manually edit hata kar AI se dobara accurate size nikalwayein"
+                        >
+                          <Sparkles size={11} /> AI se refill
+                        </button>
+                      )}
                     </div>
                     <div className="hint" style={{ marginTop: "4px" }}>
-                      Universal-fit / Curved Glass jaisi item ho jo ek se zyada screen-size cover kare, to doosra box (Max) bhi bhar dein — jaise 6.5 se 6.7. Ek hi size ke liye Max khaali chhod dein.
-                      Model list mein na milne par bhi, isi screen-size range ke doosre phones staff ko search mein AI se dikh jayenge.
+                      AI khud compatible models ke asli display size check karke ye dono box bhar deta hai — Universal-fit / Curved Glass jaisi item jo ek se zyada size cover kare to Max box bhi apne aap bhar jayega, ek hi size ke liye Max khaali rahega.
+                      Model list mein na milne par bhi, isi display-size range ke doosre phones staff ko search mein AI se dikh jayenge.
                     </div>
                   </div>
 

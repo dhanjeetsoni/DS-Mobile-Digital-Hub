@@ -155,6 +155,27 @@ async function processOperation(row: any, storeId: string) {
       invoiceNo = String(reserved);
     }
 
+    // Locally-created products only ever have a client id (e.g. "p_<uuid>"),
+    // never a row in public.products — resolve (find-or-create) the real
+    // product id before replaying the sale, or it fails permanently with an
+    // invalid-uuid error (see resolve_product_for_sale()).
+    const resolvedItems = await Promise.all((sale.items || []).map(async (item: any) => {
+      const { data: realId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+        p_store_id: storeId,
+        p_local_id: String(item.productId),
+        p_sku: item.sku ?? null,
+        p_model: item.name ?? null,
+        p_brand: item.brand ?? null,
+        p_category: item.category ?? null,
+        p_cost_price: item.costPrice ?? item.purchasePrice ?? 0,
+        p_selling_price: item.price,
+        p_stock_qty: item.stockAtSale ?? 0,
+        p_min_stock: item.minStock ?? 0,
+      });
+      if (resolveError) throw resolveError;
+      return { product_id: realId, quantity: item.qty, unit_price: item.price };
+    }));
+
     const { data: saleId, error } = await supabase.rpc("atomic_complete_sale", {
       p_store_id: storeId,
       p_invoice_no: invoiceNo,
@@ -164,11 +185,7 @@ async function processOperation(row: any, storeId: string) {
       p_discount: Number(sale.discount || 0),
       p_tax: Number(sale.taxAmount || 0),
       p_idempotency_key: row.operation_id,
-      p_items: (sale.items || []).map((item: any) => ({
-        product_id: item.productId,
-        quantity: item.qty,
-        unit_price: item.price,
-      })),
+      p_items: resolvedItems,
     });
     if (error) throw error;
     return { serverId: saleId, invoiceNo };
@@ -196,9 +213,32 @@ async function processOperation(row: any, storeId: string) {
 
   if (type === "stock_adjustment") {
     const adj = payload.adjustment || payload;
+
+    // BUG FIX (2026-09-04): adj.productId is the client-local id (e.g.
+    // "p_<uuid>") for any product created offline / not yet synced — never
+    // a real public.products row. atomic_apply_stock_adjustment's
+    // p_product_id is a strict `uuid` column, so passing it straight
+    // through failed at the parameter-cast boundary with "invalid input
+    // syntax for type uuid" on every single retry (one queued row hit 311
+    // attempts, all identical failures) and never actually adjusted stock.
+    // Resolve/find-or-create the real product uuid first, same as "sale".
+    const { data: realProductId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+      p_store_id: storeId,
+      p_local_id: String(adj.productId),
+      p_sku: adj.sku ?? null,
+      p_model: adj.model ?? null,
+      p_brand: adj.brand ?? null,
+      p_category: adj.category ?? null,
+      p_cost_price: adj.costPrice ?? 0,
+      p_selling_price: adj.sellingPrice ?? 0,
+      p_stock_qty: adj.stockQty ?? 0,
+      p_min_stock: adj.minStock ?? 0,
+    });
+    if (resolveError) throw resolveError;
+
     const { data: movementId, error } = await supabase.rpc("atomic_apply_stock_adjustment", {
       p_store_id: storeId,
-      p_product_id: adj.productId,
+      p_product_id: realProductId,
       p_delta: adj.delta,
       p_reason: adj.reason || null,
       p_idempotency_key: row.operation_id,
@@ -386,22 +426,75 @@ async function processOperation(row: any, storeId: string) {
   throw new Error(`SYNC_OPERATION_NOT_IMPLEMENTED:${type}`);
 }
 
+let flushInFlight: Promise<{ processed: number; failed: number }> | null = null;
+
 export async function flushOfflineQueue() {
+  // Prevent concurrent flushes from anywhere in the app (bootstrap, the
+  // periodic background timer, tab-resume, and the manual "Retry Sync"
+  // button all call this independently with no shared guard before this
+  // fix). Racing flushes could both read the same store_state version for
+  // a queued 'snapshot' row and both attempt to save it -- one would win,
+  // the other would fail as VERSION_CONFLICT and sit there to be retried
+  // forever on the next cycle, indefinitely re-attempting to overwrite
+  // live data with an old full-state payload. Callers now just await
+  // whichever flush is already running instead of starting a second one.
+  if (flushInFlight) return flushInFlight;
+  flushInFlight = flushOfflineQueueInner().finally(() => {
+    flushInFlight = null;
+  });
+  return flushInFlight;
+}
+
+async function flushOfflineQueueInner() {
   const profile = await getCurrentProfile();
   if (!profile?.store_id) return { processed: 0, failed: 0 };
 
+  // BUG FIX (2026-09-04): a row is marked "syncing" the instant a flush
+  // attempt starts (see markSync below), *before* the RPC call — if the
+  // app/tab closes, crashes, or loses network at exactly that moment, the
+  // row never reaches "processed" or "failed" and was permanently orphaned,
+  // since this query used to only look at "pending"/"failed". Live data
+  // showed 83 rows stuck this way, some untouched for hours. A genuinely
+  // in-flight row's last_attempt_at is only ever a few seconds old, so
+  // treating "syncing" rows stuck for 2+ minutes as abandoned and re-queuing
+  // them is safe — every operation here is idempotent (idempotency_key).
+  const staleThreshold = new Date(Date.now() - 2 * 60 * 1000).toISOString();
   const { data: rows, error } = await supabase
     .from("sync_queue")
-    .select("id,operation_id,operation,operation_type,entity,payload,retry_count,attempts")
+    .select("id,operation_id,operation,operation_type,entity,payload,retry_count,attempts,status,last_attempt_at")
     .eq("store_id", profile.store_id)
-    .in("status", ["pending", "failed"])
+    .or(`status.in.(pending,failed),and(status.eq.syncing,last_attempt_at.lt.${staleThreshold})`)
     .order("created_at", { ascending: true })
     .limit(50);
 
   if (error) throw error;
 
+  // A row that has failed this many times in a row is treated as permanently
+  // broken (e.g. a sale referencing a product record that's missing data it
+  // needs to resolve, or a stale full-state snapshot that will never stop
+  // conflicting) rather than retried forever. It's marked "abandoned" (kept
+  // for a human to look at, but excluded from the query above going
+  // forward) instead of silently retrying on every sync cycle indefinitely.
+  const MAX_RETRIES = 20;
+
   let processed = 0, failed = 0;
   for (const row of rows || []) {
+    if (Number(row.retry_count || 0) >= MAX_RETRIES) {
+      const giveUpNote = `Gave up after ${MAX_RETRIES} failed attempts — needs manual review.`;
+      try {
+        await markSync(row.id, { status: "abandoned", last_error: giveUpNote });
+      } catch {
+        // status.in.(...) filters this query by "pending"/"failed"/stale-"syncing"
+        // only, so if the DB's status CHECK constraint doesn't (yet) allow
+        // "abandoned" and this write rejects, falling back to "failed" here
+        // would put the row right back in front of this same MAX_RETRIES gate
+        // next cycle -- which correctly skips it again without ever calling
+        // processOperation, so it still stops hammering the DB.
+        await markSync(row.id, { status: "failed", last_error: giveUpNote }).catch(() => {});
+      }
+      failed++;
+      continue;
+    }
     try {
       await markSync(row.id, {
         status: "syncing",

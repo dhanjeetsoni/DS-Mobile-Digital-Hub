@@ -1,4 +1,4 @@
-import { Database, StockBatch } from "../types";
+import { Database, StockBatch, Product } from "../types";
 import { round2 } from "./indianCurrency";
 
 export function uid(prefix: string): string {
@@ -17,6 +17,36 @@ export function nowTimeStr(): string {
 export function genSku(prefix = "DSM"): string {
   // Collision-resistant client candidate. The database must still enforce UNIQUE(sku).
   return `${prefix}${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
+}
+
+/**
+ * Legacy products created before every product was required to carry a sku
+ * (or imported some other way that skipped it) have `sku: ""`. That's a
+ * problem now: resolve_product_for_sale() — used by both the sale flow and
+ * stock adjustments to find-or-create each product's row in the real
+ * relational `products` table — deliberately *refuses* to resolve a product
+ * that has no sku and isn't already a real uuid, rather than risk minting an
+ * untraceable duplicate row. Any such legacy item can't be sold or have its
+ * stock adjusted until it has a sku.
+ *
+ * This assigns one, using the exact same category-based prefix convention
+ * AddProductModal uses for brand-new products, so a legacy item gets a sku
+ * indistinguishable from one it would have been given at creation time.
+ */
+export function backfillMissingSkus(products: Product[]): { products: Product[]; changed: boolean } {
+  const seen = new Set(products.map((p) => p.sku).filter((s) => s && s.trim() !== ""));
+  let changed = false;
+  const next = products.map((p) => {
+    if (p.sku && p.sku.trim() !== "") return p;
+    const prefix =
+      p.category === "Tempered Glass" || p.category === "Curved Glass" ? "GLS" : p.category === "Back Covers" ? "CVR" : "ACC";
+    let sku = genSku(prefix);
+    while (seen.has(sku)) sku = genSku(prefix); // vanishingly unlikely, but keep this batch internally unique too
+    seen.add(sku);
+    changed = true;
+    return { ...p, sku };
+  });
+  return { products: next, changed };
 }
 
 // Generates a scannable 12-digit numeric barcode (EAN-13 style, self-check

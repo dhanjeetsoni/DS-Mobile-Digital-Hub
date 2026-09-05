@@ -2,7 +2,13 @@
   "productName": "DS Staff",
   "identifier": "com.dsmobile.digitalhub.staff",
   "app": {
-    "windows": []
+    "windows": [
+      {
+        "label": "main",
+        "title": "DS Staff",
+        "fullscreen": true
+      }
+    ]
   },
   "bundle": {
     "android": {

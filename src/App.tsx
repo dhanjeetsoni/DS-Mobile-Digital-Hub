@@ -14,7 +14,7 @@ import {
   MobileFinanceDetails,
 } from "./types";
 import { inr, round2, numberToWordsIndian, computeSaleTotals, computeDiscountPercent } from "./utils/indianCurrency";
-import { uid, todayStr, nowTimeStr, genSku, addStockBatch, consumeFIFO, fifoCostTotal, getAvailableStock } from "./utils/fifoEngine";
+import { uid, todayStr, nowTimeStr, genSku, backfillMissingSkus, addStockBatch, consumeFIFO, fifoCostTotal, getAvailableStock } from "./utils/fifoEngine";
 import { naturalMatch } from "./utils/naturalSearch";
 import { Sidebar, SECONDARY_NAV_ITEMS } from "./components/Sidebar";
 import AppearanceStudioView from "./components/AppearanceStudioView";
@@ -72,6 +72,7 @@ import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
 import { sqliteList } from "./services/localSqlite";
 import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert, sendWeeklyReportToTelegram } from "./services/telegram";
+import { getRepairDiagnosis } from "./services/aiOps";
 import { buildWeeklyReport, isWeeklyReportDue } from "./utils/weeklyReport";
 import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./services/whatsapp";
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
@@ -104,6 +105,7 @@ import {
   Loader2,
   Barcode,
   Gift,
+  Menu,
 } from "lucide-react";
 
 const LS_KEY = "dsmdh_db_v2";
@@ -212,6 +214,12 @@ export default function App() {
 
   // Modals
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+  // 2026-09-04 — Android/narrow-screen nav drawer. Sidebar is fixed-width and
+  // always in the document flow at desktop widths (unchanged); below the
+  // 900px breakpoint (see index.css) it becomes an off-canvas drawer that
+  // this state toggles, closing itself automatically on every navigation so
+  // it never lingers open over the page like a modal would.
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [confidentialPriceProduct, setConfidentialPriceProduct] = useState<Product | null>(null);
   const [isAddGiftOpen, setIsAddGiftOpen] = useState(false);
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
@@ -347,14 +355,22 @@ export default function App() {
     e.preventDefault();
     if (gateAttempts.lockUntil > Date.now()) return;
     const configuredPass = db.settings.ownerPasscode || "";
-    const isSupabaseOwner = cloudProfile?.role === "owner" || cloudProfile?.role === "manager";
     // If the shop hasn't set a custom owner passcode yet, fall back to the
     // documented default "1234" so a fresh/local install is never locked
     // out. Once the owner sets a real passcode in Settings, that becomes
     // the only accepted value (the "1234" fallback stops applying).
+    //
+    // IMPORTANT: this PIN must ALWAYS be checked on its own merits. It is
+    // documented to the user (see the hint text on this screen) as a
+    // separate, device-only security layer from the Cloud account — it
+    // must never be silently bypassed just because a Supabase cloud
+    // session happens to already be authenticated as owner/manager (e.g.
+    // a persisted login from an earlier session on this device). A prior
+    // version of this check did exactly that, letting ANY typed value
+    // unlock Owner mode whenever a cloud-owner session was active.
     const correct =
       (configuredPass && gatePassInput === configuredPass) ||
-      (!configuredPass && (gatePassInput === "1234" || isSupabaseOwner));
+      (!configuredPass && gatePassInput === "1234");
 
     if (correct) {
       persistGateAttempts({ count: 0, lockUntil: 0 });
@@ -431,6 +447,7 @@ export default function App() {
         setIsOwnerLoginOpen(false);
         setIsWindowsModalOpen(false);
         setIsJobModalOpen(false);
+        setJobAiDiagnosis({ loading: false, text: "", error: "" });
         return;
       }
 
@@ -501,6 +518,10 @@ export default function App() {
 
   // Repair ticket states
   const [isJobModalOpen, setIsJobModalOpen] = useState(false);
+  // 2026-09-04: AI first-look diagnosis for the "Reported Issue" text — a
+  // suggestion only, never a substitute for the technician actually
+  // opening the device (the AI prompt itself says this explicitly too).
+  const [jobAiDiagnosis, setJobAiDiagnosis] = useState<{ loading: boolean; text: string; error: string }>({ loading: false, text: "", error: "" });
   const [jobForm, setJobForm] = useState({
     customerName: "",
     phone: "",
@@ -600,15 +621,104 @@ export default function App() {
     if (!cloudReady || !cloudProfile?.store_id) return;
     const timer = window.setTimeout(async () => {
       try { const v = await saveCloudState(db, cloudVersion); setCloudVersion(v); setCloudStatus("online"); }
-      catch (error) {
-        console.warn("Cloud state save failed; queueing an idempotent snapshot bridge operation", error);
-        setCloudStatus("error");
-        try { await queueOfflineOperation("snapshot", "store_state", db); }
-        catch (queueError) { console.warn("Snapshot queue failed", queueError); }
+      catch (error: any) {
+        const isVersionConflict = String(error?.message || error || "").includes("VERSION_CONFLICT");
+        if (isVersionConflict) {
+          // Another device (owner/staff) already saved a newer version.
+          // Re-queuing OUR stale copy with the old version number would just
+          // fail the same way forever (this was the bug behind the
+          // permanent red "Sync Issue" badge and a growing pile of stuck
+          // sync_queue rows). Instead, pull the latest state so the local
+          // copy — and the version number used by the *next* autosave — is
+          // correct again.
+          console.warn("Cloud save hit a version conflict; refreshing from server instead of re-queuing stale data", error);
+          try {
+            const remote = await loadCloudState();
+            if (remote?.state) {
+              // BUG FIX (2026-09-04): this used to overwrite local `db`
+              // with `remote.state` unconditionally, discarding whatever
+              // hadn't been saved yet — e.g. the stock decrement from a
+              // sale that was still in-flight when the conflict hit. With
+              // two+ devices autosaving the whole store every ~650ms, this
+              // collided constantly (live sync_queue showed 8+ conflicts in
+              // under a minute), which is exactly what looked like "stock
+              // shows the new number for a moment, then reverts" — the sale
+              // itself always succeeded (it's committed atomically in
+              // Postgres separately), but the display-facing snapshot kept
+              // losing the local edit that would have shown it.
+              // Retrying the save against the now-current version resolves
+              // a single momentary race (the overwhelmingly common case)
+              // instead of throwing the local edit away immediately; only
+              // fall back to accepting the remote copy if that retry also
+              // collides.
+              try {
+                const retryVersion = await saveCloudState(db, remote.version);
+                setCloudVersion(retryVersion);
+                setCloudStatus("online");
+                return;
+              } catch (retryError) {
+                console.warn("Retry after version conflict also failed; accepting remote state instead", retryError);
+                setCloudVersion(remote.version);
+                setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
+              }
+            }
+            setCloudStatus("online");
+          } catch (refetchError) {
+            console.warn("Refetching latest state after version conflict failed", refetchError);
+            setCloudStatus("error");
+          }
+        } else {
+          console.warn("Cloud state save failed; queueing an idempotent snapshot bridge operation", error);
+          setCloudStatus("error");
+          try { await queueOfflineOperation("snapshot", "store_state", db); }
+          catch (queueError) { console.warn("Snapshot queue failed", queueError); }
+        }
       }
     }, 650);
     return () => window.clearTimeout(timer);
   }, [db, cloudReady, cloudProfile?.store_id]);
+
+  // Stock-flicker fix: product.stock inside the shared JSON snapshot is
+  // fought over by every device that autosaves (owner + staff can each
+  // overwrite the other's copy of the *entire* inventory blob within
+  // seconds of each other — that's what caused stock to visibly bounce
+  // between values). atomic_complete_sale / atomic_apply_stock_adjustment
+  // already maintain a race-free stock_qty in the relational products
+  // table (row-locked, one writer at a time). Treat that as the one source
+  // of truth for the stock *number* and periodically pull it into the local
+  // copy (matched by sku) instead of letting devices race each other.
+  useEffect(() => {
+    if (!cloudUser || !cloudProfile?.store_id) return;
+    let cancelled = false;
+    const reconcileStock = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("products")
+          .select("sku, stock_qty")
+          .eq("store_id", cloudProfile.store_id);
+        if (error || !data || cancelled) return;
+        const bySku = new Map<string, number>();
+        for (const row of data) if (row.sku) bySku.set(row.sku, Number(row.stock_qty));
+        if (bySku.size === 0) return;
+        setDb((prev) => {
+          let changed = false;
+          const products = prev.products.map((p) => {
+            if (p.sku && bySku.has(p.sku)) {
+              const real = bySku.get(p.sku)!;
+              if (real !== p.stock) { changed = true; return { ...p, stock: real }; }
+            }
+            return p;
+          });
+          return changed ? { ...prev, products } : prev;
+        });
+      } catch (error) {
+        console.warn("Stock reconciliation pull failed", error);
+      }
+    };
+    reconcileStock();
+    const t = window.setInterval(reconcileStock, 20000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, [cloudUser, cloudProfile?.store_id]);
 
   useEffect(() => {
     if (!cloudUser) return;
@@ -830,6 +940,24 @@ export default function App() {
     // which is enough to eventually catch every legacy photo.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudUser, cloudProfile?.store_id, cloudStatus]);
+
+  // One-time legacy-sku backfill: resolve_product_for_sale() (used by both
+  // the sale flow and stock adjustments) refuses to resolve a product that
+  // has no sku, since minting one there could create an untraceable
+  // duplicate row — by design, that's the server's job to guard, not to fix
+  // silently. Instead, give every legacy product a sku locally, the same
+  // way AddProductModal generates one for a brand-new product, so it stops
+  // hitting that guard entirely. Purely local (no network call); the
+  // regular autosave picks up the change afterwards.
+  useEffect(() => {
+    const { products, changed } = backfillMissingSkus(db.products);
+    if (changed) saveState({ ...db, products });
+    // Deliberately only depends on the product count, not the whole `db` —
+    // this only needs to run again when a new legacy-shaped product could
+    // have appeared (e.g. right after the cloud state loads), not on every
+    // keystroke elsewhere in the app.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db.products.length]);
 
   // Automatic weekly report → Telegram. There is no always-on server here,
   // so this runs the check whenever an owner/manager opens the app (at most
@@ -1388,6 +1516,16 @@ export default function App() {
         mrp: item.mrp ?? null,
         isGift: item.isGift || false,
         giftSellingPrice: item.giftSellingPrice ?? null,
+        // Reconciliation fields for the relational public.products table —
+        // see resolve_product_for_sale(). Locally-created products only ever
+        // get a client id like "p_<uuid>", never a row in public.products,
+        // so the cloud sale RPC needs enough info to find-or-create the real
+        // row by SKU before it can attach the sale to a real product uuid.
+        sku: prod?.sku ?? null,
+        brand: prod?.brand ?? null,
+        minStock: prod?.minStock ?? 0,
+        costPrice: prod?.purchasePrice ?? avgCost,
+        stockAtSale: prod ? prod.stock + item.qty : item.qty,
       };
     });
     } catch (error) {
@@ -1424,6 +1562,28 @@ export default function App() {
         if (reserveError) throw reserveError;
         invoiceNo = String(reservedInvoice);
 
+        // Local products only ever carry a client-generated id (e.g. "p_<uuid>")
+        // — atomic_complete_sale needs a real row in public.products. Resolve
+        // (find-or-create) each item's real product id before selling, or
+        // every sale of a locally-created product fails with an invalid-uuid
+        // error and never reaches the server (see resolve_product_for_sale()).
+        const resolvedItems = await Promise.all(saleItems.map(async (i) => {
+          const { data: realId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+            p_store_id: cloudProfile.store_id,
+            p_local_id: String(i.productId),
+            p_sku: i.sku,
+            p_model: i.name,
+            p_brand: i.brand,
+            p_category: i.category,
+            p_cost_price: i.costPrice,
+            p_selling_price: i.price,
+            p_stock_qty: i.stockAtSale,
+            p_min_stock: i.minStock,
+          });
+          if (resolveError) throw resolveError;
+          return { product_id: realId, quantity: i.qty, unit_price: i.price };
+        }));
+
         const { data: atomicSaleId, error: atomicError } = await supabase.rpc("atomic_complete_sale", {
           p_store_id: cloudProfile.store_id,
           p_invoice_no: invoiceNo,
@@ -1433,7 +1593,7 @@ export default function App() {
           p_discount: cartDiscount,
           p_tax: taxAmount,
           p_idempotency_key: idempotencyKey,
-          p_items: saleItems.map(i => ({ product_id: i.productId, quantity: i.qty, unit_price: i.price })),
+          p_items: resolvedItems,
         });
         if (atomicError) throw atomicError;
         if (atomicSaleId) showToast("Cloud transaction committed atomically", "green");
@@ -1601,6 +1761,7 @@ export default function App() {
     db.jobs.push(newJob);
     saveState({ ...db });
     setIsJobModalOpen(false);
+    setJobAiDiagnosis({ loading: false, text: "", error: "" });
     setJobForm({
       customerName: "",
       phone: "",
@@ -3529,6 +3690,7 @@ export default function App() {
             return;
           }
           setCurrentPage(page);
+          setIsMobileNavOpen(false);
         }}
         ownerMode={ownerMode}
         onToggleOwnerMode={() => {
@@ -3536,11 +3698,20 @@ export default function App() {
           else setOwnerMode(false);
         }}
         onOpenQuickScan={() => setIsCameraScannerOpen(true)}
+        isMobileOpen={isMobileNavOpen}
+        onCloseMobile={() => setIsMobileNavOpen(false)}
       />
 
       <div id="main">
         <div id="topbar">
-          <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+          <button
+            className="mobile-hamburger"
+            aria-label="Menu kholo"
+            onClick={() => setIsMobileNavOpen(true)}
+          >
+            <Menu size={20} />
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "20px" }} className="topbar-title">
             <div>
               <h1 style={{ fontSize: "17px", margin: 0, fontWeight: 800, letterSpacing: "-0.02em", color: "var(--ink)" }}>
                 {db.settings.shopName || "MOBILE HUB"} <span style={{ color: "var(--accent)" }}>PRO</span>
@@ -3625,7 +3796,13 @@ export default function App() {
               <Monitor size={13} style={{ color: "var(--accent)" }} /> 💻 Windows App
             </button>
 
-            <button className="btn sm" onClick={() => setShowCloudAuth(true)} title="Cloud account — email/password, syncs data across all devices (alag hai Owner Device PIN se)"><span className={`status-dot ${cloudStatus}`}></span> {cloudUser ? "Cloud Online" : "Cloud Sign In"}</button>
+            {/* Owner-only: this opens the shared Cloud Account panel (email/password
+                sign-in AND sign-out). Staff must never see or be able to trigger
+                cloud sign-in/sign-out — it's a different, shared account from their
+                own staffAuth login, and signing it out would break sync for everyone. */}
+            {ownerMode && cloudProfile?.role !== "staff" && (
+              <button className="btn sm" onClick={() => setShowCloudAuth(true)} title="Cloud account — email/password, syncs data across all devices (alag hai Owner Device PIN se)"><span className={`status-dot ${cloudStatus}`}></span> {cloudUser ? "Cloud Online" : "Cloud Sign In"}</button>
+            )}
             {/* Step 4.4 — chhota, hamesha visible connection badge (Owner + Staff dono ko
                 dikhta hai). Owner-only bade Status Dashboard (Step 9) se alag purpose:
                 yahan sirf "abhi online hai ya offline" + zaroorat pade to Retry Sync.
@@ -3956,7 +4133,7 @@ export default function App() {
           <div className="modal wide">
             <div className="modal-head">
               <h3>Create Repair / Service Ticket</h3>
-              <button onClick={() => setIsJobModalOpen(false)}>&times;</button>
+              <button onClick={() => { setIsJobModalOpen(false); setJobAiDiagnosis({ loading: false, text: "", error: "" }); }}>&times;</button>
             </div>
             <form onSubmit={handleCreateJobTicket}>
               <div className="formgrid">
@@ -4025,6 +4202,37 @@ export default function App() {
                     placeholder="e.g. Display glass broken, touch working partially"
                     required
                   />
+                  <div style={{ marginTop: "6px" }}>
+                    {!jobAiDiagnosis.loading && !jobAiDiagnosis.text && (
+                      <button
+                        type="button"
+                        className="btn sm"
+                        disabled={jobForm.issue.trim().length < 3}
+                        onClick={async () => {
+                          setJobAiDiagnosis({ loading: true, text: "", error: "" });
+                          try {
+                            const diagnosis = await getRepairDiagnosis({ device: jobForm.device, issue: jobForm.issue });
+                            setJobAiDiagnosis({ loading: false, text: diagnosis, error: "" });
+                          } catch (e) {
+                            setJobAiDiagnosis({ loading: false, text: "", error: e instanceof Error ? e.message : "AI diagnosis failed." });
+                          }
+                        }}
+                      >
+                        <Sparkles size={13} /> AI Diagnosis Suggest karo
+                      </button>
+                    )}
+                    {jobAiDiagnosis.loading && (
+                      <span className="hint">AI issue soch raha hai...</span>
+                    )}
+                    {jobAiDiagnosis.error && (
+                      <div className="hint" style={{ color: "var(--red)" }}>{jobAiDiagnosis.error}</div>
+                    )}
+                    {jobAiDiagnosis.text && (
+                      <div className="notice" style={{ marginTop: "4px", fontSize: "12px", whiteSpace: "pre-line" }}>
+                        🤖 {jobAiDiagnosis.text}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="field">
                   <label>Spare Part to Auto-Deduct (Optional)</label>
@@ -4079,7 +4287,7 @@ export default function App() {
                 )}
               </div>
               <div className="modal-actions" style={{ marginTop: "16px" }}>
-                <button type="button" className="btn" onClick={() => setIsJobModalOpen(false)}>Cancel</button>
+                <button type="button" className="btn" onClick={() => { setIsJobModalOpen(false); setJobAiDiagnosis({ loading: false, text: "", error: "" }); }}>Cancel</button>
                 <button type="submit" className="btn primary">Create Ticket</button>
               </div>
             </form>

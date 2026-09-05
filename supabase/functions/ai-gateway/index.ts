@@ -33,6 +33,7 @@ import { GoogleGenAI, Type } from "npm:@google/genai@2";
 //   POST /ocr-phone
 //   POST /ocr-accessory
 //   POST /screen-size-lookup
+//   POST /screen-size-range    — batch/accurate per-model display-size range
 //   POST /business-insights
 //   POST /staff-advice
 //   POST /product-photo-search
@@ -46,16 +47,36 @@ import { GoogleGenAI, Type } from "npm:@google/genai@2";
 //   POST /churn-risk            — loyalty churn risk + win-back message drafts
 //   POST /cron-daily-digest     — cron-only (x-cron-secret), queues an AI
 //                                 daily digest into telegram_outbox per store
+//
+// 2026-09-04 speed pass: every text-only (non-vision) route below now uses
+// GEMINI_MODEL_TEXT (gemini-3.5-flash-lite — Google's fastest/cheapest Flash
+// tier, ~2s typical vs ~4.5s+ for the 3.7/3.6 workhorse models) instead of
+// the heavier vision model. OCR/photo routes stay on GEMINI_MODEL_VISION
+// (gemini-3.7-flash) since IMEI/MRP/brand accuracy matters more than shaving
+// a couple seconds off a scan a staff member does once per product. Every
+// Gemini call is also now wrapped in a hard per-attempt timeout (see
+// GEMINI_TIMEOUT_MS / callWithTimeout below) so a single slow/hung key can no
+// longer make the whole request "hang forever" — it now fails fast and
+// rotates to the next key in the pool instead, which is what most of the
+// "kitna time lag ja raha hai" reports actually were (one bad/throttled key
+// silently eating the entire request timeout with no failover).
 // ---------------------------------------------------------------------------
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SECRET_KEY") || "";
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-3.7-flash";
-// Speed: disable Gemini's extended "thinking" step for every call in this
-// gateway. None of these prompts need multi-step reasoning (OCR fields,
-// short Hinglish summaries, JSON-schema extraction) — thinking only adds
-// latency here, so every request below asks for the fastest possible
-// response instead of paying for a reasoning pass it doesn't need.
+// Vision (image-input) routes: accuracy-first, still fast for a Flash-tier model.
+const GEMINI_MODEL_VISION = Deno.env.get("GEMINI_MODEL_VISION") || Deno.env.get("GEMINI_MODEL") || "gemini-3.7-flash";
+// Text-only routes: speed/cost-first — Google's fastest Flash-Lite tier.
+const GEMINI_MODEL_TEXT = Deno.env.get("GEMINI_MODEL_TEXT") || "gemini-3.5-flash-lite";
+// Hard per-attempt timeout so one slow/throttled key can't stall the whole
+// request — on timeout we treat it exactly like a "quota" failure and
+// rotate to the next key in the pool immediately.
+const GEMINI_TIMEOUT_MS = Number(Deno.env.get("GEMINI_TIMEOUT_MS")) || 20_000;
+// Speed: also disable Gemini's extended "thinking" step for every call in
+// this gateway (on top of the fast text-tier model above). None of these
+// prompts need multi-step reasoning (OCR fields, short Hinglish summaries,
+// JSON-schema extraction), so this shaves additional latency off both the
+// vision and text models.
 const FAST_MODE_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
 
 const supabaseAdmin = SUPABASE_URL && SERVICE_ROLE_KEY
@@ -70,6 +91,21 @@ const CORS_HEADERS: Record<string, string> = {
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: CORS_HEADERS });
+}
+
+// A per-attempt timeout wrapper — races the real Gemini call against a timer
+// so a hung/slow key can never block failover to the next key in the pool.
+class GeminiTimeoutError extends Error {
+  constructor() { super("Gemini call timed out"); this.name = "GeminiTimeoutError"; }
+}
+function callWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new GeminiTimeoutError()), ms);
+    promise.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); }
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +259,9 @@ function clientForKey(key: string): GoogleGenAI {
 
 const activeKeyIndexByPool = new Map<string, number>();
 
-function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | null {
+function classifyGeminiFailure(err: any): "quota" | "invalid" | null {
+  if (err instanceof GeminiTimeoutError) return "quota"; // timeout: rotate, don't invalidate the key
+
   const msg = String(err?.message || err || "").toLowerCase();
   const status = err?.status || err?.code;
 
@@ -251,26 +289,7 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | 
     return "invalid";
   }
 
-  // Google's own model-overload error ("This model is currently
-  // experiencing high demand... usually temporary"). Nothing wrong with
-  // the key or the request — a short retry on the SAME key almost always
-  // succeeds, so this must not be treated like "quota"/"invalid" (which
-  // cool the key down / remove it from rotation).
-  if (
-    status === 503 ||
-    msg.includes("503") ||
-    msg.includes("unavailable") ||
-    msg.includes("overloaded") ||
-    msg.includes("high demand")
-  ) {
-    return "unavailable";
-  }
-
   return null;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function hasAI(): boolean {
@@ -287,31 +306,23 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
   for (let attempt = 0; attempt < keys.length; attempt++) {
     const idx = (activeIdx + attempt) % keys.length;
     const entry = keys[idx];
-    // Up to 2 quick retries on the SAME key for a transient "model
-    // overloaded" error (Google's own message says these are usually a
-    // few seconds, not a real outage) before treating it like any other
-    // failure and rotating to the next key.
-    for (let overloadRetry = 0; overloadRetry <= 2; overloadRetry++) {
-      try {
-        const result = await fn(clientForKey(entry.apiKey));
-        activeKeyIndexByPool.set(poolId, idx);
-        void markKeyResult(storeId, entry.slot, true);
-        return result;
-      } catch (err) {
-        lastError = err;
-        const failure = classifyGeminiFailure(err);
-        if (failure === "unavailable" && overloadRetry < 2) {
-          await sleep(600 * (overloadRetry + 1));
-          continue;
-        }
-        if (!failure) throw err; // Not a key problem (bad input, etc) — fail fast, don't burn other keys retrying it.
+    try {
+      const result = await callWithTimeout(fn(clientForKey(entry.apiKey)), GEMINI_TIMEOUT_MS);
+      activeKeyIndexByPool.set(poolId, idx);
+      void markKeyResult(storeId, entry.slot, true);
+      return result;
+    } catch (err) {
+      lastError = err;
+      const failure = classifyGeminiFailure(err);
+      if (failure) {
         console.warn(
           `Gemini key (store=${poolId}, slot=${entry.slot}) failed (${failure}) — ` +
             (failure === "invalid" ? "marking invalid, removing from rotation." : "cooling down, rotating to next key.")
         );
-        void markKeyResult(storeId, entry.slot, false, err?.message, failure === "invalid" ? "invalid" : "exhausted");
-        break;
+        void markKeyResult(storeId, entry.slot, false, err?.message || (err instanceof GeminiTimeoutError ? "Timed out" : String(err)), failure === "invalid" ? "invalid" : "exhausted");
+        continue;
       }
+      throw err;
     }
   }
   throw lastError || new Error("All Gemini API keys exhausted");
@@ -382,7 +393,7 @@ Never invent or infer an absent value. An IMEI is valid only when a real 15-digi
 Image type: ${imageType}.`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_MODEL_VISION,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
         ...FAST_MODE_CONFIG,
@@ -464,7 +475,7 @@ Extract ONLY information visibly printed/supported by the image. Return JSON fie
 Never invent a model that is not printed on the pack.`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_MODEL_VISION,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
         ...FAST_MODE_CONFIG,
@@ -539,7 +550,7 @@ async function runScreenSizeLookup(storeId: string | null, modelName: string): P
 Reply with ONLY the number rounded to 1 decimal place (e.g. "6.7"). If you are not confident which phone this is, reply "0".`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
       config: FAST_MODE_CONFIG,
     })
@@ -548,6 +559,97 @@ Reply with ONLY the number rounded to 1 decimal place (e.g. "6.7"). If you are n
   screenSizeCache.set(key, { size, at: Date.now() });
   if (size) await saveScreenSizeToSupabase(key, modelName, size);
   return size;
+}
+
+// Step 2026-09-05: batch/accurate variant used by the Add Product form.
+// Instead of trusting a packaging photo's own printed "for 6.5-6.7 inch"
+// text (which is often vague/rounded across a long model list and produced
+// a noisy, wrong-looking range), this looks up each named model's REAL
+// screen size individually — via the same cache as runScreenSizeLookup, so
+// a model looked up once (from any store/product) stays instant — and
+// returns the true min/max across the whole compatible-models list, in a
+// single extra Gemini call (text-tier model) for whichever models aren't
+// already cached.
+async function runScreenSizeRangeLookup(
+  storeId: string | null,
+  modelNames: string[]
+): Promise<{ sizes: { modelName: string; size: number }[]; minSize: number; maxSize: number }> {
+  const cleaned = Array.from(new Set(modelNames.map((m) => String(m || "").trim()).filter(Boolean))).slice(0, 40);
+  if (cleaned.length === 0) return { sizes: [], minSize: 0, maxSize: 0 };
+
+  const results: { modelName: string; size: number }[] = [];
+  const uncached: string[] = [];
+  for (const m of cleaned) {
+    const key = m.toLowerCase();
+    const cached = screenSizeCache.get(key);
+    if (cached && Date.now() - cached.at < SCREEN_SIZE_CACHE_MS) {
+      results.push({ modelName: m, size: cached.size });
+      continue;
+    }
+    const fromDb = await getScreenSizeFromSupabase(key);
+    if (fromDb) {
+      screenSizeCache.set(key, { size: fromDb, at: Date.now() });
+      results.push({ modelName: m, size: fromDb });
+      continue;
+    }
+    uncached.push(m);
+  }
+
+  if (uncached.length > 0 && hasAI()) {
+    const prompt = `For EACH of the following mobile phone models, give its real diagonal screen size
+in inches (a single number, e.g. 6.5), based on your knowledge of that specific model — do not
+guess by averaging or copying another model's size. If you genuinely don't recognize a model,
+use 0 for that one instead of a guess.
+Respond ONLY as compact JSON: { "sizes": [ { "modelName": string, "screenSizeInches": number } ] },
+with exactly one entry per model below, in the same order, using the exact modelName given.
+
+MODELS:
+${JSON.stringify(uncached)}`;
+    try {
+      const response = await runWithGeminiFailover(storeId, (ai) =>
+        ai.models.generateContent({
+          model: GEMINI_MODEL_TEXT,
+          contents: { parts: [{ text: prompt }] },
+          config: {
+            ...FAST_MODE_CONFIG,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                sizes: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: { modelName: { type: Type.STRING }, screenSizeInches: { type: Type.NUMBER } },
+                  },
+                },
+              },
+            },
+          },
+        })
+      );
+      const parsed = JSON.parse(response.text || "{}");
+      const arr = Array.isArray(parsed.sizes) ? parsed.sizes : [];
+      for (const item of arr) {
+        const modelName = String(item.modelName || "").trim();
+        const size = Number(item.screenSizeInches) || 0;
+        if (!modelName) continue;
+        results.push({ modelName, size });
+        if (size) {
+          const key = modelName.toLowerCase();
+          screenSizeCache.set(key, { size, at: Date.now() });
+          void saveScreenSizeToSupabase(key, modelName, size);
+        }
+      }
+    } catch (e) {
+      console.warn("runScreenSizeRangeLookup: batch AI lookup failed", e);
+    }
+  }
+
+  const validSizes = results.map((r) => r.size).filter((s) => s > 0);
+  const minSize = validSizes.length ? Math.min(...validSizes) : 0;
+  const maxSize = validSizes.length ? Math.max(...validSizes) : 0;
+  return { sizes: results, minSize, maxSize };
 }
 
 // ---------------------------------------------------------------------------
@@ -585,7 +687,7 @@ image. Return JSON fields:
 Never invent details not visible in the photo.`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_MODEL_VISION,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
         ...FAST_MODE_CONFIG,
@@ -626,7 +728,7 @@ DATA:
 ${JSON.stringify(summary)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
       config: FAST_MODE_CONFIG,
     })
@@ -651,7 +753,7 @@ DATA:
 ${JSON.stringify(summary)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
       config: FAST_MODE_CONFIG,
     })
@@ -676,7 +778,7 @@ DEVICE DATA:
 ${JSON.stringify(input)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
       config: {
         ...FAST_MODE_CONFIG,
@@ -723,7 +825,7 @@ ${JSON.stringify(input.matchedProducts || [])}
 
 SHOP NAME: ${String(input.shopName || "our shop")}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
-    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
+    ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
   );
   return (response.text || "").trim();
 }
@@ -746,7 +848,7 @@ PRODUCTS (name, last30DaysQtySold, currentStock, minStock):
 ${JSON.stringify(products)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
       config: {
         ...FAST_MODE_CONFIG,
@@ -816,7 +918,7 @@ information visibly printed/supported by the image. Return JSON fields:
 Never invent an amount or date not visibly supported by the image.`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_MODEL_VISION,
       contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
       config: {
         ...FAST_MODE_CONFIG,
@@ -856,7 +958,7 @@ CUSTOMERS (name, phone, lastPurchaseDate, totalSpent, purchaseCount, avgDaysBetw
 ${JSON.stringify(customers)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
       config: {
         ...FAST_MODE_CONFIG,
@@ -974,7 +1076,7 @@ Do not invent numbers not present below.
 DATA:
 ${JSON.stringify(summary)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
-    ai.models.generateContent({ model: GEMINI_MODEL, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
+    ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
   );
   return `📊 ${summary.shopName} — Daily AI Digest (${summary.date})\n\n${(response.text || "").trim()}`;
 }
@@ -1085,6 +1187,27 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, modelName: modelName.trim(), screenSizeInches: size });
         } catch (error) {
           console.error("Screen-size lookup error", error);
+          return json({ success: false, error: "Lookup failed." }, 500);
+        }
+      }
+
+      case "screen-size-range": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`screen-size-range:${ip}`, 60_000, 15)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const modelNames = Array.isArray(body?.modelNames)
+          ? body.modelNames.filter((m: unknown) => typeof m === "string" && m.trim().length > 1)
+          : null;
+        if (!modelNames || modelNames.length === 0) return json({ success: false, error: "No models provided." }, 400);
+
+        try {
+          const result = await runScreenSizeRangeLookup(ctx.storeId, modelNames);
+          if (!result.sizes.length) return json({ success: false, error: "Could not determine display size." }, 503);
+          return json({ success: true, ...result });
+        } catch (error) {
+          console.error("Screen-size range lookup error", error);
           return json({ success: false, error: "Lookup failed." }, 500);
         }
       }

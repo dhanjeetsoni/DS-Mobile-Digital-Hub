@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcode, ShieldCheck, Search } from "lucide-react";
-import { Database, Product } from "../types";
-import { uid, genSku, genBarcode } from "../utils/fifoEngine";
+import { Database, Product, StockBatch } from "../types";
+import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
 import { processAccessoryOcr, lookupScreenSize } from "../utils/aiOcr";
 import { compressImageToDataUrl } from "../utils/imageCompress";
 import { uploadProductPhotoOrFallback, isStorageUrl } from "../services/photoStorage";
@@ -405,6 +405,28 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     };
 
     db.products.push(product);
+
+    // A brand-new product's starting stock must also exist as a FIFO batch,
+    // or getAvailableStock (which sums stockBatches, not product.stock) sees
+    // zero and blocks the very first sale with "Insufficient stock /
+    // inventory mismatch" even though the product card shows stock fine.
+    if (stock > 0) {
+      const openingBatch: StockBatch = {
+        id: uid("batch"),
+        productId: product.id,
+        qty: stock,
+        remainingQty: stock,
+        purchasePrice: purchasePrice || 0,
+        date: todayStr(),
+        supplier: supplier.trim(),
+        source: "opening-stock",
+        ref: product.id,
+        createdAt: new Date().toISOString(),
+      };
+      if (!db.stockBatches) db.stockBatches = [];
+      db.stockBatches.push(openingBatch);
+    }
+
     onCreated(product);
     toast(`${product.name} added — ${compatibleModels.length || 0} model(s) linked, stock ${stock}`, "green");
     runClosing(() => {

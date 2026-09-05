@@ -426,7 +426,26 @@ async function processOperation(row: any, storeId: string) {
   throw new Error(`SYNC_OPERATION_NOT_IMPLEMENTED:${type}`);
 }
 
+let flushInFlight: Promise<{ processed: number; failed: number }> | null = null;
+
 export async function flushOfflineQueue() {
+  // Prevent concurrent flushes from anywhere in the app (bootstrap, the
+  // periodic background timer, tab-resume, and the manual "Retry Sync"
+  // button all call this independently with no shared guard before this
+  // fix). Racing flushes could both read the same store_state version for
+  // a queued 'snapshot' row and both attempt to save it -- one would win,
+  // the other would fail as VERSION_CONFLICT and sit there to be retried
+  // forever on the next cycle, indefinitely re-attempting to overwrite
+  // live data with an old full-state payload. Callers now just await
+  // whichever flush is already running instead of starting a second one.
+  if (flushInFlight) return flushInFlight;
+  flushInFlight = flushOfflineQueueInner().finally(() => {
+    flushInFlight = null;
+  });
+  return flushInFlight;
+}
+
+async function flushOfflineQueueInner() {
   const profile = await getCurrentProfile();
   if (!profile?.store_id) return { processed: 0, failed: 0 };
 
@@ -450,8 +469,24 @@ export async function flushOfflineQueue() {
 
   if (error) throw error;
 
+  // A row that has failed this many times in a row is treated as permanently
+  // broken (e.g. a sale referencing a product record that's missing data it
+  // needs to resolve, or a stale full-state snapshot that will never stop
+  // conflicting) rather than retried forever. It's marked "abandoned" (kept
+  // for a human to look at, but excluded from the query above going
+  // forward) instead of silently retrying on every sync cycle indefinitely.
+  const MAX_RETRIES = 20;
+
   let processed = 0, failed = 0;
   for (const row of rows || []) {
+    if (Number(row.retry_count || 0) >= MAX_RETRIES) {
+      await markSync(row.id, {
+        status: "abandoned",
+        last_error: `Gave up after ${MAX_RETRIES} failed attempts — needs manual review.`,
+      });
+      failed++;
+      continue;
+    }
     try {
       await markSync(row.id, {
         status: "syncing",

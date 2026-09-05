@@ -683,6 +683,16 @@ html[data-font-style="mono"] {
   .btn, .nav button.navitem, .card, .stat-card, .job-card {
     touch-action: manipulation;
   }
+
+  /* System Status Dashboard (3 fixed columns) and Storage Usage Meter (2
+     fixed columns) set their column count via an inline style rather
+     than the shared .grid.cols-N classes above, so a plain CSS rule
+     can't out-rank it — needs !important to actually collapse these to
+     1 column on phone instead of squeezing 2-3 stat blocks into ~120px
+     each. */
+  .storage-meter-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 /* Any element carrying data-android-safe-bottom (bottom-fixed bars, e.g.

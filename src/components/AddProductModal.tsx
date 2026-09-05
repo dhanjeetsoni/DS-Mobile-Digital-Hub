@@ -1,10 +1,10 @@
 import React, { useRef, useState } from "react";
 import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcode, ShieldCheck, Search } from "lucide-react";
-import { Database, Product } from "../types";
-import { uid, genSku, genBarcode } from "../utils/fifoEngine";
-import { processAccessoryOcr } from "../utils/aiOcr";
+import { Database, Product, StockBatch } from "../types";
+import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
+import { processAccessoryOcr, lookupScreenSize } from "../utils/aiOcr";
 import { compressImageToDataUrl } from "../utils/imageCompress";
-import { uploadProductPhotoOrFallback } from "../services/photoStorage";
+import { uploadProductPhotoOrFallback, isStorageUrl } from "../services/photoStorage";
 import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 
@@ -230,6 +230,34 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     }
   };
 
+  // Re-scans the currently selected/uploaded photo. `photo` starts as a
+  // data: URL right after picking a file, but the background upload in
+  // handleImageSelected can replace it with a plain Storage https:// URL
+  // before the user taps this button — sending that URL straight to the AI
+  // gateway as if it were base64 image bytes fails server-side ("Base64
+  // decoding failed for https://...") because it's a link, not the actual
+  // photo. Fetch it back into a data: URL first when that's happened, same
+  // as EditProductModal's handleRescan.
+  const rescanCurrentPhoto = async () => {
+    if (!photo) return;
+    try {
+      let imgData = photo;
+      if (isStorageUrl(photo)) {
+        const res = await fetch(photo);
+        const blob = await res.blob();
+        imgData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Saved photo load nahi ho payi"));
+          reader.readAsDataURL(blob);
+        });
+      }
+      await runScan(imgData);
+    } catch (err: any) {
+      toast(err?.message || "Photo load nahi ho payi, dobara try karein", "red");
+    }
+  };
+
   const runScan = async (imgData: string) => {
     setIsScanning(true);
     setScanError("");
@@ -245,6 +273,12 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       if (result.screenSizeMaxInches) setScreenSizeMaxInches(result.screenSizeMaxInches);
       if (result.notes) setNotes(result.notes);
       setAiApplied(true);
+      // Packaging photo usually gives the screen size directly above; if it
+      // didn't (0), fall back to looking it up from the first detected
+      // model so this still gets auto-filled rather than left blank.
+      if (result.compatibleModels?.length && !result.screenSizeInches) {
+        void autoFillScreenSizeFromModel(result.compatibleModels[0]);
+      }
       toast(
         result.compatibleModels?.length
           ? `AI ne ${result.compatibleModels.length} models detect kiye — check karke Save karein`
@@ -255,6 +289,28 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       setScanError(err.message || "AI scan fail ho gaya. Details manually bharein.");
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  // Step 2026-09-04b — once at least one compatible model is on the list
+  // and no Screen Size has been entered yet, ask AI to look up that one
+  // model's screen size and auto-fill it — the shop never has to type it
+  // by hand. Silent/best-effort: on lookup failure the field just stays
+  // blank for manual entry, same as before this existed.
+  const [isLookingUpSize, setIsLookingUpSize] = useState(false);
+  const autoFillScreenSizeFromModel = async (modelName: string) => {
+    if (!modelName.trim() || screenSizeInches) return; // never overwrite a value already set
+    setIsLookingUpSize(true);
+    try {
+      const size = await lookupScreenSize(modelName.trim());
+      if (size) {
+        setScreenSizeInches((current) => current || size); // guard against a race with manual typing
+        toast(`AI ne "${modelName.trim()}" ka screen size ${size}" pata karke fill kar diya`, "green");
+      }
+    } catch {
+      // Best-effort only — leave the field blank for manual entry.
+    } finally {
+      setIsLookingUpSize(false);
     }
   };
 
@@ -269,6 +325,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     }
     setCompatibleModels(merged);
     setModelInput("");
+    if (parts.length && !screenSizeInches) void autoFillScreenSizeFromModel(parts[0]);
   };
 
   const removeModel = (m: string) => {
@@ -348,6 +405,28 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     };
 
     db.products.push(product);
+
+    // A brand-new product's starting stock must also exist as a FIFO batch,
+    // or getAvailableStock (which sums stockBatches, not product.stock) sees
+    // zero and blocks the very first sale with "Insufficient stock /
+    // inventory mismatch" even though the product card shows stock fine.
+    if (stock > 0) {
+      const openingBatch: StockBatch = {
+        id: uid("batch"),
+        productId: product.id,
+        qty: stock,
+        remainingQty: stock,
+        purchasePrice: purchasePrice || 0,
+        date: todayStr(),
+        supplier: supplier.trim(),
+        source: "opening-stock",
+        ref: product.id,
+        createdAt: new Date().toISOString(),
+      };
+      if (!db.stockBatches) db.stockBatches = [];
+      db.stockBatches.push(openingBatch);
+    }
+
     onCreated(product);
     toast(`${product.name} added — ${compatibleModels.length || 0} model(s) linked, stock ${stock}`, "green");
     runClosing(() => {
@@ -405,7 +484,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
             </div>
 
             {photo && !isScanning && (
-              <button type="button" className="btn sm" style={{ width: "100%", marginTop: "10px" }} onClick={() => runScan(photo)}>
+              <button type="button" className="btn sm" style={{ width: "100%", marginTop: "10px" }} onClick={rescanCurrentPhoto}>
                 <RefreshCw size={13} /> Re-scan with AI
               </button>
             )}
@@ -534,7 +613,12 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                 })()}
               </div>
 
-              {isScreenAccessory && (
+              {/* Step 2026-09-04b: this whole block (compatible models +
+                  screen-size range) only makes sense once a glass/cover
+                  item's packaging photo is actually attached — without a
+                  photo there is nothing yet to link models against, so it
+                  stays hidden until `photo` is set (by upload or AI scan). */}
+              {isScreenAccessory && photo && (
                 <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
                   <label>Compatible Phone Models ({compatibleModels.length})</label>
                   <div style={{ display: "flex", gap: "8px" }}>
@@ -613,7 +697,15 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                   )}
 
                   <div style={{ marginTop: "10px" }}>
-                    <label>Screen Size (inches) — optional, for AI matching</label>
+                    <label>
+                      Screen Size (inches) — optional, for AI matching
+                      {isLookingUpSize && (
+                        <span style={{ marginLeft: "8px", fontWeight: 700, color: "var(--glow)", fontSize: "11px" }}>
+                          <Sparkles size={11} style={{ verticalAlign: "middle", marginRight: "2px" }} />
+                          AI screen size pata kar raha hai...
+                        </span>
+                      )}
+                    </label>
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                       <input
                         type="number" min="0" step="0.1"
@@ -692,16 +784,6 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                 <label>4. MRP (₹) <span className="hint">(optional)</span></label>
                 <input type="number" min="0" step="0.01" value={mrp || ""} onChange={(e) => setMrp(Number(e.target.value) || 0)} placeholder="Khali chhod sakte hain" />
                 <div className="hint">Sirf display/discount-calculation ke liye — profit isse kabhi calculate nahi hota.</div>
-              </div>
-
-              <div className="field">
-                <label>Supplier / Distributor</label>
-                <input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. Anand Telecom" />
-              </div>
-
-              <div className="field">
-                <label>Rack / Location Notes</label>
-                <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Rack B, Box 3" />
               </div>
 
               <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>

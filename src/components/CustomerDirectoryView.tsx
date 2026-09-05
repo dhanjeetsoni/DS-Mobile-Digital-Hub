@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from "react";
-import { Search, Download, Send, Copy, Printer, Users } from "lucide-react";
+import { Search, Download, Send, Copy, Printer, Users, Sparkles, MessageCircle } from "lucide-react";
 import { Database } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { todayStr } from "../utils/fifoEngine";
 import { sendTelegramReport } from "../services/telegram";
+import { getDueReminderMessage } from "../services/aiOps";
+import { openWhatsApp } from "../services/whatsapp";
 
 interface CustomerDirectoryViewProps {
   db: Database;
@@ -25,6 +27,27 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({ db
   const [customTo, setCustomTo] = useState("");
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  // 2026-09-04: AI-drafted WhatsApp due-payment reminder, one draft at a time
+  // (keyed by customer id) shown inline under the row rather than a modal —
+  // this is a short list of customers, not worth a popup per item.
+  const [reminderState, setReminderState] = useState<Record<string, { loading: boolean; text: string; error: string }>>({});
+
+  const handleAiReminder = async (customerId: string, name: string, phone: string, dueAmount: number) => {
+    setReminderState((prev) => ({ ...prev, [customerId]: { loading: true, text: "", error: "" } }));
+    try {
+      const message = await getDueReminderMessage({
+        customerName: name,
+        dueAmount,
+        shopName: db.settings.shopName,
+      });
+      setReminderState((prev) => ({ ...prev, [customerId]: { loading: false, text: message, error: "" } }));
+    } catch (e) {
+      setReminderState((prev) => ({
+        ...prev,
+        [customerId]: { loading: false, text: "", error: e instanceof Error ? e.message : "AI reminder failed." },
+      }));
+    }
+  };
 
   const monthStart = todayStr().slice(0, 7) + "-01";
 
@@ -155,6 +178,7 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({ db
                 <th>Address</th>
                 <th>Added On</th>
                 <th>Outstanding Due</th>
+                <th>Reminder</th>
               </tr>
             </thead>
             <tbody>
@@ -167,10 +191,59 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({ db
                   <td style={{ fontWeight: 800, color: (c.totalDue || 0) > 0 ? "var(--red)" : "var(--green)" }}>
                     {inr(c.totalDue || 0)}
                   </td>
+                  <td>
+                    {(c.totalDue || 0) > 0 ? (
+                      <div style={{ minWidth: "180px" }}>
+                        {!reminderState[c.id] && (
+                          <button
+                            className="btn sm"
+                            style={{ fontSize: "11px", padding: "3px 8px" }}
+                            onClick={() => handleAiReminder(c.id, c.name, c.phone, c.totalDue || 0)}
+                          >
+                            <Sparkles size={12} /> AI Reminder
+                          </button>
+                        )}
+                        {reminderState[c.id]?.loading && (
+                          <span style={{ fontSize: "11px", color: "var(--ink-soft)" }}>Likh rahe hain...</span>
+                        )}
+                        {reminderState[c.id]?.error && (
+                          <div style={{ fontSize: "11px", color: "var(--red)" }}>
+                            {reminderState[c.id].error}{" "}
+                            <button
+                              className="btn sm"
+                              style={{ fontSize: "10px", padding: "2px 6px" }}
+                              onClick={() => handleAiReminder(c.id, c.name, c.phone, c.totalDue || 0)}
+                            >
+                              Retry
+                            </button>
+                          </div>
+                        )}
+                        {reminderState[c.id]?.text && (
+                          <div>
+                            <div style={{ fontSize: "11px", color: "var(--ink-soft)", whiteSpace: "pre-line", marginBottom: "4px" }}>
+                              {reminderState[c.id].text}
+                            </div>
+                            <button
+                              className="btn sm green"
+                              style={{ fontSize: "11px", padding: "3px 8px" }}
+                              onClick={() => {
+                                const ok = openWhatsApp(c.phone, reminderState[c.id].text);
+                                if (!ok) toast("Phone number invalid lag raha hai.", "red");
+                              }}
+                            >
+                              <MessageCircle size={12} /> WhatsApp par bhejo
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={5} style={{ textAlign: "center", padding: "20px" }}>Is filter mein koi customer nahi mila</td></tr>
+                <tr><td colSpan={6} style={{ textAlign: "center", padding: "20px" }}>Is filter mein koi customer nahi mila</td></tr>
               )}
             </tbody>
           </table>

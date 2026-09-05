@@ -550,6 +550,123 @@ screen, signed in as owner or staff, what the button/screen shows) to
 diagnose further — nothing in the current code path explains it being
 permanently hidden for a real Owner account.
 
+## 2026-09-04 (3) — Investigation of Owner's 5 reported issues (permanent login, Telegram, AI errors, Android black screen, theme colours) + one real new bug found & fixed
+
+**Requested (owner, Hinglish):** (1) permanent cloud login, never logs out,
+same for staff+owner on Android; (2) same permanence for Telegram bot
+connection; (3) AI features erroring/slow everywhere; (4) Android app
+installs but shows a black/blank screen; (5) theme colours not applying
+correctly.
+
+**Investigation before writing any new code (per this file's own Section 3
+rule):**
+- **(1) Permanent login:** already confirmed done in the 2026-09-04 (1)
+  entry above — `persistSession`/`autoRefreshToken` are `true` in
+  `supabaseClient.ts`, so Owner/Staff email sessions persist indefinitely
+  on their own. The Cloud Sign In / Cloud Online status button already
+  exists in the status/top-actions bar (`App.tsx`, next to Telegram
+  Connect) — not missing. **Not changed:** storing the raw
+  email/password permanently in plain text was NOT implemented — that
+  would be a real security regression (anyone with the device gets the
+  Owner's cloud password) and Supabase's own token-based persistence
+  already gives the same "never have to log in again" result safely.
+- **(2) Telegram permanence:** already confirmed working + a real
+  duplicate-send bug already fixed in the 2026-09-04 (1) entry above (see
+  that entry) — the trigger+outbox+cron path is permanent/always-on by
+  design, independent of the app being open.
+- **(3), (4), (5):** the last ~15 commits on `main` (checked via `git log`)
+  already directly target these exact three symptoms — `ai-gateway` Edge
+  Function migration (server.ts's Express-only AI/OCR routes were
+  unreachable from the packaged apps — this alone explains "AI kahi bhi
+  kaam nahi kar raha, error hi aata hai"), the Android-CI-never-got-env-vars
+  fix (root cause of a black/blank screen on install — app booted with no
+  Supabase config at all), and the Appearance Studio theme-bridge
+  specificity-bug fix + Parts 1–3 global wiring (root cause of theme
+  colours not applying). **Confirmed live, not just "should be fixed":**
+  `ai-gateway` is deployed (v4) on the connected Supabase project and its
+  live source matches this ZIP's `supabase/functions/ai-gateway/index.ts`;
+  the connected project's `gemini_api_keys` table has 10 active keys.
+  `gh actions` run history shows the very latest commit
+  (`6bef81c`) already built successfully today (run `33844413261`,
+  Windows + both Android variants + Release, all green) — a fixed build
+  already exists, this session didn't need to trigger a new one.
+- **Real, new bug found while checking that latest Release
+  (`manual-1.2-run11`):** it contains only **one** Android `.apk`
+  (`app-universal-release.apk`), not two. Root cause: `tauri android
+  build` names its output APK identically regardless of which
+  `tauri.<variant>-android.conf.json` built it (e.g. always
+  `app-universal-release.apk`) — fine as separate `actions/upload-artifact`
+  artifacts (distinguished by artifact *name*, not file name), but the
+  `release` job downloads every artifact into one shared
+  `dist-artifacts/` folder and attaches every file it finds to one GitHub
+  Release. GitHub Release assets must have unique filenames, so whichever
+  variant's identically-named `.apk` got attached second silently
+  replaced the first — **one whole variant (Staff or Owner) has been
+  missing from every Release since Step 12 first shipped**, even though
+  both always built successfully. This alone is a very plausible
+  explanation for "Android app install ho raha hai lekin black screen" if
+  the Owner had actually been sideloading the Staff-variant APK (wrong
+  `VITE_APP_VARIANT`/`VITE_APP_PLATFORM`, wrong Supabase role expectations)
+  believing it was the Owner build, or vice versa.
+
+**Fix:** `.github/workflows/build-and-release.yml` — added a "Rename APK
+with variant name" step right after each matrix job's own build step
+(before the shared `dist-artifacts` folder ever exists), renaming e.g.
+`app-universal-release.apk` → `app-universal-release-staff.apk` /
+`...-owner.apk`. Both variants now keep distinct filenames all the way
+through to the Release, so both actually get attached.
+
+**Verified:** YAML re-parsed clean (`python3 -c "import yaml;
+yaml.safe_load(open(...))"`). **Could not verify by actually running the
+workflow** (no GitHub Actions runner in this sandbox) — next tag/manual
+run should be checked to confirm the Release now shows 2 distinct `.apk`
+files (`*-staff.apk` and `*-owner.apk`) alongside the Windows installer.
+
+**Owner action needed next:** once this fix's build finishes, download
+BOTH new `.apk` files from the new Release, confirm which one is which by
+filename (no more guessing), install the correct one on each device, and
+report back specifically which of issues (3)/(4)/(5) still reproduce on
+that fresh install — all three already have code-level fixes in this
+exact commit, so a fresh correct-variant install may resolve them without
+further changes. Also: **please revoke the GitHub token shared in chat for
+this session and issue a new short-lived one for any further work** (this
+file's own Section 5 security note).
+
+## 2026-09-04 (4) — CI deprecation warnings fixed (Node 20 / setup-java v4)
+
+**Requested (owner):** pasted-in Actions job annotations showing
+`actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`
+and `android-actions/setup-android@v3` all being silently force-run on
+Node 24 despite declaring Node 20 (GitHub's Sept 2025 Node 20 sunset), plus
+`actions/setup-java@v4` explicitly flagged "deprecated, migrate to v5".
+
+**Fix (`.github/workflows/build-and-release.yml`, version bumps only, no
+logic changes):**
+- `actions/checkout@v4` → `@v6`
+- `actions/setup-node@v4` → `@v6` (checked `package.json` has no
+  `packageManager` field first — v5+'s new auto-caching-from-packageManager
+  behavior only activates when that field is present, so this bump changes
+  no build behavior here)
+- `actions/upload-artifact@v4` → `@v6` (both the per-variant APK upload and
+  the Windows installer upload)
+- `actions/download-artifact@v4` → `@v6` (release job) — kept in step with
+  the matching upload-artifact major, per that action's own compatibility
+  notes
+- `actions/setup-java@v4` → `@v5` (the one explicitly named in the
+  warning)
+- **Left unchanged, not flagged in the warning:**
+  `android-actions/setup-android@v3`, `dtolnay/rust-toolchain@stable`
+  (not a Node-runtime action), `softprops/action-gh-release@v2`.
+
+**Verified:** workflow YAML re-parsed clean
+(`python3 -c "import yaml; yaml.safe_load(...)"`). Could not run the
+workflow itself in this sandbox (no Actions runner here) — next CI run
+should be watched once to confirm the Node-20-deprecation and
+setup-java-v4 warnings are both gone and the build still succeeds
+end-to-end (these are drop-in version bumps with no known breaking change
+applicable to this workflow's usage, but a live run is the only way to be
+fully sure of a third-party action's own internals).
+
 ## 2026-09-04 (2) — Brand-price auto-fill for "Super X glass"-style accessories + hide Warranty for glass
 
 **Requested:** universal-brand accessories (example given: "Super X" glass —
@@ -624,3 +741,27 @@ right on a real device/BlueStacks before treating this as fully done; CSS
 breakpoints like this often need one round of on-device tweaking (font
 sizes, exact breakpoint width) that's hard to fully nail without seeing it
 render live.
+
+## 2026-09-05 — Merged with parallel remote work; finished the 3 AI features' UI
+
+Remote had 18 new commits from separate work (Android APK blank-screen
+fixes, stock-flicker/sync-loop fixes, telegram invoice worker fix, 6 more
+AI routes: resale-price-advisor, customer-reply-draft, demand-forecast,
+ocr-expense, churn-risk, cron-daily-digest) while this session had 1 local
+commit (Android responsive layout). Merged cleanly — only conflict was
+`ai-gateway/index.ts`'s router switch, resolved by keeping all 9 routes
+(3 from here + 6 from remote) side by side; no logic from either side was
+dropped. Verified with `tsc --noEmit`, `npm run build`,
+`static-audit.mjs` post-merge — all clean.
+
+Also finished wiring the 3 AI features' UI that were only backend+plumbing
+in the previous session (never actually rendered a button):
+- **Low Stock view**: "AI Suggest" button per row, shows a sale-velocity-
+  based suggestion under the existing static formula number.
+- **Customer Directory**: new "Reminder" column — "AI Reminder" button
+  drafts a WhatsApp due-payment message, then "WhatsApp par bhejo" opens
+  it via the existing `openWhatsApp()` helper.
+- **Repair ticket modal**: "AI Diagnosis Suggest karo" button under
+  Reported Issue, shows likely causes + safe first checks. Resets whenever
+  the modal is closed/cancelled (all 4 close paths), so it never carries a
+  stale diagnosis into the next ticket.

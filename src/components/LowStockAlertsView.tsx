@@ -110,7 +110,40 @@ export const LowStockAlertsView: React.FC<LowStockAlertsViewProps> = ({ db, show
                     {row.product.stock}
                   </td>
                   <td>{row.product.minStock}</td>
-                  <td><b>{row.suggestedQty}</b></td>
+                  <td>
+                    <b>{row.suggestedQty}</b>
+                    <div style={{ marginTop: "4px" }}>
+                      {!aiSuggestions[row.product.id] && (
+                        <button
+                          className="btn sm"
+                          style={{ fontSize: "11px", padding: "3px 8px" }}
+                          onClick={() => handleAiSuggest(row)}
+                        >
+                          <Sparkles size={12} /> AI Suggest
+                        </button>
+                      )}
+                      {aiSuggestions[row.product.id]?.loading && (
+                        <span style={{ fontSize: "11px", color: "var(--ink-soft)" }}>Sochte hue...</span>
+                      )}
+                      {aiSuggestions[row.product.id]?.error && (
+                        <div style={{ fontSize: "11px", color: "var(--red)" }}>
+                          {aiSuggestions[row.product.id].error}
+                          <button
+                            className="btn sm"
+                            style={{ fontSize: "10px", padding: "2px 6px", marginLeft: "6px" }}
+                            onClick={() => handleAiSuggest(row)}
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      )}
+                      {aiSuggestions[row.product.id]?.text && (
+                        <div style={{ fontSize: "11px", color: "var(--ink-soft)", maxWidth: "220px", whiteSpace: "pre-line" }}>
+                          🤖 {aiSuggestions[row.product.id].text}
+                        </div>
+                      )}
+                    </div>
+                  </td>
                   <td>{row.supplier?.name || row.product.supplier || "—"}</td>
                   <td>
                     <button className="btn sm blue" onClick={() => handleReorder(row)}>

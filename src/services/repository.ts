@@ -480,10 +480,18 @@ async function flushOfflineQueueInner() {
   let processed = 0, failed = 0;
   for (const row of rows || []) {
     if (Number(row.retry_count || 0) >= MAX_RETRIES) {
-      await markSync(row.id, {
-        status: "abandoned",
-        last_error: `Gave up after ${MAX_RETRIES} failed attempts — needs manual review.`,
-      });
+      const giveUpNote = `Gave up after ${MAX_RETRIES} failed attempts — needs manual review.`;
+      try {
+        await markSync(row.id, { status: "abandoned", last_error: giveUpNote });
+      } catch {
+        // status.in.(...) filters this query by "pending"/"failed"/stale-"syncing"
+        // only, so if the DB's status CHECK constraint doesn't (yet) allow
+        // "abandoned" and this write rejects, falling back to "failed" here
+        // would put the row right back in front of this same MAX_RETRIES gate
+        // next cycle -- which correctly skips it again without ever calling
+        // processOperation, so it still stops hammering the DB.
+        await markSync(row.id, { status: "failed", last_error: giveUpNote }).catch(() => {});
+      }
       failed++;
       continue;
     }

@@ -46,6 +46,9 @@ interface SidebarProps {
   onToggleOwnerMode: () => void;
   onOpenQuickScan: () => void;
   onOpenWindowsModal?: () => void;
+  /** 2026-09-04: narrow-screen (Android/small window) off-canvas drawer state — see index.css's 900px breakpoint. Both no-ops on desktop widths. */
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 // 6 Core Daily Counter Items for Ultra-Easy Counter Work
@@ -179,6 +182,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleOwnerMode,
   onOpenQuickScan,
   onOpenWindowsModal,
+  isMobileOpen = false,
+  onCloseMobile,
 }) => {
   const [showAllTools, setShowAllTools] = useState<boolean>(false);
   const [easyMode, setEasyMode] = useState<boolean>(false);
@@ -228,7 +233,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isCurrentSecondary = SECONDARY_NAV_ITEMS.some((s) => s.key === currentPage);
 
   return (
-    <aside id="sidebar">
+    <>
+      {/* 2026-09-04: backdrop only ever rendered while the drawer is open, so
+          it costs nothing on desktop and never needs its own media query. */}
+      {isMobileOpen && <div className="sidebar-backdrop" onClick={onCloseMobile} />}
+      <aside id="sidebar" className={isMobileOpen ? "mobile-open" : ""}>
       {/* Brand Header */}
       <div className="brand" style={{ cursor: "pointer" }} onClick={() => onNavigate("dashboard")}>
         <div className="logo-badge fx-flip-3d" id="brandLogoBadge">
@@ -523,5 +532,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
     </aside>
+    </>
   );
 };

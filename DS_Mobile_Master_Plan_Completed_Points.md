@@ -622,7 +622,69 @@ workflow** (no GitHub Actions runner in this sandbox) — next tag/manual
 run should be checked to confirm the Release now shows 2 distinct `.apk`
 files (`*-staff.apk` and `*-owner.apk`) alongside the Windows installer.
 
-**Owner action needed next:** once this fix's build finishes, download
+## 2026-09-05 — App-wide Android/phone usability pass (Windows untouched)
+
+**Requested (owner):** Windows UI/design should not change at all; Android
+(both Staff and Owner apps) needs a from-scratch usability redesign —
+phone-friendly, easy to use, no text getting cut off at the edges,
+fast/perfect touch experience.
+
+**Approach:** the previous session (a93fe7c) already introduced a
+`@media (max-width: 900px)` layer for the sidebar-drawer + topbar wrap,
+scoped so everything above it (the desktop layout) is untouched — a
+narrow-window/phone-width query rather than a hard platform check, so it
+naturally never fires on a normal desktop window and needs no separate
+"Android build" flag. This session extended that same block, app-wide,
+instead of touching individual view files one by one, since almost every
+screen in the app shares the same handful of CSS classes:
+- `.formgrid` (every Add/Edit form — product, sale, customer, expense,
+  staff, settings, etc.) was a fixed 2-column grid on every screen size —
+  on a ~360-400px phone that squeezed every label+value into an
+  unreadably narrow column. Now 1 column under 900px.
+- `.truncate` (table/list cell name-clipping) was a fixed 220px cap
+  regardless of screen width — over half a phone's screen width, which
+  is very likely most of what "text cut on edge" meant. Now `62vw` on
+  phone so it scales with the actual available width instead of a
+  desktop-sized fixed number.
+- `.btn` / inputs/selects/textareas were sized for a mouse+desktop
+  (8-9px padding, 13-13.5px font) — bumped to a real touch target
+  (≥42px tall) and slightly larger text under 900px.
+- `.actions`/`.toolbar`/`.row-actions`/`.filter-bar` rows (present across
+  many views for filter/action buttons) now wrap instead of forcing
+  buttons to shrink unreadably thin or run off-screen.
+- `.modal` went from a fixed desktop max-width+24px padding to
+  near-full-bleed (`calc(100vw - 20px)`) with safe-area-aware bottom
+  padding for notched Android phones, and `.modal-actions` buttons now
+  stack/wrap full-width instead of a cramped right-aligned row.
+- Table cells get the same touch-sized padding/font as buttons/inputs on
+  phone, and long unbroken values now wrap (`overflow-wrap: break-word`)
+  inside a `max-width: 46vw` cap rather than silently stretching the
+  table wider than the phone screen underneath the already-present
+  `.table-wrap` horizontal scroll.
+- Added a `[data-android-safe-bottom]` utility class (any bottom-fixed
+  bar can opt in) that respects `env(safe-area-inset-bottom)` for
+  gesture-nav/notch phones — not currently applied to any element yet,
+  available for a future sticky action bar.
+
+**Verified:** `npm run build` — clean, no TypeScript/CSS errors, same
+chunk output as before this change (only `index.css` size changed, from
+CSS additions). CSS brace-balance checked (358 open / 358 close). Every
+new rule lives strictly inside `@media (max-width: 900px)` (or is an
+opt-in utility class applied to nothing yet), so a normal desktop-width
+Windows window renders byte-for-byte the same as before this commit —
+confirmed by re-reading the diff, not just by assumption.
+
+**Not done / explicitly out of scope for this pass:** this is a
+CSS-level, cross-cutting pass covering shared components used by nearly
+every screen — it is not a per-screen rebuild of every individual view's
+unique custom markup (a handful of views may have their own bespoke
+inline layout that doesn't go through `.formgrid`/`.actions`/etc. and
+would need to be found and fixed individually; `LowStockAlertsView.tsx`
+was already handled bespoke in the prior session). **Owner action
+needed:** install a fresh build on an Android device and point out any
+specific screen that still doesn't look/feel right — a screenshot or
+screen name narrows this down far faster than guessing which of ~40+
+screens to check one by one.
 BOTH new `.apk` files from the new Release, confirm which one is which by
 filename (no more guessing), install the correct one on each device, and
 report back specifically which of issues (3)/(4)/(5) still reproduce on
@@ -694,3 +756,124 @@ warranty in this shop, so stop showing the Warranty section for them.
 
 **Verified:** `npx tsc --noEmit` (zero errors) → `npm run build` (clean) →
 `node scripts/static-audit.mjs` (all 16 PASS).
+
+## 2026-09-04 (3) — Android/narrow-window responsive layout + light theme default
+
+**Requested:** screenshots showed the app on Android (via BlueStacks) using
+the exact same always-docked 260px sidebar + fixed-height topbar as desktop,
+squeezed into a ~380-550px phone width — causing the topbar's shop-name,
+subtitle, and action buttons to overlap/garble ("DIGITAL HUB PRO" running
+into "COUNTER: Owner Retail OS"). Asked for a separate, workable layout for
+narrow/Android windows (desktop/"totally new window" layout left as-is),
+and light theme as the default on both.
+
+**Root cause confirmed from code (not just the screenshots):** `#sidebar`
+had no small-screen behaviour at all (always `width:260px` in the flex
+row), and `#topbar` was `height:64px` fixed with no wrap — on a ~550px-wide
+BlueStacks viewport that leaves ~290px for the whole topbar row (title +
+subtitle + Dashboard/New Bill/Cloud-status buttons), which cannot fit
+without visually overlapping.
+
+**Fix — `src/index.css` (`@media (max-width: 900px)`), `src/components/Sidebar.tsx`, `src/App.tsx`:**
+- Sidebar becomes an off-canvas drawer below 900px: `position:fixed`,
+  slides in via `transform`, with a dimmed backdrop (click to close). Above
+  900px, completely unchanged (still the normal docked desktop sidebar).
+- A hamburger button (`Menu` icon, hidden entirely above 900px) opens the
+  drawer; picking any nav item auto-closes it (`onNavigate` now also does
+  `setIsMobileNavOpen(false)`), so it behaves like a phone nav drawer, not
+  a modal you have to dismiss separately.
+- Topbar is allowed to wrap/grow (`height:auto`, `flex-wrap:wrap`) below
+  900px instead of a fixed 64px, and the shop name / subtitle get
+  `text-overflow:ellipsis` + a max-width instead of overlapping when there
+  isn't room for the full string.
+- Desktop/large-window layout: zero changes outside the new media query —
+  this was explicitly "leave the existing window design alone, just add an
+  Android one," not a redesign of the whole app.
+- `theme/useAppearance.ts`: fresh-install default flipped from `mode: "dark"`
+  to `mode: "light"` (kept the existing "midnight" default theme id, which
+  already ships both a dark and a light swatch — only the light/dark
+  default changed, not the palette). Applies identically on Windows and
+  Android since it's the same shared appearance store.
+
+**Verified:** `npx tsc --noEmit` (zero errors) → `npm run build` (clean) →
+`node scripts/static-audit.mjs` (all 16 PASS). Not yet visually verified in
+an actual narrow browser/device by a human — please reload the Android
+build and confirm the hamburger + drawer + non-overlapping header look
+right on a real device/BlueStacks before treating this as fully done; CSS
+breakpoints like this often need one round of on-device tweaking (font
+sizes, exact breakpoint width) that's hard to fully nail without seeing it
+render live.
+
+## 2026-09-05 — Merged with parallel remote work; finished the 3 AI features' UI
+
+Remote had 18 new commits from separate work (Android APK blank-screen
+fixes, stock-flicker/sync-loop fixes, telegram invoice worker fix, 6 more
+AI routes: resale-price-advisor, customer-reply-draft, demand-forecast,
+ocr-expense, churn-risk, cron-daily-digest) while this session had 1 local
+commit (Android responsive layout). Merged cleanly — only conflict was
+`ai-gateway/index.ts`'s router switch, resolved by keeping all 9 routes
+(3 from here + 6 from remote) side by side; no logic from either side was
+dropped. Verified with `tsc --noEmit`, `npm run build`,
+`static-audit.mjs` post-merge — all clean.
+
+Also finished wiring the 3 AI features' UI that were only backend+plumbing
+in the previous session (never actually rendered a button):
+- **Low Stock view**: "AI Suggest" button per row, shows a sale-velocity-
+  based suggestion under the existing static formula number.
+- **Customer Directory**: new "Reminder" column — "AI Reminder" button
+  drafts a WhatsApp due-payment message, then "WhatsApp par bhejo" opens
+  it via the existing `openWhatsApp()` helper.
+- **Repair ticket modal**: "AI Diagnosis Suggest karo" button under
+  Reported Issue, shows likely causes + safe first checks. Resets whenever
+  the modal is closed/cancelled (all 4 close paths), so it never carries a
+  stale diagnosis into the next ticket.
+
+## 2026-09-05 (5) — Screen-size field: fixed decimal rejection + stopped AI auto-computing a false range
+
+**Requested (owner, with screenshot):** Add Product's Screen Size field
+rejected "6.44" with a browser error ("nearest valid values are 6.4 and
+6.5"), and separately: after an accessory packaging scan (27 compatible
+models), AI had filled a "6.44 se 6.6" range — owner said this is wrong:
+all these models actually share the SAME real screen size, so it should
+pick one model, look up its real size, and fill ONE number, not a
+manufactured range.
+
+**Root causes:**
+1. Both screen-size `<input type="number">` had `step="0.1"`, so the
+   browser's native validation only accepts values landing exactly on a
+   0.1 increment from 0 (6.0, 6.1, ... 6.4, 6.5) — 6.44 falls between two
+   valid steps and gets rejected outright.
+2. `runScan()` (`AddProductModal.tsx`) was directly trusting whatever
+   `screenSizeMaxInches` the packaging-photo OCR guessed, and that OCR
+   guess comes from comparing several models' sizes printed/inferred off
+   one photo — small per-model OCR read variance was showing up as a
+   fabricated "range" even when the item is genuinely one universal
+   screen-size glass.
+
+**Fix (`src/components/AddProductModal.tsx`):**
+- `step="0.1"` -> `step="0.01"` on both screen-size inputs (matches the
+  precision already used on the price fields).
+- `runScan()` no longer sets `screenSizeMaxInches` from the OCR result at
+  all — the OCR's own `screenSizeInches` guess is kept only as an instant
+  placeholder.
+- Immediately after every scan, `autoFillScreenSizeFromModel()` is now
+  always called with a new `authoritative` flag on the first detected
+  model — this hits the existing dedicated screen-size-lookup endpoint
+  (a real single-model lookup, backed by the durable
+  `phone_screen_size_cache` table) and its result overwrites the OCR's
+  placeholder and clears any max value, so the field always ends up as
+  one real, trusted number instead of a spread. The old manual-add path
+  (typing a model into the list by hand later) keeps its previous safe
+  behavior (`authoritative=false` — never overwrites a value the shop
+  already entered).
+- Hint text under the field updated to say AI always fills one real size
+  now; a genuine range is still something the shop can type in manually
+  if they know one is actually needed (kept the Max box, just nothing
+  auto-fills it anymore).
+
+**Verified:** `npx tsc --noEmit` clean, `npm run build` clean.
+**Not changed:** the `ai-gateway` accessory-OCR prompt/schema itself still
+returns its own `screenSizeMaxInches` guess in the API response (for any
+other caller) — this fix works entirely on the frontend by simply no
+longer trusting/using that field for this flow, which is the safer,
+smaller change and needed no Edge Function redeploy.

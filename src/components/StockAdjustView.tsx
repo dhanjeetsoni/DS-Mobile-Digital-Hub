@@ -63,9 +63,35 @@ export const StockAdjustView: React.FC<StockAdjustViewProps> = ({
     const idempotencyKey = crypto.randomUUID();
     if (isCloudConfigured && storeId) {
       try {
+        // BUG FIX (2026-09-04): locally-created products only ever carry a
+        // client id like "p_<uuid>", never a row in public.products.
+        // atomic_apply_stock_adjustment's p_product_id is a strict `uuid`
+        // column — passing product.id straight through made every
+        // adjustment on such a product fail at the PostgREST parameter-cast
+        // boundary with "invalid input syntax for type uuid", before the
+        // RPC body (and its isBusinessRejection() classifier) ever ran. That
+        // sent it down the offline-queue "safety net" path every time,
+        // where it failed identically on every retry forever (one row was
+        // seen with 311 failed attempts). Resolve/find-or-create the real
+        // product uuid first, exactly like the sale flow already does via
+        // resolve_product_for_sale.
+        const { data: realProductId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+          p_store_id: storeId,
+          p_local_id: String(product.id),
+          p_sku: product.sku || null,
+          p_model: product.name || null,
+          p_brand: product.brand || null,
+          p_category: product.category || null,
+          p_cost_price: product.purchasePrice ?? 0,
+          p_selling_price: product.sellingPrice ?? 0,
+          p_stock_qty: previousStock,
+          p_min_stock: product.minStock ?? 0,
+        });
+        if (resolveError) throw resolveError;
+
         const { error } = await supabase.rpc("atomic_apply_stock_adjustment", {
           p_store_id: storeId,
-          p_product_id: product.id,
+          p_product_id: realProductId,
           p_delta: delta,
           p_reason: reason,
           p_idempotency_key: idempotencyKey,
@@ -81,7 +107,24 @@ export const StockAdjustView: React.FC<StockAdjustViewProps> = ({
           await queueOfflineOperation(
             "stock_adjustment",
             "stock_movements",
-            { adjustment: { productId: product.id, delta, reason } },
+            {
+              adjustment: {
+                productId: product.id,
+                delta,
+                reason,
+                // Needed by repository.ts's offline replay to resolve the
+                // same client id -> real product uuid before retrying —
+                // see the matching fix there.
+                sku: product.sku || null,
+                model: product.name || null,
+                brand: product.brand || null,
+                category: product.category || null,
+                costPrice: product.purchasePrice ?? 0,
+                sellingPrice: product.sellingPrice ?? 0,
+                stockQty: previousStock,
+                minStock: product.minStock ?? 0,
+              },
+            },
             idempotencyKey
           );
         } catch {

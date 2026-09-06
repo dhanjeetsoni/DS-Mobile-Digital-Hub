@@ -2,7 +2,13 @@
   "productName": "DS Owner",
   "identifier": "com.dsmobile.digitalhub.owner",
   "app": {
-    "windows": []
+    "windows": [
+      {
+        "label": "main",
+        "title": "DS Owner",
+        "fullscreen": true
+      }
+    ]
   },
   "bundle": {
     "android": {

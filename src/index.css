@@ -430,6 +430,296 @@ html[data-font-style="mono"] {
   gap: 10px;
 }
 
+/* ==========================================================================
+   2026-09-04 — Android / narrow-window layout
+   Everything above this block is the unchanged desktop layout (sidebar
+   always docked in the flow, fixed-height topbar). Below ~900px — a phone
+   in portrait, or BlueStacks/an Android window — the sidebar becomes an
+   off-canvas drawer instead of trying to squeeze a 260px rail permanently
+   onto a ~380-550px screen, and the topbar is allowed to wrap onto two
+   lines instead of overlapping when the shop name + subtitle + action
+   buttons no longer fit one 64px-tall row.
+   ========================================================================== */
+.mobile-hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .mobile-hamburger {
+    display: inline-flex;
+  }
+
+  #sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    transform: translate3d(-100%, 0, 0);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: none;
+  }
+
+  #sidebar.mobile-open {
+    transform: translate3d(0, 0, 0);
+    box-shadow: 20px 0 48px rgba(0, 0, 0, 0.35);
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 12, 20, 0.55);
+    z-index: 95; /* under #sidebar (z-index 30 already, raise via same stacking context is fine since sidebar becomes fixed) */
+    animation: fadeInBackdrop 0.2s ease both;
+  }
+
+  #sidebar {
+    z-index: 100;
+  }
+
+  @keyframes fadeInBackdrop {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  #main {
+    width: 100%;
+  }
+
+  #topbar {
+    height: auto;
+    min-height: 56px;
+    padding: 8px 12px;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  #topbar h1 {
+    font-size: 15px !important;
+    max-width: 56vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #topbar .sub {
+    max-width: 56vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #topbar > .topbar-title {
+    gap: 10px !important;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .top-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 6px;
+  }
+
+  #page {
+    padding: 14px 12px 32px;
+  }
+
+  /* ------------------------------------------------------------------
+     2026-09-05 — full app-wide Android pass (staff + owner, both apps
+     share this same CSS). Everything below still lives inside the same
+     max-width:900px query as the block above, so desktop/Windows is
+     completely unaffected — only phone/narrow-window layout changes.
+     ------------------------------------------------------------------ */
+
+  /* Every 2-column entry form in the app (Add Product, Add Sale, Add
+     Customer, Add Expense, staff/owner settings, etc.) used a fixed
+     2-column grid that never adapted — two ~150px-wide fields side by
+     side on a 360-400px phone screen, forcing every label+value to
+     truncate or overflow. Single column on phone = full label/value
+     always readable, no cutting. */
+  .formgrid {
+    grid-template-columns: 1fr;
+  }
+  .formgrid .field.full {
+    grid-column: span 1;
+  }
+
+  /* Table/customer/product-name truncation was a fixed 220px regardless
+     of screen size — on a 360px-wide phone that alone was over half the
+     visible width, so names/values got clipped constantly ("text cut on
+     edge"). Let it use most of the available row width instead of a
+     desktop-sized fixed cap. */
+  .truncate {
+    max-width: 62vw;
+  }
+
+  /* Buttons: 8px/16px padding at 13px font is a small, easy-to-miss tap
+     target on a touchscreen (Apple/Google guidance is ~44px tall
+     minimum). Bump height and text size app-wide on phone without
+     touching the desktop .btn rule above. */
+  .btn {
+    min-height: 42px;
+    padding: 9px 16px;
+    font-size: 14px;
+  }
+  .btn.sm {
+    min-height: 36px;
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+
+  /* Inputs/selects: bigger tap target + bigger text so typing prices,
+     IMEIs, names etc. on a phone keyboard is comfortable instead of
+     fiddly, and so on-screen keyboards don't force awkward zooming to
+     read what was typed. */
+  input, select, textarea {
+    padding: 11px 12px;
+    font-size: 15px;
+  }
+
+  /* Rows of action buttons (toolbars above tables, card footers, filter
+     bars) were plain non-wrapping flex rows in many views, which is fine
+     on a wide desktop window but pushes buttons off-screen or squashes
+     them unreadably thin on a phone. Let any row using the existing
+     .actions/.toolbar/.row-actions helper classes wrap instead. */
+  .actions, .toolbar, .row-actions, .filter-bar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* Modals: 24px padding either side plus a fixed max-width eats a lot
+     of a ~360-400px phone screen and can force its own inner content to
+     scroll sideways. Go closer to full-bleed with safe-area awareness
+     for notched Android phones, and stack action buttons full-width
+     instead of a cramped right-aligned row. */
+  .modal, .modal.wide {
+    max-width: calc(100vw - 20px);
+    width: calc(100vw - 20px);
+    padding: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    max-height: calc(100vh - 20px);
+  }
+  .modal-actions {
+    flex-wrap: wrap;
+  }
+  .modal-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  /* Table cells: match the same touch-friendly sizing as buttons/inputs
+     above, and never let a single unbroken long value quietly stretch
+     the whole table wider than the phone screen underneath the
+     already-present horizontal scroll on .table-wrap. */
+  th, td {
+    padding: 10px 12px;
+    font-size: 12.5px;
+  }
+  td, th {
+    max-width: 46vw;
+    overflow-wrap: break-word;
+  }
+
+  /* Sidebar drawer: 260px was sized for a permanently-docked desktop
+     rail, not a drawer meant to be swiped/tapped open on a phone. A
+     little wider is easier to read + tap without feeling cramped, while
+     still leaving the dimmed backdrop visible so it clearly reads as an
+     overlay, not the whole screen. */
+  #sidebar {
+    width: min(300px, 84vw);
+    flex-basis: min(300px, 84vw);
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .brand .name {
+    max-width: 200px;
+  }
+
+  /* Nav items: 8.5px/13px was sized for a mouse pointer with hover
+     states, not a thumb — bump to a comfortable one-handed tap target
+     and slightly bigger icon/text so the drawer reads as a real phone
+     menu instead of a shrunk desktop sidebar. */
+  .nav button.navitem {
+    padding: 12px 14px;
+    font-size: 14.5px;
+    gap: 14px;
+  }
+  .nav button.navitem .ic {
+    width: 22px;
+  }
+  .nav .grp-label {
+    padding: 14px 10px 6px;
+  }
+
+  /* Topbar: account for a phone's status bar / camera cutout when the
+     app runs full-bleed in the Android WebView. */
+  #topbar {
+    padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  }
+
+  /* Native-feeling momentum scrolling for the drawer, the page body, and
+     any scrollable modal — plain `overflow:auto` can feel stiff/laggy
+     in an Android WebView without this. */
+  #page, .nav, .modal {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Removes the ~300ms tap-delay browsers reserve for detecting a
+     double-tap-to-zoom gesture on every button/nav-item/tappable card —
+     on a phone this is the difference between the app feeling instant
+     vs. always slightly laggy to the touch. */
+  .btn, .nav button.navitem, .card, .stat-card, .job-card {
+    touch-action: manipulation;
+  }
+
+  /* System Status Dashboard (3 fixed columns) and Storage Usage Meter (2
+     fixed columns) set their column count via an inline style rather
+     than the shared .grid.cols-N classes above, so a plain CSS rule
+     can't out-rank it — needs !important to actually collapse these to
+     1 column on phone instead of squeezing 2-3 stat blocks into ~120px
+     each. */
+  .storage-meter-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* .section-head is the title+action-buttons header row used at the top
+     of ~37 different screens across the app (every list/CRUD view:
+     Staff Access, Products, Sales History, Returns, Purchases, etc.). It
+     had no flex-wrap, so a longer title plus 2+ buttons had nowhere to
+     go on a phone-width screen except overflow or squeeze unreadably
+     thin. One fix here reaches every one of those screens at once. */
+  .section-head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .section-head h2 {
+    font-size: 15px;
+    max-width: 100%;
+  }
+}
+
+/* Any element carrying data-android-safe-bottom (bottom-fixed bars, e.g.
+   a sticky "Save"/checkout bar) respects a phone's gesture-nav/notch
+   inset instead of sitting flush under it, on every screen size — not
+   just under 900px, since a Chrome-OS-in-tablet-mode Android window can
+   still report a safe-area inset. */
+[data-android-safe-bottom] {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+
+
 #page {
   flex: 1;
   padding: 24px 28px 48px;

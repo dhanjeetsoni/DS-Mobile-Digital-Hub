@@ -74,6 +74,42 @@ export async function lookupScreenSize(modelName: string): Promise<number> {
   return 0;
 }
 
+// Step 2026-09-05: batch version used by the Add Product form's Compatible
+// Models flow. A tempered-glass/cover item can list many models at once
+// (e.g. from a photo scan), and the earlier approach of trusting the
+// packaging photo's own printed "for 6.5-6.7 inch" text produced a noisy,
+// inaccurate range. This instead asks AI to look up each named model's real
+// screen size individually (server-side cached, so repeat models across
+// products are instant) and returns the TRUE min/max across them, so the
+// Display Size min/max boxes reflect actual device sizes, not guessed pack
+// text.
+export interface ScreenSizeRangeResult {
+  minSize: number;
+  maxSize: number;
+  sizes: { modelName: string; size: number }[];
+}
+
+export async function lookupScreenSizeRange(modelNames: string[]): Promise<ScreenSizeRangeResult> {
+  const empty: ScreenSizeRangeResult = { minSize: 0, maxSize: 0, sizes: [] };
+  if (!AI_GATEWAY_URL || !modelNames.length) return empty;
+  const res = await fetch(`${AI_GATEWAY_URL}/screen-size-range`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({ modelNames }),
+  });
+  if (res.ok) {
+    const json = await res.json();
+    if (json.success) {
+      return {
+        minSize: Number(json.minSize) || 0,
+        maxSize: Number(json.maxSize) || 0,
+        sizes: Array.isArray(json.sizes) ? json.sizes : [],
+      };
+    }
+  }
+  return empty;
+}
+
 // Scans an accessory pack photo (tempered glass / back cover / charger /
 // cable box) and returns the brand, product name, suggested category and the
 // FULL list of compatible phone models printed on it. Used to auto-fill the

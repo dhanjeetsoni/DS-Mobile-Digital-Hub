@@ -65,8 +65,49 @@ export async function loadCloudState() {
   return { state: row.state as Database, version: Number(row.version || 0), storeId: row.store_id };
 }
 
-export async function saveCloudState(state: Database, expectedVersion: number) {
-  const profile = await getCurrentProfile();
+/**
+ * Phase 1 (data architecture fix): products.stock_qty is the authoritative
+ * transactional number (updated inside the row-locked atomic RPCs), not the
+ * JSON store_state blob, which only reaches a device on its next full save/
+ * load cycle and is what caused the "0 ↔ 5" flicker. This is a lightweight
+ * one-shot read of just {id, stock_qty} for every product — used to seed the
+ * live-stock map on bootstrap, before the realtime subscription below takes
+ * over keeping it current.
+ */
+export async function fetchLiveStock(storeId: string): Promise<Record<string, number>> {
+  const { data, error } = await supabase
+    .from("products")
+    .select("id,stock_qty")
+    .eq("store_id", storeId);
+  if (error) throw error;
+  const map: Record<string, number> = {};
+  for (const row of data || []) map[row.id] = Number(row.stock_qty || 0);
+  return map;
+}
+
+/**
+ * Realtime companion to fetchLiveStock(): fires on every insert/update/delete
+ * to this store's products (a sale, purchase, or stock adjustment on *any*
+ * device updates stock_qty via its atomic RPC, which this picks up in
+ * ~1 second) so every open device's live-stock map stays current without
+ * waiting for the slower store_state blob save/load round trip.
+ */
+export function subscribeToLiveStock(storeId: string, onChange: (productId: string, stockQty: number) => void) {
+  const channel = supabase
+    .channel(`live-stock-${storeId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "products", filter: `store_id=eq.${storeId}` },
+      (payload: any) => {
+        const row = payload.new || payload.old;
+        if (row?.id) onChange(row.id, Number(row.stock_qty || 0));
+      }
+    )
+    .subscribe();
+  return channel;
+}
+
+export async function saveCloudState(state: Database, expectedVersion: number) {  const profile = await getCurrentProfile();
   if (profile?.role === "staff") {
     const { data, error } = await supabase.rpc("save_store_state_for_user", {
       p_state: state,
@@ -193,6 +234,24 @@ async function processOperation(row: any, storeId: string) {
 
   if (type === "purchase") {
     const purchase = payload.purchase || payload;
+    // Same class of bug as "sale"/"stock_adjustment" above — a queued
+    // purchase's items only ever carry the client-local product id.
+    const resolvedItems = await Promise.all((purchase.items || []).map(async (item: any) => {
+      const { data: realId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+        p_store_id: storeId,
+        p_local_id: String(item.productId),
+        p_sku: item.sku ?? null,
+        p_model: item.name ?? null,
+        p_brand: item.brand ?? null,
+        p_category: item.category ?? null,
+        p_cost_price: item.purchasePrice ?? 0,
+        p_selling_price: item.sellingPrice ?? 0,
+        p_stock_qty: item.stockAtPurchase ?? 0,
+        p_min_stock: item.minStock ?? 0,
+      });
+      if (resolveError) throw resolveError;
+      return { product_id: realId, quantity: item.qty, purchase_price: item.purchasePrice };
+    }));
     const { data: purchaseId, error } = await supabase.rpc("atomic_complete_purchase", {
       p_store_id: storeId,
       p_supplier: purchase.supplier || null,
@@ -201,11 +260,7 @@ async function processOperation(row: any, storeId: string) {
       p_notes: purchase.notes || null,
       p_payment_status: purchase.paymentStatus || null,
       p_idempotency_key: row.operation_id,
-      p_items: (purchase.items || []).map((item: any) => ({
-        product_id: item.productId,
-        quantity: item.qty,
-        purchase_price: item.purchasePrice,
-      })),
+      p_items: resolvedItems,
     });
     if (error) throw error;
     return { serverId: purchaseId };

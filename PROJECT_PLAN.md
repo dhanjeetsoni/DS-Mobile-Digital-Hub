@@ -254,6 +254,48 @@ finished in this session (2026-09-06)._
     documented below is still genuinely in place, not silently reverted.
   - `npx tsc --noEmit`, `npx vitest run` (26/26), `npm run build` — all
     re-run clean against the current `main` right before this update.
+- [x] **Found and fixed 2026-09-06 (this session) — a real gap in the Phase 1
+      claim above that the "owner needs to test on a real device" item would
+      have failed for a staff device specifically**: `fetchLiveStock()` /
+      `subscribeToLiveStock()` and `fetchLiveCatalog()` /
+      `subscribeToLiveCatalog()` were wired unconditionally for every role in
+      `App.tsx`'s bootstrap, but query `products` directly — and `products`
+      has exactly **one** RLS policy, `products_owner_manager_write`
+      (owner/manager only, confirmed via `pg_policies` on the live project).
+      For a staff session this silently returned zero rows (no thrown error
+      — `fetchLiveStock`'s catch just logs "falling back to blob stock") and
+      Realtime never delivered a single `postgres_changes` event either
+      (Realtime enforces the same RLS a plain `SELECT` would). Net effect: a
+      staff Android device got **none** of the Phase 1 instant-stock benefit
+      and silently stayed on the slower/staler `store_state` blob path this
+      whole migration exists to move away from — exactly the kind of gap
+      that would only surface during the owner's real-device test, and would
+      have looked like "Phase 1 didn't actually fix it" rather than what it
+      really was (a staff-specific RLS hole).
+  - Fix: new `products_staff_view` mirror table — same pattern as the
+    existing `store_state_staff_view` (a physical table, not a SQL view,
+    since Realtime needs real table replication) — holding only the columns
+    these two functions already restricted themselves to (`fetchLiveStock`:
+    `id`+`stock_qty` only; `fetchLiveCatalog`: `LIVE_CATALOG_COLUMNS`, which
+    already explicitly excludes `cost_price`/`confidential_price`). Kept in
+    lockstep by an `AFTER INSERT OR UPDATE OR DELETE` trigger on `products`;
+    RLS lets any authenticated store member (owner, manager, **or staff**)
+    read it, since it never carries a confidential column to begin with;
+    added to the `supabase_realtime` publication; backfilled for every
+    existing row. `repository.ts`'s four functions now point at this mirror
+    instead of the base table.
+  - **Verified live, not just deployed and assumed**: backfill row count
+    matches `products` exactly (3/3); `products_staff_view` confirmed
+    present in `pg_publication_tables` for `supabase_realtime`.
+  - Migration: `supabase/migrations/20260906130000_phase1_products_staff_view_v38.sql`.
+  - Same store_state/staff visibility class of bug, found and fixed the
+    same way, one layer up: the JSON-blob realtime channel
+    (`store-state-${storeId}` on table `store_state`) was also only ever
+    wired for `role !== "staff"` in `App.tsx` — staff got zero live push
+    from the blob path either. Fixed by wiring the already-existing (but
+    never-subscribed-to) `store_state_staff_view` mirror
+    (migration `20260831064309_realtime_store_state_sync_v23.sql`, built by
+    an earlier session but left disconnected) for staff sessions instead.
 - [ ] **Owner needs to actually test this on a real device — this is now
       the ONLY thing left before Phase 1 can be marked ✅.** Everything
       above (code, migrations, live DB structure, live function bodies)
@@ -289,6 +331,26 @@ finished in this session (2026-09-06)._
       not a true replace — the old 24-arg buggy version had to be
       explicitly dropped, confirmed gone). Migration applied live, full
       test suite + typecheck + build re-run clean, then merged to `main`.
+
+**JSON blob vs. relational tables — current status, 2026-09-06 (asked for
+explicitly, answered precisely rather than "mostly migrated"):**
+
+| Data | Source of truth | Live-synced to every device instantly? |
+|---|---|---|
+| `stock_qty` | ✅ Relational (`products.stock_qty`, via atomic RPCs) | ✅ Yes — owner **and staff** (`products_staff_view`, fixed this session) |
+| Catalog fields (photo, MRP, warranty, notes, compatible models, screen size, min stock) | ✅ Relational (`products`, via `upsert_product_catalog()`) | ✅ Yes — owner **and staff** (`products_staff_view`, fixed this session) |
+| `selling_price` | ✅ Relational (`products.selling_price`, written by the same RPCs) | ❌ **No** — every render site (`p.sellingPrice`) still reads it off the JSON `db.products` blob, not `liveCatalogByClientId`/`bySku`. Not included in `LIVE_CATALOG_COLUMNS` or the new `products_staff_view` mirror. Same class of gap as the catalog-fields one above, just not closed yet. |
+| `cost_price` / `confidential_price` | ✅ Relational (`products`) | 🚫 Intentionally blob/UI-gated only — never meant to be in any realtime feed (staff must never see it; owner's existing Confidential Price flow is untouched) |
+| Full product object everywhere else it's rendered (most screens) | ⚠️ Still the JSON blob (`store_state.state.products[]`) | Only as fast as the blob save/load cycle (the slower path Phase 1 exists to move away from) — explicitly logged above as "not attempted in this pass" |
+| Sales/invoices | ✅ Relational (`sales`, `sale_items`) + `supabase_realtime` publication enabled | ⚠️ Enabled at the DB level, but **nothing in the client subscribes to it yet** — no live "new sale from another device" feed exists; this was never actually wired, only the publication flag was added |
+| Everything else (settings, customers, expenses, loans, staff-advice text, etc.) | JSON blob (`store_state.state`) | Owner/manager: yes, via the existing `store_state` realtime channel. Staff: yes, via `store_state_staff_view` (this session) |
+
+Net: the two things that were actually *causing* the flicker bug (stock
+count, and the "0 ↔ 5" race) are now fully relational and instantly synced
+for every role. Selling price and the sales-table realtime hookup are the
+two concrete items still left in the "JSON blob" or "enabled but unused"
+column — real, specific, not yet touched, not a vague "still some work
+left."
 
 ### ⬜ Phase 2: Login & session redesign
 - [ ] Permanent background session (survives app close/reopen; only a true

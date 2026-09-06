@@ -167,8 +167,33 @@ finished in this session (2026-09-06)._
     bug already fixed earlier in `StockAdjustView`, just never applied here.
 - [x] Verified after every change: `tsc --noEmit`, full test suite (26
       tests), static audit, production build — all clean.
-- [ ] **Not done yet, carried over from the prior session's list**: a
-      `sale_items` → `products` same-`store_id` defence-in-depth constraint.
+- [x] **`sale_items` → `products` same-`store_id` defence-in-depth
+      constraint — closed 2026-09-06 (this session)**: there's no direct
+      `store_id` column on `sale_items` to express this as a plain
+      composite foreign key across two joined tables, so it's enforced
+      with a `BEFORE INSERT OR UPDATE` trigger
+      (`enforce_sale_item_product_store_match()` /
+      `sale_items_product_store_match`) instead — a real DB-level
+      constraint that runs no matter which RPC/path writes the row, not
+      an application-level check that could be bypassed.
+  - Checked live data before adding it: 0 of 8 existing `sale_items` rows
+    with a non-null `product_id` mismatch their sale's `store_id` — safe
+    to roll out, nothing existing to break.
+  - **Actually tested against the live DB, not just deployed and assumed
+    working**: (1) a normal same-store insert — succeeded, confirming the
+    trigger doesn't interfere with real usage; (2) a genuine cross-store
+    insert (real second `stores` row + a product under it, not a fake
+    UUID that would fail for an unrelated reason) — the trigger correctly
+    raised `sale_items store mismatch: product ... belongs to a different
+    store than sale ...` and blocked it. All test rows (fake store,
+    product, sale_item) deleted immediately after; `sale_items` count
+    confirmed back to its original 8 afterward.
+  - Since the product's own locked-in decision is single-store-only for
+    now, this trigger can't actually fire in today's real usage — it's
+    insurance against a future bug (or future multi-store support)
+    silently mixing another store's product into a sale, not a fix for
+    an active problem.
+  - Migration: `supabase/migrations/20260906120000_sale_items_product_store_id_guard.sql`.
 - [x] **Full product catalog (photo, MRP, discount%, warranty, notes,
       compatible models, screen size, etc.) is now also relational — done
       this session, per the owner's explicit ask to close this gap**:
@@ -208,11 +233,38 @@ finished in this session (2026-09-06)._
     null on those 3 rows until the owner opens each in Edit Product and
     re-saves once. Every product added/edited from now on will have full
     data from the start.
-- [ ] **Owner needs to actually test this on a real device** — everything
-      above is verified against the live DB/repo and passes automated
-      checks, but the "sell from one device, see stock update on another
-      within ~1 second, no flicker" behaviour itself hasn't been watched
-      happen live yet. That's the one thing left before this can be ✅.
+- [x] **Full independent re-verification pass, 2026-09-06 (this session,
+      per this document's own ground rule — every earlier ✅/[x] item
+      above was re-checked directly against the live project, not
+      trusted)**:
+  - `products` table columns: `client_id`, `photo`, `mrp`,
+    `compatible_models`, `screen_size_inches`/`_max_inches`, and every
+    other catalog field genuinely present — read directly from
+    `information_schema.columns`, not assumed from a migration filename.
+  - `products`/`sales` genuinely both in the live `supabase_realtime`
+    publication — read directly from `pg_publication_tables`.
+  - `resolve_product_for_sale()`'s real live body re-read in full: uuid
+    match → `client_id` match → sku match (with `client_id` backfill) →
+    explicit `raise exception` on missing sku — matches every claim above
+    exactly, still true today.
+  - `upsert_product_catalog()`'s real live body re-read in full: exactly
+    one function overload exists (25 args, confirmed via `pg_proc`); the
+    `UPDATE` branch still never touches `stock_qty`; the `INSERT` branch
+    still uses `coalesce(p_stock_qty,0)` — the stock_qty=0 bug fix
+    documented below is still genuinely in place, not silently reverted.
+  - `npx tsc --noEmit`, `npx vitest run` (26/26), `npm run build` — all
+    re-run clean against the current `main` right before this update.
+- [ ] **Owner needs to actually test this on a real device — this is now
+      the ONLY thing left before Phase 1 can be marked ✅.** Everything
+      above (code, migrations, live DB structure, live function bodies)
+      has been independently verified twice now (2026-09-06, twice) and
+      passes every automated check available in this environment, but no
+      automated check can actually watch "sell from one device, see stock
+      update on another within ~1 second, no flicker" happen — that
+      requires two real devices and a human watching them, which only the
+      owner can do. Marking this ✅ without that would be exactly the
+      "silent I think this is fixed" claim this document's own ground
+      rules forbid.
 - [ ] **Technical detail, still open**: `resolve_product_for_sale()` now has
       `client_id`, but only products that go through a resolve call (sale,
       stock adjustment, purchase) get backfilled — a product that's never

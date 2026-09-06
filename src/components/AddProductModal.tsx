@@ -7,6 +7,8 @@ import { compressImageToDataUrl } from "../utils/imageCompress";
 import { uploadProductPhotoOrFallback, isStorageUrl } from "../services/photoStorage";
 import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
+import { isCloudConfigured } from "../services/supabaseClient";
+import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -420,6 +422,23 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     };
 
     db.products.push(product);
+
+    // Phase 1 (continued) — write the full catalog relationally too, not
+    // just to the local blob. Best-effort/non-blocking: the product is
+    // already saved locally above regardless of what happens here, and a
+    // failure falls back to the same offline-queue safety net every other
+    // cloud write already uses.
+    if (isCloudConfigured && storeId) {
+      const idempotencyKey = crypto.randomUUID();
+      upsertProductCatalog(storeId, product).catch(async (err) => {
+        console.warn("Product catalog cloud write failed; queueing for retry", err);
+        try {
+          await queueOfflineOperation("product", "products", { product }, idempotencyKey);
+        } catch {
+          // Local save already succeeded above; this is a best-effort mirror.
+        }
+      });
+    }
 
     // A brand-new product's starting stock must also exist as a FIFO batch,
     // or getAvailableStock (which sums stockBatches, not product.stock) sees

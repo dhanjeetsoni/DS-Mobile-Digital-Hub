@@ -45,6 +45,32 @@ obvious or quick.
 | UI redesign priority across screens | No specific order requested — will go through screens systematically (see Phase 5) |
 | Testing cadence | Owner will do a full test pass after each phase is reported complete, not continuously mid-phase |
 
+## Decisions locked in with the owner — round 2 (2026-09-05, AI + advanced features)
+
+| Topic | Decision |
+|---|---|
+| AI Photo Scan accuracy | Actively used and valued — needs to be made more accurate, not just kept as-is |
+| Product photos | Add support for **1 or 2 photos** (front + back) when adding a product. AI should auto-fill details from either 1 or 2 photos. Product list/stock view shows however many photos were given (1 if 1, both if 2) |
+| Gemini AI key management | Keys sometimes hit limits/errors — needs better pooling/fallback so AI features don't just fail |
+| Photo Stock Finder | Keep and improve |
+| AI price suggestion | Add — when adding a product, AI should suggest a selling price/MRP based on market data, not fully manual |
+| Bulk Excel import | Not needed — one-by-one add is fine, focus effort on making AI scan itself better instead |
+| Auto reorder to supplier | Not needed |
+| Customer-facing bill delivery | Telegram to the owner's bot only — no WhatsApp/SMS to customers needed |
+| Staff performance tracking | Yes — track each staff member's sales (a leaderboard/summary) |
+| Data export | Yes — invoices/customers exportable to Excel/PDF for the owner's records/accountant |
+| Customer purchase history | Yes — a customer's profile should show everything they've ever bought |
+| Repair job tracking | Current behaviour is fine, no change requested |
+| Warranty claims | Yes — needs a proper tracked process with reminders, not just a note |
+| Biometric unlock | Yes, fingerprint unlock in addition to PIN (PIN stays as fallback) |
+| Auto-lock on idle | Not needed — only lock when the app is actually closed/backgrounded |
+| Remote session kill | Yes — owner should be able to force-logout a lost/stolen device's session from the Windows app |
+| Price change history | Yes — track when a product's price changed and to what |
+| Receipt branding | Yes — shop logo/name/address customizable on the printed/PDF receipt |
+| Staff access window | Owner needs a **configurable control** (from Windows or in-app) over staff access: what time range they can use the app, how many minutes of access, and which sections/data they're allowed to see — not a fixed rule, an owner-adjustable setting |
+| Refund/return approval | Yes — a staff-initiated return/refund needs owner approval before it completes |
+| Customer birthday/anniversary marketing reminders | Not needed |
+
 ---
 
 ## Phases
@@ -111,7 +137,25 @@ obvious or quick.
 - [ ] In-app auto-update check (APK self-update prompt)
 - [ ] Automatic crash reporting
 
-### ⬜ Phase 6: Final pass
+### ⬜ Phase 6: AI & advanced feature enhancements
+- [ ] AI Photo Scan: improve accuracy, support 1 or 2 photos (front/back) with
+      auto-fill from either, product view shows all photos provided
+- [ ] AI-based selling price/MRP suggestion when adding a product
+- [ ] Better Gemini key pool handling (fallback/retry instead of hard failures)
+- [ ] Improve Photo Stock Finder matching
+- [ ] Staff performance tracking (sales leaderboard/summary per staff)
+- [ ] Excel/PDF export for invoices and customers
+- [ ] Customer profile: full purchase history
+- [ ] Warranty claims: proper tracked workflow with reminders
+- [ ] Biometric (fingerprint) unlock alongside PIN
+- [ ] Remote session kill (owner force-logs-out a device from Windows)
+- [ ] Product price change history log
+- [ ] Customizable receipt branding (shop logo/name/address)
+- [ ] Owner-configurable staff access window (time range, duration, which
+      sections/data are visible)
+- [ ] Refund/return requires owner approval before it completes
+
+### ⬜ Phase 7: Final pass
 - [ ] Full regression test across Windows + both Android apps
 - [ ] Clean up dead code / old migrations
 - [ ] Update this document — everything checked off, or explicitly listed as

@@ -155,7 +155,68 @@ obvious or quick.
       sections/data are visible)
 - [ ] Refund/return requires owner approval before it completes
 
-### ⬜ Phase 7: Final pass
+### ⬜ Phase 8: Amazon/Flipkart-style product experience
+- [ ] App opens directly into the **Stock/Inventory section** by default
+      (not the dashboard)
+- [ ] Product list redesigned as e-commerce style cards (photo-forward,
+      like Amazon/Flipkart)
+- [ ] AI auto-fills full specifications for a product when added (extends
+      Phase 6's photo-scan work)
+- [ ] AI sources/generates good-quality product photos automatically (not
+      only what the owner uploads)
+- [ ] All product photos permanently stored on Cloudflare R2 (durable,
+      never lost)
+- [ ] Dedicated **product detail page** per product (tap a product →
+      full page), showing MRP (struck through), discount %, and selling
+      price, e-commerce style
+- [ ] "Confidential Price" button available directly on this page
+- [ ] "Add to Cart" **and** "Buy Now" (direct checkout) both available from
+      the product page, like Amazon
+- [ ] AI auto-designs the rest of the product page layout (feature
+      highlights, photo gallery) per product, saved permanently so it
+      loads instantly next time (including offline)
+
+### ⬜ Phase 9: Real universal search (+ AI search, glass-specific intelligence)
+- [ ] Fix the core bug: search currently only searches *within* whatever
+      category tab you're already in (e.g. Tempered Glass) — must search
+      **all products, all categories, everywhere**, like Amazon/Flipkart
+- [ ] Add AI-powered search on top of normal keyword search — runs by
+      default alongside plain search, not instead of it
+- [ ] Search by phone **model number** must surface matching glass/cases
+      even if the product title doesn't literally contain that model
+- [ ] Clicking a matched model shows **all** compatible glass/cover models
+      for that phone
+- [ ] When adding a tempered-glass product, AI auto-fetches and
+      **permanently saves** the actual screen size of the phone model it's
+      for (e.g. Realme 7 → 6.5")
+- [ ] When a search has no exact model match (e.g. "Realme 7 glass" and no
+      glass is tagged for that exact model), AI suggests the closest
+      size-compatible glass instead, and explains why (e.g. "Realme 7 is
+      6.5\" — this glass is for 6.4\"–6.5\" screens, likely fits")
+
+### ⬜ Phase 10: Product-specific invoice rules & quotes (AI-driven)
+- [ ] Each product/category (glass, mobile, accessory, repair, etc.) has
+      its **own** terms/rules text (warranty, return policy, etc.)
+- [ ] Invoice shows **only** the rules relevant to what was actually sold
+      on that invoice — not a single generic rules block for everything
+- [ ] Same per-category logic for the customer-facing "quote"/feel-good
+      line printed on the invoice
+- [ ] AI decides/generates the right rules+quote per product by default,
+      running automatically in the background — no manual selection needed
+      unless the owner wants to override
+
+### ⬜ Phase 11: Offline catalog download & flexible AI provider keys
+- [ ] A "Download" section: on a fresh login (new device), the owner/staff
+      can trigger a download of the full catalog + product pages so
+      everything (including the AI-generated product pages from Phase 8)
+      works offline afterward
+- [ ] Support adding **any number of AI API keys from any provider** (not
+      locked to Gemini) — owner can plug in their own keys from whichever
+      AI company, and the app uses them
+- [ ] Directly extends Phase 6's "better Gemini key pooling" item — the
+      pool should be provider-agnostic, not Gemini-only
+
+### ⬜ Phase 12: Final pass
 - [ ] Full regression test across Windows + both Android apps
 - [ ] Clean up dead code / old migrations
 - [ ] Update this document — everything checked off, or explicitly listed as

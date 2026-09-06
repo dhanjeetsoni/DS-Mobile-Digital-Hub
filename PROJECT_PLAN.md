@@ -102,6 +102,18 @@ obvious or quick.
       Android, or staff Android)
 - [ ] Re-verify: sell from any one device → stock updates on all others
       instantly, invoice fires to Telegram silently, every time, no misses
+- [ ] **Technical detail from research**: `resolve_product_for_sale()`
+      currently dedupes only by SKU — every product going forward must
+      always carry a SKU (already true for the in-app "Add Product" flow),
+      and the function should also backfill a `client_id` column (matching
+      the pattern already used by `suppliers`/`customers`) so a product's
+      *local* id and its *real* id are permanently linked, not just
+      re-derived by SKU lookup every time
+- [ ] **My own addition**: add a database constraint/trigger so a
+      `sale_items` row can never reference a `products.id` that doesn't
+      belong to the same `store_id` — a defence-in-depth check so a future
+      bug like the "invalid uuid" one fails immediately and loudly in
+      testing, instead of silently reaching production
 
 ### ⬜ Phase 2: Login & session redesign
 - [ ] Permanent background session (survives app close/reopen; only a true
@@ -155,7 +167,7 @@ obvious or quick.
       sections/data are visible)
 - [ ] Refund/return requires owner approval before it completes
 
-### ⬜ Phase 8: Amazon/Flipkart-style product experience
+### ⬜ Phase 7: Amazon/Flipkart-style product experience
 - [ ] App opens directly into the **Stock/Inventory section** by default
       (not the dashboard)
 - [ ] Product list redesigned as e-commerce style cards (photo-forward,
@@ -176,7 +188,7 @@ obvious or quick.
       highlights, photo gallery) per product, saved permanently so it
       loads instantly next time (including offline)
 
-### ⬜ Phase 9: Real universal search (+ AI search, glass-specific intelligence)
+### ⬜ Phase 8: Real universal search (+ AI search, glass-specific intelligence)
 - [ ] Fix the core bug: search currently only searches *within* whatever
       category tab you're already in (e.g. Tempered Glass) — must search
       **all products, all categories, everywhere**, like Amazon/Flipkart
@@ -193,8 +205,17 @@ obvious or quick.
       glass is tagged for that exact model), AI suggests the closest
       size-compatible glass instead, and explains why (e.g. "Realme 7 is
       6.5\" — this glass is for 6.4\"–6.5\" screens, likely fits")
+- [ ] **My own addition**: build this as a proper searchable **phone-model
+      → screen-size** reference table in the database (not just an AI call
+      every time), so once a model's size is looked up once, every future
+      search for that model is instant and doesn't re-spend an AI call —
+      AI fills gaps in this table over time instead of being asked the same
+      question repeatedly
+- [ ] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
+      should still match "Realme"/"iPhone") since shop staff typing fast
+      under pressure will misspell things
 
-### ⬜ Phase 10: Product-specific invoice rules & quotes (AI-driven)
+### ⬜ Phase 9: Product-specific invoice rules & quotes (AI-driven)
 - [ ] Each product/category (glass, mobile, accessory, repair, etc.) has
       its **own** terms/rules text (warranty, return policy, etc.)
 - [ ] Invoice shows **only** the rules relevant to what was actually sold
@@ -205,7 +226,7 @@ obvious or quick.
       running automatically in the background — no manual selection needed
       unless the owner wants to override
 
-### ⬜ Phase 11: Offline catalog download & flexible AI provider keys
+### ⬜ Phase 10: Offline catalog download & flexible AI provider keys
 - [ ] A "Download" section: on a fresh login (new device), the owner/staff
       can trigger a download of the full catalog + product pages so
       everything (including the AI-generated product pages from Phase 8)
@@ -216,7 +237,55 @@ obvious or quick.
 - [ ] Directly extends Phase 6's "better Gemini key pooling" item — the
       pool should be provider-agnostic, not Gemini-only
 
-### ⬜ Phase 12: Final pass
+### ⬜ Phase 11: Windows app theme & polish fixes
+_Root-caused by reading the actual theme code, not a guess:_
+- [ ] **Startup flicker, exact cause found**: the saved theme lives in
+      `localStorage['ds-nexus.appearance']`, but it's only applied by
+      `startAppearanceSync()` inside `main.tsx` — which runs *after* the JS
+      bundle loads and the browser has already painted once with whatever
+      default colours the CSS falls back to. Fix: add a tiny synchronous
+      script at the very top of `index.html`'s `<head>` (before any
+      stylesheet/script) that reads that same localStorage key and sets
+      `data-theme`/`data-mode` on `<html>` immediately — this is the
+      standard fix for "flash of wrong theme" and needs no framework change
+- [ ] **Hardcoded colour audit**: found 21 places across components using
+      raw colours (`bg-white`, `text-black`, literal hex codes) instead of
+      the theme's CSS variables — these are exactly what looks "ajeeb" in
+      some themes/dark mode while everything else looks right. Go through
+      each one and convert it to the theme-aware variable
+- [ ] Re-test all themes (light + dark, every preset in Appearance Studio)
+      after the audit, on both Windows and Android, since Phase 8's new
+      product-card UI will add more surface area that needs to respect
+      the same variables from day one
+
+### ⬜ Phase 12: Performance & startup speed
+- [ ] Measure and reduce Windows/Android cold-start time (bundle size,
+      what blocks first paint) — every extra second at launch is a second
+      the owner/staff are staring at a blank/loading screen
+- [ ] Lazy-load rarely-used screens (Reports, Appearance Studio, AI tools)
+      instead of bundling everything into the initial load
+- [ ] Audit the 20+ product photos / R2 uploads path (Phase 8) for
+      compression before upload, so the catalog doesn't get slow to load
+      as more products get AI-generated photos
+
+### ⬜ Phase 13: A safety net so this doesn't happen again
+_This is my own addition, not something explicitly asked for — but after
+the last two days of whack-a-mole fixes (one fix causing a new bug, twice),
+I think it's necessary:_
+- [ ] Add a small set of automated checks for the highest-risk paths
+      (a sale completing end-to-end, a product resolving to a real id, the
+      version-conflict retry not looping) that run before any build is
+      shipped — so a regression like the 1,858-row runaway gets caught
+      before it reaches the live store, not after
+- [ ] A simple **owner-facing "System Health" screen** (Windows + Android):
+      pending sync queue size, last successful Telegram send, last
+      successful cloud save — so if something breaks, you see it
+      immediately instead of noticing days later from a customer complaint
+- [ ] Staging/test mode: a way to try a new build against a *copy* of the
+      real data instead of the live store, for anything touching sales or
+      stock
+
+### ⬜ Phase 14: Final pass
 - [ ] Full regression test across Windows + both Android apps
 - [ ] Clean up dead code / old migrations
 - [ ] Update this document — everything checked off, or explicitly listed as

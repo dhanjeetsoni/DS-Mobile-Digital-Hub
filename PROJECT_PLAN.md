@@ -181,7 +181,12 @@ obvious or quick.
 - [ ] Dedicated **product detail page** per product (tap a product →
       full page), showing MRP (struck through), discount %, and selling
       price, e-commerce style
-- [ ] "Confidential Price" button available directly on this page
+- [ ] "Confidential Price" button available directly on this page —
+      **reuse the existing flow** (`confidentialPrice.ts` + the
+      `telegram-connect` Edge Function): staff tap it, owner gets an
+      Approve/Deny prompt on Telegram, price reveals for 5 minutes on
+      approval, all in realtime already. This page just needs to surface
+      the button, not rebuild the approval system
 - [ ] "Add to Cart" **and** "Buy Now" (direct checkout) both available from
       the product page, like Amazon
 - [ ] AI auto-designs the rest of the product page layout (feature
@@ -214,8 +219,33 @@ obvious or quick.
 - [ ] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
       should still match "Realme"/"iPhone") since shop staff typing fast
       under pressure will misspell things
+- [ ] **Discovered while researching**: a `upsert_screen_size_cache()`
+      function and backing cache table **already exist** in the database —
+      the phone-model → screen-size groundwork above is partially built
+      already. Needs auditing (is it actually wired into the Add Product
+      flow yet? how many models does it already know?) rather than built
+      from scratch
 
-### ⬜ Phase 9: Product-specific invoice rules & quotes (AI-driven)
+### ⬜ Phase 9: Security hardening (found via a live audit, 2026-09-06)
+_I ran a security scan against the live database while researching Phase 1
+— found a few real gaps worth closing, not asked for but worth doing:_
+- [ ] Several money-moving functions (`save_store_state`, `record_return`,
+      `record_exchange`, `record_customer_payment`, `record_supplier_payment`,
+      `upsert_customer`, `upsert_supplier`, `enqueue_invoice_telegram`,
+      `handle_new_user`) are currently callable by **`anon`** — meaning a
+      request that isn't even logged in can attempt to call them. Each one
+      does check the caller's role internally before doing anything, so
+      this hasn't been exploited, but it's needless exposed surface area
+      that should be locked down to `authenticated` only, as defence in
+      depth
+- [ ] Enable Supabase Auth's **leaked-password protection** (checks new
+      passwords against known breached-password lists) — currently off,
+      one toggle to turn on
+- [ ] While in there: review whether `resolve_product_for_sale` and
+      similar RPCs need any additional rate-limiting given they're callable
+      directly by any authenticated staff account
+
+### ⬜ Phase 10: Product-specific invoice rules & quotes (AI-driven)
 - [ ] Each product/category (glass, mobile, accessory, repair, etc.) has
       its **own** terms/rules text (warranty, return policy, etc.)
 - [ ] Invoice shows **only** the rules relevant to what was actually sold
@@ -226,7 +256,7 @@ obvious or quick.
       running automatically in the background — no manual selection needed
       unless the owner wants to override
 
-### ⬜ Phase 10: Offline catalog download & flexible AI provider keys
+### ⬜ Phase 11: Offline catalog download & flexible AI provider keys
 - [ ] A "Download" section: on a fresh login (new device), the owner/staff
       can trigger a download of the full catalog + product pages so
       everything (including the AI-generated product pages from Phase 8)
@@ -236,8 +266,18 @@ obvious or quick.
       AI company, and the app uses them
 - [ ] Directly extends Phase 6's "better Gemini key pooling" item — the
       pool should be provider-agnostic, not Gemini-only
+- [ ] **Technical detail from research**: the existing pool
+      (`gemini_api_keys` table + the 1,418-line `ai-gateway` Edge Function)
+      already has solid rotation/cooldown/failure-tracking — it's just
+      hardcoded to Gemini's specific request/response format end to end.
+      The right way to extend it: add a `provider` column to the key table,
+      and refactor the Edge Function's actual HTTP call into a small
+      per-provider adapter (Gemini/OpenAI/Anthropic/etc. each format
+      requests and parse responses differently) behind the same rotation
+      logic — not a rewrite of the rotation system itself, which already
+      works well
 
-### ⬜ Phase 11: Windows app theme & polish fixes
+### ⬜ Phase 12: Windows app theme & polish fixes
 _Root-caused by reading the actual theme code, not a guess:_
 - [ ] **Startup flicker, exact cause found**: the saved theme lives in
       `localStorage['ds-nexus.appearance']`, but it's only applied by
@@ -258,7 +298,7 @@ _Root-caused by reading the actual theme code, not a guess:_
       product-card UI will add more surface area that needs to respect
       the same variables from day one
 
-### ⬜ Phase 12: Performance & startup speed
+### ⬜ Phase 13: Performance & startup speed
 - [ ] Measure and reduce Windows/Android cold-start time (bundle size,
       what blocks first paint) — every extra second at launch is a second
       the owner/staff are staring at a blank/loading screen
@@ -268,7 +308,7 @@ _Root-caused by reading the actual theme code, not a guess:_
       compression before upload, so the catalog doesn't get slow to load
       as more products get AI-generated photos
 
-### ⬜ Phase 13: A safety net so this doesn't happen again
+### ⬜ Phase 14: A safety net so this doesn't happen again
 _This is my own addition, not something explicitly asked for — but after
 the last two days of whack-a-mole fixes (one fix causing a new bug, twice),
 I think it's necessary:_
@@ -285,7 +325,7 @@ I think it's necessary:_
       real data instead of the live store, for anything touching sales or
       stock
 
-### ⬜ Phase 14: Final pass
+### ⬜ Phase 15: Final pass
 - [ ] Full regression test across Windows + both Android apps
 - [ ] Clean up dead code / old migrations
 - [ ] Update this document — everything checked off, or explicitly listed as

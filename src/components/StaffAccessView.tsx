@@ -36,6 +36,7 @@ const CopyButton: React.FC<{ value: string }> = ({ value }) => {
 type AccessMode = "no_restriction" | "full_day" | "timed";
 
 const accessModeLabel = (s: StaffProfile) => {
+  if (s.role === "manager") return s.access_enabled ? "Full Access (Owner-level)" : "Access OFF";
   if (!s.access_enabled) return "Access OFF";
   if (s.access_mode === "no_restriction") return "No time limit";
   if (s.access_mode === "full_day") return "Full day (aaj tak)";
@@ -70,14 +71,19 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<StaffProfile | null>(null);
-  const [form, setForm] = useState({ staffName: "", loginId: "", password: "" });
+  const [form, setForm] = useState<{ staffName: string; loginId: string; password: string; role: "staff" | "manager" }>({
+    staffName: "",
+    loginId: "",
+    password: "",
+    role: "staff",
+  });
   const [resetPassword, setResetPassword] = useState("");
   const [saving, setSaving] = useState(false);
   // Step 1.2: shown once, right after a staff login is created, so the owner
   // can copy/note the auto-generated ID + password before closing the modal
   // (the password itself is hashed server-side and can never be shown again
   // — only "Reset Password" can set a new one after this).
-  const [createdReveal, setCreatedReveal] = useState<{ loginId: string; password: string; staffName: string } | null>(null);
+  const [createdReveal, setCreatedReveal] = useState<{ loginId: string; password: string; staffName: string; role: "staff" | "manager" } | null>(null);
   // Step 1.6 (finishing touch): "Regenerate Password" must be a one-click
   // random generate, never the Owner typing a new password by hand — same
   // rule as account creation. Reusing the reveal pattern so the new
@@ -113,7 +119,7 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
   }, [storeId]);
 
   const openAddModal = () => {
-    setForm({ staffName: "", loginId: generateStaffLoginId(), password: generateStaffPassword() });
+    setForm({ staffName: "", loginId: generateStaffLoginId(), password: generateStaffPassword(), role: "staff" });
     setCreatedReveal(null);
     setIsAddOpen(true);
   };
@@ -124,7 +130,7 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.staffName.trim()) {
-      toast("Staff ka naam bharo.", "amber");
+      toast("Naam bharo.", "amber");
       return;
     }
     setSaving(true);
@@ -137,8 +143,8 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
     for (let tries = 0; tries < 5; tries++) {
       try {
         await createStaffAccount(attempt);
-        setCreatedReveal({ loginId: attempt.loginId, staffName: attempt.staffName, password: attempt.password });
-        setForm({ staffName: "", loginId: "", password: "" });
+        setCreatedReveal({ loginId: attempt.loginId, staffName: attempt.staffName, password: attempt.password, role: attempt.role });
+        setForm({ staffName: "", loginId: "", password: "", role: "staff" });
         await refresh();
         setSaving(false);
         return;
@@ -164,6 +170,21 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
       toast(`${member.staff_name || member.staff_login_id} ka access OFF kar diya — ab wo login nahi kar payega, aur agar already andar hai to turant logout ho jayega.`, "amber");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Access OFF karne mein dikkat hui.", "red");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /** Manager (owner-level) rows have no time-window concept — a simple
+   * one-click re-enable instead of opening the staff Grant Access modal. */
+  const handleQuickEnable = async (member: StaffProfile) => {
+    setBusyId(member.id);
+    try {
+      await grantStaffAccess(member.id, { mode: "no_restriction" });
+      await refresh();
+      toast(`${member.staff_name || member.staff_login_id} ka access wapas ON kar diya.`, "green");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Access ON karne mein dikkat hui.", "red");
     } finally {
       setBusyId(null);
     }
@@ -233,7 +254,7 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
   if (!isCloudConfigured) {
     return (
       <div className="section">
-        <h2><Users size={16} style={{ verticalAlign: "-2px", marginRight: "6px" }} />Staff Access Manager</h2>
+        <h2><Users size={16} style={{ verticalAlign: "-2px", marginRight: "6px" }} />Android Access Area</h2>
         <div className="notice" style={{ marginTop: 12 }}>
           Ye feature cloud sync maangta hai. Pehle Cloud &amp; Security se sign in / setup karo, phir yahan se staff
           Login ID &amp; Password bana paoge.
@@ -248,7 +269,7 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
   if (storeLoading) {
     return (
       <div className="section">
-        <h2><Users size={16} style={{ verticalAlign: "-2px", marginRight: "6px" }} />Staff Access Manager</h2>
+        <h2><Users size={16} style={{ verticalAlign: "-2px", marginRight: "6px" }} />Android Access Area</h2>
         <div className="card" style={{ padding: 20, textAlign: "center", color: "var(--ink-soft)", marginTop: 12 }}>
           <Loader2 size={18} className="spin" style={{ marginBottom: 8 }} /><br />
           Store status check ho raha hai…
@@ -260,7 +281,7 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
   if (!storeId) {
     return (
       <div className="section">
-        <h2>Staff Access Manager</h2>
+        <h2>Android Access Area</h2>
         <div className="notice" style={{ marginTop: 12 }}>Store abhi set nahi hua — Cloud &amp; Security se pehle sign in karo.</div>
       </div>
     );
@@ -269,24 +290,26 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
   return (
     <div className="section">
       <div className="section-head">
-        <h2><Users size={16} style={{ verticalAlign: "-2px", marginRight: "6px" }} />Staff Access Manager ({staff.length})</h2>
+        <h2><Users size={16} style={{ verticalAlign: "-2px", marginRight: "6px" }} />Android Access Area ({staff.length})</h2>
         <div style={{ display: "flex", gap: "8px" }}>
           <button className="btn sm" onClick={refresh} disabled={loading}>
             {loading ? <Loader2 size={14} className="spin" /> : <RefreshCcw size={14} />} Refresh
           </button>
           <button className="btn primary sm" onClick={openAddModal}>
-            <UserPlus size={14} /> Add Staff
+            <UserPlus size={14} /> Generate ID/Password
           </button>
         </div>
       </div>
 
       <div className="notice" style={{ marginTop: 4, marginBottom: 12 }}>
         <ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: "4px" }} />
-        Yahan se banaya gaya Login ID &amp; Password staff ko Android app ke "Staff Area" login screen mein daalna
-        hai. Har baar "Grant Access" karne par sirf usi waqt se aage ki sales/galla staff ko dikhti hai — usse
-        pehle ka purana data hidden rehta hai (product list hamesha A-Z dikhti hai). Time khatam hote hi ya
-        aap "Turn OFF" karte hi wo turant logout ho jaata hai — chahe uska phone offline hi kyun na ho, device
-        ka apna clock time khatam hone par khud hi logout kar deta hai.
+        Yahan se banaya gaya Login ID &amp; Password app ke login screen mein daalna hai — Gmail/email ki
+        zaroorat nahi hai. Do tarah ke login generate kar sakte ho: <b>Owner-level</b> (full access, khud
+        Gmail use kiye bina apna Android app login) aur <b>Staff</b> (limited, time-boxed access). Staff ke
+        liye — har baar "Grant Access" karne par sirf usi waqt se aage ki sales/galla dikhti hai, purana data
+        hidden rehta hai. Time khatam hote hi ya "Turn OFF" karte hi turant logout ho jaata hai, chahe phone
+        offline hi kyun na ho — device ka apna clock time khatam hone par khud hi logout kar deta hai.
+        Login karne ke baad session device par save rehta hai — dobara app kholne par login nahi maangta.
       </div>
 
       {staff.length === 0 && !loading && (
@@ -300,7 +323,8 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
           <table>
             <thead>
               <tr>
-                <th>Staff Name</th>
+                <th>Name</th>
+                <th>Role</th>
                 <th>Login ID</th>
                 <th>Status</th>
                 <th>Created</th>
@@ -313,12 +337,17 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
               {staff.map((s) => (
                 <tr key={s.id}>
                   <td><b>{s.staff_name || "—"}</b></td>
+                  <td>
+                    <span className={`badge ${s.role === "manager" ? "" : ""}`} style={{ fontWeight: 600, color: s.role === "manager" ? "var(--blue, #2563eb)" : "var(--ink-soft)" }}>
+                      {s.role === "manager" ? "Owner-level" : "Staff"}
+                    </span>
+                  </td>
                   <td className="hint">{s.staff_login_id}</td>
                   <td>
                     <span style={{ color: s.access_enabled ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
                       {s.access_enabled ? "● " : "● "}{accessModeLabel(s)}
                     </span>
-                    {s.access_enabled && s.visibility_from && (
+                    {s.role !== "manager" && s.access_enabled && s.visibility_from && (
                       <div className="hint">Galla/sales sirf {new Date(s.visibility_from).toLocaleString()} ke baad se dikhti hai</div>
                     )}
                   </td>
@@ -331,12 +360,16 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
                         <button className="btn sm danger" onClick={() => handleRevoke(s)} disabled={busyId === s.id}>
                           {busyId === s.id ? <Loader2 size={12} className="spin" /> : <Power size={12} />} Turn OFF
                         </button>
+                      ) : s.role === "manager" ? (
+                        <button className="btn sm primary" onClick={() => handleQuickEnable(s)} disabled={busyId === s.id}>
+                          {busyId === s.id ? <Loader2 size={12} className="spin" /> : <Power size={12} />} Turn ON
+                        </button>
                       ) : (
                         <button className="btn sm primary" onClick={() => openGrantModal(s)} disabled={busyId === s.id}>
                           <Clock size={12} /> Grant Access
                         </button>
                       )}
-                      {s.access_enabled && (
+                      {s.role !== "manager" && s.access_enabled && (
                         <button className="btn sm" onClick={() => openGrantModal(s)}>
                           <Clock size={12} /> Change Access Window
                         </button>
@@ -360,16 +393,29 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
         <div className="modal-backdrop" onMouseDown={() => setIsAddOpen(false)}>
           <div className="modal" style={{ maxWidth: 420 }} onMouseDown={(e) => e.stopPropagation()}>
             <div className="modal-head">
-              <h3 style={{ margin: 0 }}><Plus size={16} /> New Staff Login</h3>
+              <h3 style={{ margin: 0 }}><Plus size={16} /> New Login — ID/Password</h3>
               <button className="icon-btn" onClick={() => setIsAddOpen(false)}>&times;</button>
             </div>
             <form onSubmit={handleCreate}>
               <div className="field">
-                <label>Staff Name</label>
+                <label>Kis role ke liye generate karna hai?</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}>
+                    <input type="radio" checked={form.role === "manager"} onChange={() => setForm((f) => ({ ...f, role: "manager" }))} />
+                    Owner — full access (sab kuch dikhega, jaisa Windows par)
+                  </label>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}>
+                    <input type="radio" checked={form.role === "staff"} onChange={() => setForm((f) => ({ ...f, role: "staff" }))} />
+                    Staff — limited, owner-controlled access
+                  </label>
+                </div>
+              </div>
+              <div className="field">
+                <label>{form.role === "manager" ? "Owner Name" : "Staff Name"}</label>
                 <input autoFocus value={form.staffName} onChange={(e) => setForm({ ...form, staffName: e.target.value })} placeholder="e.g. Rahul" />
               </div>
               <div className="field">
-                <label>Staff ID (system-generated)</label>
+                <label>Login ID (system-generated)</label>
                 <div style={{ display: "flex", gap: 6 }}>
                   <input value={form.loginId} readOnly style={{ fontFamily: "monospace", fontWeight: 600, letterSpacing: 0.5 }} />
                   <button type="button" className="btn sm" onClick={regenerateLoginId} title="Naya ID generate karo">
@@ -391,7 +437,7 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
               <div className="modal-actions">
                 <button type="button" className="btn" onClick={() => setIsAddOpen(false)}>Cancel</button>
                 <button type="submit" className="btn primary" disabled={saving}>
-                  {saving ? <Loader2 size={15} className="spin" /> : <UserPlus size={15} />} {saving ? "Creating…" : "Create Staff Login"}
+                  {saving ? <Loader2 size={15} className="spin" /> : <UserPlus size={15} />} {saving ? "Creating…" : "Create Login"}
                 </button>
               </div>
             </form>

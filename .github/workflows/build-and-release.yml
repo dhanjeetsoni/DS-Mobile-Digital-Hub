@@ -103,7 +103,15 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        variant: [staff, owner]
+        # 2026-09-05: "mobile" is the new unified "DS Mobile" APK — one app,
+        # same login screen as Windows (VITE_APP_VARIANT falls through to
+        # "full"/"choose" for any value other than "staff"/"owner", so this
+        # needs no special-casing below). Whoever signs in with an Android
+        # Access Area Login ID/Password gets the access their role grants —
+        # Staff or Owner-level — no separate APK needed anymore. "staff" and
+        # "owner" dedicated builds are kept for now for anyone already using
+        # them; "mobile" is the one to hand out going forward.
+        variant: [staff, owner, mobile]
     steps:
       - uses: actions/checkout@v6
 

@@ -1,0 +1,12 @@
+{
+  "productName": "DS Mobile",
+  "identifier": "com.dsmobile.digitalhub",
+  "app": {
+    "windows": []
+  },
+  "bundle": {
+    "android": {
+      "minSdkVersion": 24
+    }
+  }
+}

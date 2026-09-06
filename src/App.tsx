@@ -319,11 +319,20 @@ export default function App() {
     try {
       const result = await staffSignIn(staffLoginId.trim(), staffLoginPassword);
       if (result.status === "ok") {
-        showToast(`Welcome, ${result.profile?.staff_name || staffLoginId}!`, "green");
+        const isFullAccess = result.profile?.role === "manager";
+        showToast(
+          isFullAccess
+            ? `Welcome! Full access signed in.`
+            : `Welcome, ${result.profile?.staff_name || staffLoginId}!`,
+          "green"
+        );
         // The Supabase session is now persisted to local storage by
         // supabase-js itself; reloading lets the existing bootstrap effect
         // (cloud profile load, realtime channel, offline queue flush) pick
-        // it up the normal way instead of duplicating that logic here.
+        // it up the normal way instead of duplicating that logic here — the
+        // bootstrap effect already sets ownerMode true for role
+        // owner/manager, so a "manager" (full-access) Android Access Area
+        // login lands straight in the full app, no separate PIN needed.
         window.location.reload();
         return;
       }
@@ -580,8 +589,40 @@ export default function App() {
         }
         setCloudStatus("online");
         setCloudReady(true);
+        // 2026-09-05 fix: a valid cloud session (real owner Cloud Sign In,
+        // or a "manager" full-access Login ID/Password from the Android
+        // Access Area) used to still hit the Owner Device PIN screen on
+        // every single app relaunch, with no way to skip it — "baar baar
+        // login" even though the account was already authenticated.
+        // Now: if this shop has never set an Owner Device PIN, a valid
+        // owner/manager cloud session skips the PIN screen and opens
+        // straight into the app, same relaunch behaviour as any other app.
+        // Setting a PIN in Settings brings the lock screen back — the PIN
+        // is opt-in, not mandatory.
+        if ((profile.role === "owner" || profile.role === "manager") && !remote?.state?.settings?.ownerPasscode) {
+          setGateUnlocked(true);
+        }
         if (profile.role !== "staff") {
           channel = supabase.channel(`store-state-${profile.store_id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'store_state', filter: `store_id=eq.${profile.store_id}` }, (payload: any) => {
+            const row = payload.new;
+            if (row?.state) {
+              setCloudVersion(Number(row.version || 0));
+              setDb(prev => ({ ...prev, ...row.state, settings: { ...prev.settings, ...(row.state.settings || {}) } }));
+            }
+          }).subscribe();
+        } else {
+          // 2026-09-05 fix: staff devices were never getting instant
+          // cross-device updates — realtime was skipped for them entirely.
+          // They can't subscribe to raw `store_state` (it has confidential
+          // fields like purchase price / lender data), but a redacted
+          // realtime mirror already exists server-side for exactly this —
+          // `store_state_staff_view`, kept in sync by a DB trigger, same
+          // redaction as the load_store_state_for_user() RPC (see migration
+          // 20260831064309_realtime_store_state_sync_v23.sql). Subscribing
+          // here is the missing wire-up: now a sale/stock change from
+          // Windows or another device reaches every staff Android device
+          // instantly, with no confidential data ever touching the socket.
+          channel = supabase.channel(`store-state-staff-${profile.store_id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'store_state_staff_view', filter: `store_id=eq.${profile.store_id}` }, (payload: any) => {
             const row = payload.new;
             if (row?.state) {
               setCloudVersion(Number(row.version || 0));
@@ -3359,8 +3400,8 @@ export default function App() {
             <div className="gate-options">
               <div className="gate-option staff" onClick={handleGateStaffAreaTap}>
                 <div className="icon-wrap"><Users size={24} /></div>
-                <h3>Staff Area</h3>
-                <p>Quick access for daily sales &amp; billing. Selling prices only — no financial reports.</p>
+                <h3>Login (ID / Password)</h3>
+                <p>Android Access Area se mila Login ID + Password daalo — Staff ya Owner-level, dono is se sign in hote hain.</p>
                 <ArrowRightIcon size={18} className="go-arrow" color="#60a5fa" />
               </div>
               <div className="gate-option owner" onClick={() => setGateStage("ownerAuth")}>
@@ -3433,8 +3474,8 @@ export default function App() {
             <div className="gate-auth-head">
               <div className="warn-badge" style={{ background: "#1d4ed8" }}><Users size={22} /></div>
               <div>
-                <h3>Staff Login</h3>
-                <p>Apni shop se mila Login ID &amp; Password daalo</p>
+                <h3>Login</h3>
+                <p>Android Access Area se mila Login ID &amp; Password daalo (Staff ya Owner-level)</p>
               </div>
             </div>
 

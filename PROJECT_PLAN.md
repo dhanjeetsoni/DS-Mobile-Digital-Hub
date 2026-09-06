@@ -12,6 +12,14 @@ obvious or quick.
 - One phase at a time. Ask before starting the next.
 - Every code change → typechecked → committed → pushed to GitHub → (if it
   touches the database) migration applied to the live Supabase project.
+- **If any step in this plan is found already marked complete/done (✅ or
+  `[x]`)**, never accept that at face value — deeply re-verify it end-to-end
+  directly against the live Supabase project (actual tables, RPCs, policies,
+  logs — not just the code that's supposed to call them) and against the
+  actual GitHub repo (the real committed code, not a remembered summary of
+  it). Confirm it genuinely works as claimed, then improve it further to the
+  maximum level reasonably possible before moving on — a checkmark from an
+  earlier session is a starting point to double-check, not a fact to trust.
 - No silent "I think this is fixed" claims — call out what was verified vs.
   what still needs the owner to test on a real device.
 

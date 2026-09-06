@@ -7,6 +7,11 @@ import { queueOfflineOperation } from "../services/repository";
 
 interface StockAdjustViewProps {
   db: Database;
+  // Phase 1 completion (2026-09-06): see ReturnsExchangesView for the same
+  // pattern/rationale. Used ONLY for the "choose product" dropdown below —
+  // every adjustment/mismatch-fix path here correctly keeps using the real
+  // db.products, unchanged.
+  catalogProducts?: Product[];
   storeId?: string;
   onUpdate: () => void;
   toast: (msg: string, type?: "green" | "red" | "amber") => void;
@@ -21,6 +26,7 @@ function isBusinessRejection(message: string): boolean {
 
 export const StockAdjustView: React.FC<StockAdjustViewProps> = ({
   db,
+  catalogProducts,
   storeId,
   onUpdate,
   toast,
@@ -361,7 +367,7 @@ export const StockAdjustView: React.FC<StockAdjustViewProps> = ({
                 required
               >
                 <option value="">-- Choose Product from Inventory --</option>
-                {db.products.map((p) => (
+                {(catalogProducts || db.products).map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} ({p.category}) — Current Stock: {p.stock} {p.sku ? `[${p.sku}]` : ""}
                   </option>

@@ -65,8 +65,185 @@ export async function loadCloudState() {
   return { state: row.state as Database, version: Number(row.version || 0), storeId: row.store_id };
 }
 
-export async function saveCloudState(state: Database, expectedVersion: number) {
-  const profile = await getCurrentProfile();
+/**
+ * Phase 1 (data architecture fix): products.stock_qty is the authoritative
+ * transactional number (updated inside the row-locked atomic RPCs), not the
+ * JSON store_state blob, which only reaches a device on its next full save/
+ * load cycle and is what caused the "0 ↔ 5" flicker. This is a lightweight
+ * one-shot read of just {id, stock_qty} for every product — used to seed the
+ * live-stock map on bootstrap, before the realtime subscription below takes
+ * over keeping it current.
+ */
+export async function fetchLiveStock(storeId: string): Promise<Record<string, number>> {
+  const { data, error } = await supabase
+    .from("products")
+    .select("id,stock_qty")
+    .eq("store_id", storeId);
+  if (error) throw error;
+  const map: Record<string, number> = {};
+  for (const row of data || []) map[row.id] = Number(row.stock_qty || 0);
+  return map;
+}
+
+/**
+ * Realtime companion to fetchLiveStock(): fires on every insert/update/delete
+ * to this store's products (a sale, purchase, or stock adjustment on *any*
+ * device updates stock_qty via its atomic RPC, which this picks up in
+ * ~1 second) so every open device's live-stock map stays current without
+ * waiting for the slower store_state blob save/load round trip.
+ */
+export function subscribeToLiveStock(storeId: string, onChange: (productId: string, stockQty: number) => void) {
+  const channel = supabase
+    .channel(`live-stock-${storeId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "products", filter: `store_id=eq.${storeId}` },
+      (payload: any) => {
+        const row = payload.new || payload.old;
+        if (row?.id) onChange(row.id, Number(row.stock_qty || 0));
+      }
+    )
+    .subscribe();
+  return channel;
+}
+
+/**
+ * Phase 1 completion (2026-09-06) — read-side companion to
+ * upsertProductCatalog() above. That function already writes the full
+ * catalog relationally on every Add/Edit Product save; this is what was
+ * explicitly left undone at the time ("the read side still reads from the
+ * JSON blob... a full rip-and-replace... not attempted in this pass").
+ *
+ * Deliberately EXCLUDES cost_price and confidential_price — those stay
+ * blob-only/UI-gated exactly as before, untouched by this change, so the
+ * existing owner-only / Telegram-approval-gated pricing flows keep working
+ * exactly as they do today. This is display-catalog data only (photo, MRP,
+ * warranty, notes, compatible models, screen size, etc.) — the same fields
+ * `upsert_product_catalog()` accepts, minus the two price tiers.
+ *
+ * Keyed by `client_id` (the app's own product.id, which is what every
+ * screen actually indexes by) with a `sku` fallback map for the small
+ * number of pre-Phase-1 rows that predate client_id backfill.
+ */
+export interface LiveCatalogEntry {
+  sku: string; barcode: string | null; brand: string; category: string;
+  mrp: number | null; photo: string; warrantyEnabled: boolean; warrantyMonths: number;
+  requireCustomerDetails: boolean; supplier: string; notes: string;
+  compatibleModels: string[]; screenSizeInches?: number; screenSizeMaxInches?: number;
+  isMobilePhone?: boolean; isSparePart?: boolean; minStock: number;
+}
+
+function rowToLiveCatalogEntry(row: any): LiveCatalogEntry {
+  return {
+    sku: row.sku || "",
+    barcode: row.barcode ?? null,
+    brand: row.brand || "",
+    category: row.category || "",
+    mrp: row.mrp === null || row.mrp === undefined ? null : Number(row.mrp),
+    photo: row.photo || "",
+    warrantyEnabled: !!row.warranty_enabled,
+    warrantyMonths: Number(row.warranty_months || 0),
+    requireCustomerDetails: !!row.require_customer_details,
+    supplier: row.supplier || "",
+    notes: row.notes || "",
+    compatibleModels: Array.isArray(row.compatible_models) ? row.compatible_models : [],
+    screenSizeInches: row.screen_size_inches === null || row.screen_size_inches === undefined ? undefined : Number(row.screen_size_inches),
+    screenSizeMaxInches: row.screen_size_max_inches === null || row.screen_size_max_inches === undefined ? undefined : Number(row.screen_size_max_inches),
+    isMobilePhone: row.is_mobile_phone === null || row.is_mobile_phone === undefined ? undefined : !!row.is_mobile_phone,
+    isSparePart: row.is_spare_part === null || row.is_spare_part === undefined ? undefined : !!row.is_spare_part,
+    minStock: Number(row.min_stock || 0),
+  };
+}
+
+const LIVE_CATALOG_COLUMNS =
+  "id,client_id,sku,barcode,brand,model,category,mrp,photo,warranty_enabled,warranty_months," +
+  "require_customer_details,supplier,notes,compatible_models,screen_size_inches,screen_size_max_inches," +
+  "is_mobile_phone,is_spare_part,min_stock";
+
+export async function fetchLiveCatalog(storeId: string): Promise<{ byClientId: Record<string, LiveCatalogEntry>; bySku: Record<string, LiveCatalogEntry> }> {
+  const { data, error } = await supabase
+    .from("products")
+    .select(LIVE_CATALOG_COLUMNS)
+    .eq("store_id", storeId) as { data: any[] | null; error: any };
+  if (error) throw error;
+  const byClientId: Record<string, LiveCatalogEntry> = {};
+  const bySku: Record<string, LiveCatalogEntry> = {};
+  for (const row of data || []) {
+    const entry = rowToLiveCatalogEntry(row);
+    if (row.client_id) byClientId[row.client_id] = entry;
+    else if (row.sku) bySku[row.sku] = entry;
+  }
+  return { byClientId, bySku };
+}
+
+/**
+ * Realtime companion to fetchLiveCatalog() — separate channel from
+ * subscribeToLiveStock() above (deliberately not merged into it) so this
+ * addition can never regress the already-device-tested Phase 1 stock feed;
+ * worst case if this one has a bug, stock sync keeps working unaffected.
+ */
+export function subscribeToLiveCatalog(storeId: string, onChange: (clientId: string | null, sku: string, entry: LiveCatalogEntry) => void) {
+  const channel = supabase
+    .channel(`live-catalog-${storeId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "products", filter: `store_id=eq.${storeId}` },
+      (payload: any) => {
+        const row = payload.new || payload.old;
+        if (!row) return;
+        onChange(row.client_id || null, row.sku || "", rowToLiveCatalogEntry(row));
+      }
+    )
+    .subscribe();
+  return channel;
+}
+
+/**
+ * Phase 1 (continued) — writes a product's FULL catalog (photo, MRP,
+ * confidential price, warranty, notes, compatible models, screen size,
+ * etc.), not just the minimal scalar fields resolve_product_for_sale
+ * captures in passing during a sale/adjustment/purchase. Called by Add/Edit
+ * Product on save, in addition to (not instead of) the existing local blob
+ * write — the relational row becomes the durable, queryable record; the
+ * blob stays the app's fast read cache.
+ */
+export async function upsertProductCatalog(storeId: string, product: any): Promise<string> {
+  const { data, error } = await supabase.rpc("upsert_product_catalog", {
+    p_store_id: storeId,
+    p_local_id: String(product.id),
+    p_sku: product.sku ?? null,
+    p_name: product.name ?? null,
+    p_brand: product.brand ?? null,
+    p_category: product.category ?? null,
+    p_barcode: product.barcode ?? null,
+    p_photo: product.photo ?? null,
+    p_cost_price: product.purchasePrice ?? 0,
+    p_confidential_price: product.confidentialPrice ?? null,
+    p_selling_price: product.sellingPrice ?? 0,
+    p_mrp: product.mrp ?? null,
+    p_pending_cost: !!product.pendingCost,
+    p_min_stock: product.minStock ?? 0,
+    p_warranty_enabled: !!product.warrantyEnabled,
+    p_warranty_months: product.warrantyMonths ?? 0,
+    p_require_customer_details: !!product.requireCustomerDetails,
+    p_supplier: product.supplier ?? null,
+    p_notes: product.notes ?? null,
+    p_compatible_models: product.compatibleModels ?? [],
+    p_screen_size_inches: product.screenSizeInches ?? null,
+    p_screen_size_max_inches: product.screenSizeMaxInches ?? null,
+    p_is_mobile_phone: !!product.isMobilePhone,
+    p_is_spare_part: !!product.isSparePart,
+    // 2026-09-06 bug fix (see accompanying migration): only ever used on
+    // first-creation INSERT inside the RPC, never on an UPDATE of an
+    // existing product — so this can never clobber a stock count that's
+    // changed since via a sale/adjustment on another device.
+    p_stock_qty: product.stock ?? 0,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function saveCloudState(state: Database, expectedVersion: number) {  const profile = await getCurrentProfile();
   if (profile?.role === "staff") {
     const { data, error } = await supabase.rpc("save_store_state_for_user", {
       p_state: state,
@@ -193,6 +370,24 @@ async function processOperation(row: any, storeId: string) {
 
   if (type === "purchase") {
     const purchase = payload.purchase || payload;
+    // Same class of bug as "sale"/"stock_adjustment" above — a queued
+    // purchase's items only ever carry the client-local product id.
+    const resolvedItems = await Promise.all((purchase.items || []).map(async (item: any) => {
+      const { data: realId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+        p_store_id: storeId,
+        p_local_id: String(item.productId),
+        p_sku: item.sku ?? null,
+        p_model: item.name ?? null,
+        p_brand: item.brand ?? null,
+        p_category: item.category ?? null,
+        p_cost_price: item.purchasePrice ?? 0,
+        p_selling_price: item.sellingPrice ?? 0,
+        p_stock_qty: item.stockAtPurchase ?? 0,
+        p_min_stock: item.minStock ?? 0,
+      });
+      if (resolveError) throw resolveError;
+      return { product_id: realId, quantity: item.qty, purchase_price: item.purchasePrice };
+    }));
     const { data: purchaseId, error } = await supabase.rpc("atomic_complete_purchase", {
       p_store_id: storeId,
       p_supplier: purchase.supplier || null,
@@ -201,11 +396,7 @@ async function processOperation(row: any, storeId: string) {
       p_notes: purchase.notes || null,
       p_payment_status: purchase.paymentStatus || null,
       p_idempotency_key: row.operation_id,
-      p_items: (purchase.items || []).map((item: any) => ({
-        product_id: item.productId,
-        quantity: item.qty,
-        purchase_price: item.purchasePrice,
-      })),
+      p_items: resolvedItems,
     });
     if (error) throw error;
     return { serverId: purchaseId };
@@ -245,6 +436,14 @@ async function processOperation(row: any, storeId: string) {
     });
     if (error) throw error;
     return { serverId: movementId };
+  }
+
+  if (type === "product") {
+    // Offline-queued Add/Edit Product catalog write (see
+    // upsertProductCatalog) — replayed once connectivity returns.
+    const product = payload.product || payload;
+    const id = await upsertProductCatalog(storeId, product);
+    return { serverId: id };
   }
 
   if (type === "supplier") {

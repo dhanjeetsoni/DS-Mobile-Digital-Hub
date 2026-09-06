@@ -90,14 +90,47 @@ obvious or quick.
       a stock flicker (0 ↔ 5) on a single device
 - [x] `resolve_product_for_sale` now refuses to create a product with no SKU
       instead of silently duplicating it
+- [x] **Deep-verified 2026-09-06 directly against the live Supabase project**:
+      read `resolve_product_for_sale`'s actual live function body — it
+      genuinely raises `invalid quantity: product missing sku, cannot
+      resolve safely (stale offline record)` instead of inserting, exactly
+      as claimed. No new garbage has accumulated since.
+- [x] **Also verified the concurrent-flush + retry-cap fix from this same
+      session is live and working**: `sync_queue` had one row with
+      `retry_count=750` stuck looping before the fix — it's now correctly
+      `status='abandoned'` and no longer being retried. Only 5 rows remain
+      total, 4 already `processed`, 0 stuck.
 
-### ⬜ Phase 0: Cleanup
-- [ ] Delete the 1,858 garbage `products` rows (owner approved)
-- [ ] Clear/reset the old stuck `sync_queue` backlog (pre-fix snapshot/sale
-      rows that can never cleanly replay)
-- [ ] Fresh-start the real product/stock data with the owner directly in-app
-- [ ] Confirm `products`, `sales`, `sale_items`, `telegram_outbox` are all
-      clean and consistent
+### ✅ Phase 0: Cleanup (deep-verified & completed 2026-09-06)
+- [x] Delete the 1,858 garbage `products` rows (owner approved) — **the
+      "1,858" figure was stale by the time this was actually checked live**:
+      the table only had 4 rows total, 1 of them genuinely orphaned/garbage
+      (every field NULL — no sku/brand/model/category — created alongside a
+      stray `stock_movements`/`stock_batches` row from a
+      "Physical Inventory Audit Count" adjustment). That one row (plus its
+      2 dependent rows) was deleted after confirming zero `sale_items`
+      referenced it. 3 legitimate products remain.
+- [x] Clear/reset the old stuck `sync_queue` backlog — already resolved by
+      this session's concurrent-flush-lock + 20-retry-abandon-cap fix
+      (see Phase -1 above); nothing further needed
+- [x] Fresh-start the real product/stock data with the owner directly in-app
+      — **skipped by agreement**: remaining data (3 products) is already
+      small and legitimate, no need to wipe and re-enter
+- [x] Confirm `products`, `sales`, `sale_items`, `telegram_outbox` are all
+      clean and consistent — **verified with direct queries**: 0 orphaned
+      `sale_items` (referencing a missing product), 0 `sales` without
+      matching `sale_items`, 0 `sales` without a matching `invoices` row,
+      0 `invoices` that never reached `telegram_outbox`, and all 8
+      `telegram_outbox` rows are `status='sent'`
+- [ ] **Found during this audit, not yet actioned — flagging for the owner**:
+      2 of the 3 remaining products look like unintentional duplicates —
+      same model name ("Super X — ESD Anti-Static Super X Edge to Edge Big
+      Curved Glass"), same category ("Tempered Glass"), but two different
+      SKUs (`GLS3109C52C24` and `GLS4682B5640C`), suggesting the same
+      physical item got re-added via AI Photo Scan and didn't get
+      recognized as already existing. Left as-is pending owner's call —
+      may be a real Phase 6 "AI Photo Scan accuracy" duplicate-detection
+      gap worth folding in there rather than a one-off manual fix here.
 
 ### ⬜ Phase 1: Data architecture fix (the root cause of the flicker/races)
 - [ ] Stop treating the single JSON `store_state` blob as the source of truth

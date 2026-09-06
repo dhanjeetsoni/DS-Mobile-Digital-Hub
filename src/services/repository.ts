@@ -73,10 +73,19 @@ export async function loadCloudState() {
  * one-shot read of just {id, stock_qty} for every product — used to seed the
  * live-stock map on bootstrap, before the realtime subscription below takes
  * over keeping it current.
+ *
+ * 2026-09-06: reads from `products_staff_view` (a redacted, always-current
+ * mirror of `products`, kept in sync by a trigger — see migration
+ * 20260906130000_phase1_products_staff_view_v38.sql), not `products`
+ * directly. `products` only has an owner/manager RLS policy, so a staff
+ * session silently got zero rows here before — this function looked like it
+ * worked (no thrown error reached the UI) while actually leaving staff on
+ * the stale blob-only stock the whole time. The mirror carries no
+ * confidential column, so it's safe for every role, staff included.
  */
 export async function fetchLiveStock(storeId: string): Promise<Record<string, number>> {
   const { data, error } = await supabase
-    .from("products")
+    .from("products_staff_view")
     .select("id,stock_qty")
     .eq("store_id", storeId);
   if (error) throw error;
@@ -91,13 +100,18 @@ export async function fetchLiveStock(storeId: string): Promise<Record<string, nu
  * device updates stock_qty via its atomic RPC, which this picks up in
  * ~1 second) so every open device's live-stock map stays current without
  * waiting for the slower store_state blob save/load round trip.
+ *
+ * 2026-09-06: subscribes to `products_staff_view`, not `products` — see the
+ * fetchLiveStock comment above. Realtime enforces the same RLS as a normal
+ * SELECT, so a staff session subscribing directly to `products` never
+ * receives a single event (no error either — it just silently never fires).
  */
 export function subscribeToLiveStock(storeId: string, onChange: (productId: string, stockQty: number) => void) {
   const channel = supabase
     .channel(`live-stock-${storeId}`)
     .on(
       "postgres_changes",
-      { event: "*", schema: "public", table: "products", filter: `store_id=eq.${storeId}` },
+      { event: "*", schema: "public", table: "products_staff_view", filter: `store_id=eq.${storeId}` },
       (payload: any) => {
         const row = payload.new || payload.old;
         if (row?.id) onChange(row.id, Number(row.stock_qty || 0));
@@ -161,8 +175,13 @@ const LIVE_CATALOG_COLUMNS =
   "is_mobile_phone,is_spare_part,min_stock";
 
 export async function fetchLiveCatalog(storeId: string): Promise<{ byClientId: Record<string, LiveCatalogEntry>; bySku: Record<string, LiveCatalogEntry> }> {
+  // 2026-09-06: reads from `products_staff_view`, same reasoning as
+  // fetchLiveStock above — `products` has no staff SELECT policy at all, so
+  // this silently returned zero rows for every staff session. The mirror
+  // carries the exact same LIVE_CATALOG_COLUMNS set (still excluding
+  // cost_price/confidential_price), so this is a like-for-like swap.
   const { data, error } = await supabase
-    .from("products")
+    .from("products_staff_view")
     .select(LIVE_CATALOG_COLUMNS)
     .eq("store_id", storeId) as { data: any[] | null; error: any };
   if (error) throw error;
@@ -181,13 +200,17 @@ export async function fetchLiveCatalog(storeId: string): Promise<{ byClientId: R
  * subscribeToLiveStock() above (deliberately not merged into it) so this
  * addition can never regress the already-device-tested Phase 1 stock feed;
  * worst case if this one has a bug, stock sync keeps working unaffected.
+ *
+ * 2026-09-06: subscribes to `products_staff_view`, not `products` — same
+ * "staff has no SELECT policy on the base table, so Realtime silently never
+ * fires" issue as subscribeToLiveStock above.
  */
 export function subscribeToLiveCatalog(storeId: string, onChange: (clientId: string | null, sku: string, entry: LiveCatalogEntry) => void) {
   const channel = supabase
     .channel(`live-catalog-${storeId}`)
     .on(
       "postgres_changes",
-      { event: "*", schema: "public", table: "products", filter: `store_id=eq.${storeId}` },
+      { event: "*", schema: "public", table: "products_staff_view", filter: `store_id=eq.${storeId}` },
       (payload: any) => {
         const row = payload.new || payload.old;
         if (!row) return;

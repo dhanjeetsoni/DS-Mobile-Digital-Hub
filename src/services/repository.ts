@@ -142,6 +142,11 @@ export async function upsertProductCatalog(storeId: string, product: any): Promi
     p_screen_size_max_inches: product.screenSizeMaxInches ?? null,
     p_is_mobile_phone: !!product.isMobilePhone,
     p_is_spare_part: !!product.isSparePart,
+    // 2026-09-06 bug fix (see accompanying migration): only ever used on
+    // first-creation INSERT inside the RPC, never on an UPDATE of an
+    // existing product — so this can never clobber a stock count that's
+    // changed since via a sale/adjustment on another device.
+    p_stock_qty: product.stock ?? 0,
   });
   if (error) throw error;
   return data as string;

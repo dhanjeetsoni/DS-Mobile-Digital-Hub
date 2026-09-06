@@ -107,6 +107,46 @@ export function subscribeToLiveStock(storeId: string, onChange: (productId: stri
   return channel;
 }
 
+/**
+ * Phase 1 (continued) — writes a product's FULL catalog (photo, MRP,
+ * confidential price, warranty, notes, compatible models, screen size,
+ * etc.), not just the minimal scalar fields resolve_product_for_sale
+ * captures in passing during a sale/adjustment/purchase. Called by Add/Edit
+ * Product on save, in addition to (not instead of) the existing local blob
+ * write — the relational row becomes the durable, queryable record; the
+ * blob stays the app's fast read cache.
+ */
+export async function upsertProductCatalog(storeId: string, product: any): Promise<string> {
+  const { data, error } = await supabase.rpc("upsert_product_catalog", {
+    p_store_id: storeId,
+    p_local_id: String(product.id),
+    p_sku: product.sku ?? null,
+    p_name: product.name ?? null,
+    p_brand: product.brand ?? null,
+    p_category: product.category ?? null,
+    p_barcode: product.barcode ?? null,
+    p_photo: product.photo ?? null,
+    p_cost_price: product.purchasePrice ?? 0,
+    p_confidential_price: product.confidentialPrice ?? null,
+    p_selling_price: product.sellingPrice ?? 0,
+    p_mrp: product.mrp ?? null,
+    p_pending_cost: !!product.pendingCost,
+    p_min_stock: product.minStock ?? 0,
+    p_warranty_enabled: !!product.warrantyEnabled,
+    p_warranty_months: product.warrantyMonths ?? 0,
+    p_require_customer_details: !!product.requireCustomerDetails,
+    p_supplier: product.supplier ?? null,
+    p_notes: product.notes ?? null,
+    p_compatible_models: product.compatibleModels ?? [],
+    p_screen_size_inches: product.screenSizeInches ?? null,
+    p_screen_size_max_inches: product.screenSizeMaxInches ?? null,
+    p_is_mobile_phone: !!product.isMobilePhone,
+    p_is_spare_part: !!product.isSparePart,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
 export async function saveCloudState(state: Database, expectedVersion: number) {  const profile = await getCurrentProfile();
   if (profile?.role === "staff") {
     const { data, error } = await supabase.rpc("save_store_state_for_user", {
@@ -300,6 +340,14 @@ async function processOperation(row: any, storeId: string) {
     });
     if (error) throw error;
     return { serverId: movementId };
+  }
+
+  if (type === "product") {
+    // Offline-queued Add/Edit Product catalog write (see
+    // upsertProductCatalog) — replayed once connectivity returns.
+    const product = payload.product || payload;
+    const id = await upsertProductCatalog(storeId, product);
+    return { serverId: id };
   }
 
   if (type === "supplier") {

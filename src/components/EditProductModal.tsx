@@ -7,6 +7,8 @@ import { processAccessoryOcr } from "../utils/aiOcr";
 import { ProductThumb } from "./ProductThumb";
 import { uploadProductPhotoOrFallback, deleteProductPhotoByUrl, isStorageUrl } from "../services/photoStorage";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
+import { isCloudConfigured } from "../services/supabaseClient";
+import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
 
 interface EditProductModalProps {
   isOpen: boolean;
@@ -221,6 +223,20 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     // blocks or fails the save — see deleteProductPhotoByUrl.
     if (originalPhotoRef.current && originalPhotoRef.current !== photo && isStorageUrl(originalPhotoRef.current)) {
       void deleteProductPhotoByUrl(originalPhotoRef.current);
+    }
+
+    // Phase 1 (continued) — mirror the full edited catalog relationally
+    // too, same best-effort/offline-queue-fallback pattern as Add Product.
+    if (isCloudConfigured && storeId) {
+      const idempotencyKey = crypto.randomUUID();
+      upsertProductCatalog(storeId, product).catch(async (err) => {
+        console.warn("Product catalog cloud write failed; queueing for retry", err);
+        try {
+          await queueOfflineOperation("product", "products", { product }, idempotencyKey);
+        } catch {
+          // Local save already succeeded above; this is a best-effort mirror.
+        }
+      });
     }
 
     onSaved();

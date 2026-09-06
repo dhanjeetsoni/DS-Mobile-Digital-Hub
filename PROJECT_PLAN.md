@@ -219,6 +219,24 @@ finished in this session (2026-09-06)._
       been sold/adjusted/restocked since this shipped still has
       `client_id = null` until the first time one of those happens to it.
       Harmless (SKU fallback still works), just not instant.
+- [x] **Deep-re-verified 2026-09-06, per the ground rule above — this
+      exact catalog-migration work was NOT trusted at face value even
+      though it looked complete**: read `upsert_product_catalog()`'s real
+      live body and found the INSERT branch hardcoded `stock_qty = 0` for
+      every brand-new product — `AddProductModal` never calls
+      `resolve_product_for_sale` first (unlike the sale/adjustment/purchase
+      paths, which all correctly pass a real stock number), so a
+      newly-added product would have shown **0 stock everywhere**,
+      including on the very device that just added it, the instant Phase
+      1's `stockOf()` went live. Fixed: the RPC now takes `p_stock_qty`,
+      used only in the INSERT branch, never added to the UPDATE branch (so
+      editing a product still can never touch its stock — that stays
+      resolve_product_for_sale/adjustment/purchase-only). Verified via the
+      live `pg_proc` catalog that only one function overload exists after
+      the fix (adding a parameter registers a *new* overload in Postgres,
+      not a true replace — the old 24-arg buggy version had to be
+      explicitly dropped, confirmed gone). Migration applied live, full
+      test suite + typecheck + build re-run clean, then merged to `main`.
 
 ### ⬜ Phase 2: Login & session redesign
 - [ ] Permanent background session (survives app close/reopen; only a true

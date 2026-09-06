@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Database,
   Product,
@@ -66,7 +66,7 @@ import { AddGiftModal } from "./components/AddGiftModal";
 import { staffSignIn, isAccessWindowExpired, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
-import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock } from "./services/repository";
+import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, type LiveCatalogEntry } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
@@ -215,6 +215,60 @@ export default function App() {
   const [liveStock, setLiveStock] = useState<Record<string, number>>({});
   const stockOf = (product: Product): number =>
     product.id in liveStock ? liveStock[product.id] : product.stock;
+
+  // Phase 1 completion (2026-09-06): same shape as liveStock/stockOf above,
+  // for the rest of the catalog. Read-only merge — NEVER mutates the
+  // product it's given, and deliberately never touches purchasePrice or
+  // confidentialPrice (those stay exactly as the blob has them, matching
+  // upsertProductCatalog's write side and every existing owner-only /
+  // Telegram-approval pricing flow untouched). Call sites that only ever
+  // read a product for display should use catalogOf(p) instead of p
+  // directly; call sites that find-then-mutate-then-save a product (e.g.
+  // ImeiAuditView's db.products.push/edit-in-place flows) must keep using
+  // the raw db.products entry — merging here would make that edit silently
+  // apply to a throwaway derived object instead of the real one that gets
+  // persisted.
+  const [liveCatalogByClientId, setLiveCatalogByClientId] = useState<Record<string, LiveCatalogEntry>>({});
+  const [liveCatalogBySku, setLiveCatalogBySku] = useState<Record<string, LiveCatalogEntry>>({});
+  const catalogOf = (product: Product): Product => {
+    const entry = liveCatalogByClientId[product.id] || (product.sku ? liveCatalogBySku[product.sku] : undefined);
+    if (!entry) return product;
+    return {
+      ...product,
+      sku: entry.sku || product.sku,
+      barcode: entry.barcode ?? product.barcode,
+      brand: entry.brand || product.brand,
+      category: entry.category || product.category,
+      mrp: entry.mrp !== null ? entry.mrp : product.mrp,
+      photo: entry.photo || product.photo,
+      warrantyEnabled: entry.warrantyEnabled,
+      warrantyMonths: entry.warrantyMonths || product.warrantyMonths,
+      requireCustomerDetails: entry.requireCustomerDetails,
+      supplier: entry.supplier || product.supplier,
+      notes: entry.notes || product.notes,
+      compatibleModels: entry.compatibleModels.length ? entry.compatibleModels : product.compatibleModels,
+      screenSizeInches: entry.screenSizeInches ?? product.screenSizeInches,
+      screenSizeMaxInches: entry.screenSizeMaxInches ?? product.screenSizeMaxInches,
+      isMobilePhone: entry.isMobilePhone ?? product.isMobilePhone,
+      isSparePart: entry.isSparePart ?? product.isSparePart,
+      minStock: entry.minStock || product.minStock,
+    };
+  };
+  // Read-only, display-ready product list — every screen that only lists/
+  // shows products (not one that finds-then-mutates-then-saves) should
+  // read from this instead of db.products directly.
+  const catalogProducts = useMemo(
+    () => db.products.map(catalogOf),
+    [db.products, liveCatalogByClientId, liveCatalogBySku]
+  );
+  // For child components confirmed to only ever READ db.products (list/
+  // filter/display — never db.products.push/find-then-mutate-then-save).
+  // Passing this instead of the real `db` lets those screens show live
+  // catalog data with zero changes to their own internals. Do NOT use this
+  // for a component that mutates db.products in place (e.g. AddProductModal,
+  // SecondHandKycModal, ImeiAuditView, StockAdjustView, PurchasesView,
+  // ReturnsExchangesView all do — they keep the real `db` prop).
+  const catalogDb = useMemo(() => ({ ...db, products: catalogProducts }), [db, catalogProducts]);
   const [cloudReady, setCloudReady] = useState(false);
   const [cloudStatus, setCloudStatus] = useState("offline");
   const [showCloudAuth, setShowCloudAuth] = useState(false);
@@ -553,6 +607,7 @@ export default function App() {
     let active = true;
     let channel: any = null;
     let stockChannel: any = null;
+    let catalogChannel: any = null;
     const bootstrap = async () => {
       try {
         setCloudStatus("connecting");
@@ -619,6 +674,24 @@ export default function App() {
         stockChannel = subscribeToLiveStock(profile.store_id, (productId, stockQty) => {
           setLiveStock(prev => ({ ...prev, [productId]: stockQty }));
         });
+        // Phase 1 completion (2026-09-06): same pattern as liveStock above,
+        // but for the rest of the catalog (photo, MRP, warranty, notes,
+        // compatible models, screen size) — the "read side still reads from
+        // the JSON blob" gap the plan explicitly left open when the write
+        // side (upsertProductCatalog) shipped. Deliberately independent of
+        // liveStock's channel/state so a bug here can't regress the
+        // already-verified stock-sync behaviour.
+        try {
+          const { byClientId, bySku } = await fetchLiveCatalog(profile.store_id);
+          setLiveCatalogByClientId(byClientId);
+          setLiveCatalogBySku(bySku);
+        } catch (e) {
+          console.warn("Live catalog initial fetch failed; falling back to blob catalog fields until realtime catches up", e);
+        }
+        catalogChannel = subscribeToLiveCatalog(profile.store_id, (clientId, sku, entry) => {
+          if (clientId) setLiveCatalogByClientId(prev => ({ ...prev, [clientId]: entry }));
+          else if (sku) setLiveCatalogBySku(prev => ({ ...prev, [sku]: entry }));
+        });
         setCloudStatus("online");
         setCloudReady(true);
         if (profile.role !== "staff") {
@@ -634,7 +707,7 @@ export default function App() {
       } catch (e) { console.warn("Cloud bootstrap failed", e); setCloudStatus("error"); setCloudReady(true); }
     };
     bootstrap();
-    return () => { active = false; if (channel) supabase.removeChannel(channel); if (stockChannel) supabase.removeChannel(stockChannel); };
+    return () => { active = false; if (channel) supabase.removeChannel(channel); if (stockChannel) supabase.removeChannel(stockChannel); if (catalogChannel) supabase.removeChannel(catalogChannel); };
   }, []);
 
   useEffect(() => {
@@ -1145,7 +1218,7 @@ export default function App() {
     showToast(`Scanned: ${scannedValue}`, "green");
     const clean = scannedValue.trim();
     // Search in products by generated Barcode, SKU, or IMEI/Serial
-    const prodBySku = db.products.find(
+    const prodBySku = catalogProducts.find(
       (p) =>
         (p.barcode && p.barcode === clean) ||
         p.sku.toLowerCase() === clean.toLowerCase() ||
@@ -1298,7 +1371,7 @@ export default function App() {
 
   const updateCartQty = (idx: number, delta: number) => {
     const item = cart[idx];
-    const prod = db.products.find((p) => p.id === item.productId);
+    const prod = catalogProducts.find((p) => p.id === item.productId);
     const newQty = item.qty + delta;
     if (newQty <= 0) {
       setCart(cart.filter((_, i) => i !== idx));
@@ -1962,7 +2035,7 @@ export default function App() {
         const returnsToday = visibleReturns.filter((r) => r.date === todayStr());
         const refundAmtToday = returnsToday.reduce((a, r) => a + r.subtotalRefund, 0);
         const todayNetSales = round2(grossSalesRev - refundAmtToday);
-        const lowStock = db.products.filter((p) => stockOf(p) <= p.minStock);
+        const lowStock = catalogProducts.filter((p) => stockOf(p) <= p.minStock);
         const totalDue = db.customers.reduce((a, c) => a + (c.totalDue || 0), 0);
         const openJobs = db.jobs.filter((j) => j.status !== "Delivered").length;
         const totalPayables = db.suppliers.reduce((a, s) => a + (s.totalPayable || 0), 0);
@@ -1998,7 +2071,7 @@ export default function App() {
               </div>
             </div>
 
-            <AiAdviceCard db={db} ownerMode={ownerMode} />
+            <AiAdviceCard db={catalogDb} ownerMode={ownerMode} />
 
             {/* Simple 1-Touch Fast Counter Hub */}
             <div className="section" style={{ marginBottom: "16px" }}>
@@ -2263,7 +2336,7 @@ export default function App() {
           { id: "Cyber & Xerox", label: "🖨️ Cyber/Xerox" },
         ];
 
-        const filteredProds = db.products.filter((p) => {
+        const filteredProds = catalogProducts.filter((p) => {
           if (stockOf(p) <= 0) return false;
           if (sellCategoryFilter !== "ALL") {
             if (sellCategoryFilter === "Cyber & Xerox") {
@@ -2387,7 +2460,7 @@ export default function App() {
                 <div>
                   <div style={{ maxHeight: "300px", overflowY: "auto" }}>
                     {cart.map((item, idx) => {
-                      const prod = db.products.find((p) => p.id === item.productId);
+                      const prod = catalogProducts.find((p) => p.id === item.productId);
                       const priceFloor = prod?.confidentialPrice ?? prod?.purchasePrice ?? 0;
                       const belowFloor = !item.isGift && !ownerMode && priceFloor > 0 && item.price < priceFloor;
                       return (
@@ -2651,7 +2724,7 @@ export default function App() {
         return <SupplierKhataView db={db} onUpdate={() => saveState({ ...db })} toast={showToast} />;
 
       case "labels":
-        return <BarcodeTagStudio db={db} />;
+        return <BarcodeTagStudio db={catalogDb} />;
 
       case "products":
         return (
@@ -2698,7 +2771,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {db.products.map((p) => (
+                    {catalogProducts.map((p) => (
                       <tr key={p.id}>
                         <td><ProductThumb photo={p.photo} name={p.name} /></td>
                         <td><b>{p.name}</b></td>
@@ -3081,7 +3154,7 @@ export default function App() {
         );
 
       case "ownerreports":
-        return <OwnerReportsView db={db} onUpdate={() => saveState({ ...db })} toast={showToast} />;
+        return <OwnerReportsView db={catalogDb} onUpdate={() => saveState({ ...db })} toast={showToast} />;
 
       case "exportClear":
         return (
@@ -3096,7 +3169,7 @@ export default function App() {
       case "modelsearch":
         return (
           <ModelSearchView
-            db={db}
+            db={catalogDb}
             onAddToCart={(p) => {
               addToCart(p);
               showToast(`Added ${p.name} to cart!`, "green");
@@ -3108,7 +3181,7 @@ export default function App() {
       case "photoFinder":
         return (
           <PhotoStockFinderView
-            db={db}
+            db={catalogDb}
             onAddToCart={(p) => {
               addToCart(p);
               showToast(`Added ${p.name} to cart!`, "green");
@@ -3121,6 +3194,7 @@ export default function App() {
         return (
           <ReturnsExchangesView
             db={db}
+            catalogProducts={catalogProducts}
             storeId={cloudProfile?.store_id}
             onUpdate={() => saveState({ ...db })}
             toast={showToast}
@@ -3131,6 +3205,7 @@ export default function App() {
         return (
           <StockAdjustView
             db={db}
+            catalogProducts={catalogProducts}
             storeId={cloudProfile?.store_id}
             onUpdate={() => saveState({ ...db })}
             toast={showToast}
@@ -3141,6 +3216,7 @@ export default function App() {
         return (
           <PurchasesView
             db={db}
+            catalogProducts={catalogProducts}
             storeId={cloudProfile?.store_id}
             onUpdate={() => saveState({ ...db })}
             toast={showToast}
@@ -3209,10 +3285,10 @@ export default function App() {
         return <ProfitLossDashboardView db={db} />;
 
       case "lowstock":
-        return <LowStockAlertsView db={db} showToast={showToast} />;
+        return <LowStockAlertsView db={catalogDb} showToast={showToast} />;
 
       case "downloadArea":
-        return <DownloadAreaView db={db} isStaff={cloudProfile?.role === "staff"} showToast={showToast} />;
+        return <DownloadAreaView db={catalogDb} isStaff={cloudProfile?.role === "staff"} showToast={showToast} />;
 
       case "loyalty":
         return (
@@ -3303,7 +3379,7 @@ export default function App() {
       case "setupWizard":
         return (
           <SetupWizardView
-            db={db}
+            db={catalogDb}
             storeId={cloudProfile?.store_id}
             telegramConnected={Boolean(telegramStatus?.connected)}
             onConnectTelegram={async () => {
@@ -3673,7 +3749,7 @@ export default function App() {
     <div id="app">
       <MoneyAnimation />
       <Sidebar
-        db={db}
+        db={catalogDb}
         currentPage={currentPage}
         onNavigate={(page) => {
           // Any owner-only tool (financial reports, loan/byaj tracker, purchases, expenses, etc.)
@@ -3758,7 +3834,7 @@ export default function App() {
                 onDismiss={dismissAppUpdate}
               />
             )}
-            {db.products.filter(p => stockOf(p) <= p.minStock).length > 0 && (
+            {catalogProducts.filter(p => stockOf(p) <= p.minStock).length > 0 && (
               <div
                 style={{
                   padding: "4px 10px",
@@ -3772,7 +3848,7 @@ export default function App() {
                 }}
                 onClick={() => setCurrentPage("products")}
               >
-                LOW STOCK: {db.products.filter(p => stockOf(p) <= p.minStock).length} SKUs
+                LOW STOCK: {catalogProducts.filter(p => stockOf(p) <= p.minStock).length} SKUs
               </div>
             )}
 
@@ -3951,7 +4027,7 @@ export default function App() {
 
       {isAddGiftOpen && (
         <AddGiftModal
-          db={db}
+          db={catalogDb}
           excludeGiftedProductIds={cart.filter((c) => c.isGift).map((c) => c.productId)}
           onSelect={(product) => {
             addGiftToCart(product);
@@ -4236,7 +4312,7 @@ export default function App() {
                     onChange={(e) => setJobForm({ ...jobForm, selectedSparePartId: e.target.value })}
                   >
                     <option value="">-- No spare part used --</option>
-                    {db.products
+                    {catalogProducts
                       .filter((p) => p.isSparePart || p.category.includes("Repair"))
                       .map((sp) => (
                         <option key={sp.id} value={sp.id}>

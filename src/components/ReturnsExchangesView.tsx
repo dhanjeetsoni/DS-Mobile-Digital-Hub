@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { RotateCcw, Search, CheckCircle2, ArrowRight, Printer, AlertTriangle, RefreshCw, ShieldCheck, Clock } from "lucide-react";
-import { Database, Sale, ReturnRecord, ExchangeRecord, ReturnItem, WarrantyClaim } from "../types";
+import { Database, Sale, ReturnRecord, ExchangeRecord, ReturnItem, WarrantyClaim, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { todayStr, nowTimeStr, uid, addStockBatch, consumeFIFO } from "../utils/fifoEngine";
 import { supabase, isCloudConfigured } from "../services/supabaseClient";
@@ -8,6 +8,13 @@ import { queueOfflineOperation } from "../services/repository";
 
 interface ReturnsExchangesViewProps {
   db: Database;
+  // Phase 1 completion (2026-09-06): live-relational display copy of
+  // db.products (photo/mrp/warranty/notes/etc kept current via realtime).
+  // Optional + falls back to db.products so this component still works
+  // fine if a caller (e.g. a test) doesn't pass it. Used ONLY for the
+  // replacement-product picker below — every stock mutation in this file
+  // correctly keeps using the real db.products, unchanged.
+  catalogProducts?: Product[];
   storeId?: string;
   onUpdate: () => void;
   toast: (msg: string, type?: "green" | "red" | "amber") => void;
@@ -33,6 +40,7 @@ function isSaleUuid(value: unknown): value is string {
 
 export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
   db,
+  catalogProducts,
   storeId,
   onUpdate,
   toast,
@@ -823,7 +831,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
                       onChange={(e) => setExchangeReplacementId(e.target.value)}
                     >
                       <option value="">-- Choose Replacement --</option>
-                      {db.products.filter((p) => p.stock > 0).map((p) => (
+                      {(catalogProducts || db.products).filter((p) => p.stock > 0).map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name} ({inr(p.sellingPrice)}) - Stock: {p.stock}
                         </option>

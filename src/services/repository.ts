@@ -108,6 +108,97 @@ export function subscribeToLiveStock(storeId: string, onChange: (productId: stri
 }
 
 /**
+ * Phase 1 completion (2026-09-06) — read-side companion to
+ * upsertProductCatalog() above. That function already writes the full
+ * catalog relationally on every Add/Edit Product save; this is what was
+ * explicitly left undone at the time ("the read side still reads from the
+ * JSON blob... a full rip-and-replace... not attempted in this pass").
+ *
+ * Deliberately EXCLUDES cost_price and confidential_price — those stay
+ * blob-only/UI-gated exactly as before, untouched by this change, so the
+ * existing owner-only / Telegram-approval-gated pricing flows keep working
+ * exactly as they do today. This is display-catalog data only (photo, MRP,
+ * warranty, notes, compatible models, screen size, etc.) — the same fields
+ * `upsert_product_catalog()` accepts, minus the two price tiers.
+ *
+ * Keyed by `client_id` (the app's own product.id, which is what every
+ * screen actually indexes by) with a `sku` fallback map for the small
+ * number of pre-Phase-1 rows that predate client_id backfill.
+ */
+export interface LiveCatalogEntry {
+  sku: string; barcode: string | null; brand: string; category: string;
+  mrp: number | null; photo: string; warrantyEnabled: boolean; warrantyMonths: number;
+  requireCustomerDetails: boolean; supplier: string; notes: string;
+  compatibleModels: string[]; screenSizeInches?: number; screenSizeMaxInches?: number;
+  isMobilePhone?: boolean; isSparePart?: boolean; minStock: number;
+}
+
+function rowToLiveCatalogEntry(row: any): LiveCatalogEntry {
+  return {
+    sku: row.sku || "",
+    barcode: row.barcode ?? null,
+    brand: row.brand || "",
+    category: row.category || "",
+    mrp: row.mrp === null || row.mrp === undefined ? null : Number(row.mrp),
+    photo: row.photo || "",
+    warrantyEnabled: !!row.warranty_enabled,
+    warrantyMonths: Number(row.warranty_months || 0),
+    requireCustomerDetails: !!row.require_customer_details,
+    supplier: row.supplier || "",
+    notes: row.notes || "",
+    compatibleModels: Array.isArray(row.compatible_models) ? row.compatible_models : [],
+    screenSizeInches: row.screen_size_inches === null || row.screen_size_inches === undefined ? undefined : Number(row.screen_size_inches),
+    screenSizeMaxInches: row.screen_size_max_inches === null || row.screen_size_max_inches === undefined ? undefined : Number(row.screen_size_max_inches),
+    isMobilePhone: row.is_mobile_phone === null || row.is_mobile_phone === undefined ? undefined : !!row.is_mobile_phone,
+    isSparePart: row.is_spare_part === null || row.is_spare_part === undefined ? undefined : !!row.is_spare_part,
+    minStock: Number(row.min_stock || 0),
+  };
+}
+
+const LIVE_CATALOG_COLUMNS =
+  "id,client_id,sku,barcode,brand,model,category,mrp,photo,warranty_enabled,warranty_months," +
+  "require_customer_details,supplier,notes,compatible_models,screen_size_inches,screen_size_max_inches," +
+  "is_mobile_phone,is_spare_part,min_stock";
+
+export async function fetchLiveCatalog(storeId: string): Promise<{ byClientId: Record<string, LiveCatalogEntry>; bySku: Record<string, LiveCatalogEntry> }> {
+  const { data, error } = await supabase
+    .from("products")
+    .select(LIVE_CATALOG_COLUMNS)
+    .eq("store_id", storeId) as { data: any[] | null; error: any };
+  if (error) throw error;
+  const byClientId: Record<string, LiveCatalogEntry> = {};
+  const bySku: Record<string, LiveCatalogEntry> = {};
+  for (const row of data || []) {
+    const entry = rowToLiveCatalogEntry(row);
+    if (row.client_id) byClientId[row.client_id] = entry;
+    else if (row.sku) bySku[row.sku] = entry;
+  }
+  return { byClientId, bySku };
+}
+
+/**
+ * Realtime companion to fetchLiveCatalog() — separate channel from
+ * subscribeToLiveStock() above (deliberately not merged into it) so this
+ * addition can never regress the already-device-tested Phase 1 stock feed;
+ * worst case if this one has a bug, stock sync keeps working unaffected.
+ */
+export function subscribeToLiveCatalog(storeId: string, onChange: (clientId: string | null, sku: string, entry: LiveCatalogEntry) => void) {
+  const channel = supabase
+    .channel(`live-catalog-${storeId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "products", filter: `store_id=eq.${storeId}` },
+      (payload: any) => {
+        const row = payload.new || payload.old;
+        if (!row) return;
+        onChange(row.client_id || null, row.sku || "", rowToLiveCatalogEntry(row));
+      }
+    )
+    .subscribe();
+  return channel;
+}
+
+/**
  * Phase 1 (continued) — writes a product's FULL catalog (photo, MRP,
  * confidential price, warranty, notes, compatible models, screen size,
  * etc.), not just the minimal scalar fields resolve_product_for_sale

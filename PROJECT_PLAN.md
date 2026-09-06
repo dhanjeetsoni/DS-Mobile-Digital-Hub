@@ -22,6 +22,14 @@ obvious or quick.
   earlier session is a starting point to double-check, not a fact to trust.
 - No silent "I think this is fixed" claims — call out what was verified vs.
   what still needs the owner to test on a real device.
+- **Before starting any phase/item, always check first whether it's already
+  partially built** — other sessions (automated pipelines or other Claude
+  sessions) may have already started or finished pieces of it. Deeply
+  verify what already exists in both GitHub (code/commit history) and the
+  live Supabase project (tables, RPCs, migrations) before writing anything
+  new. If something exists but is incomplete or rough, finish and improve
+  it to the maximum reasonable level rather than building a parallel
+  version next to it.
 
 ## Decisions locked in with the owner (2026-09-05)
 

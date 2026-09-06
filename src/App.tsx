@@ -66,7 +66,7 @@ import { AddGiftModal } from "./components/AddGiftModal";
 import { staffSignIn, isAccessWindowExpired, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
-import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync } from "./services/repository";
+import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
@@ -207,6 +207,14 @@ export default function App() {
   const [cloudUser, setCloudUser] = useState<any>(null);
   const [cloudProfile, setCloudProfile] = useState<any>(null);
   const [cloudVersion, setCloudVersion] = useState(0);
+  // Phase 1 (data architecture fix): live per-product stock, sourced from
+  // the relational products.stock_qty (authoritative, row-locked on every
+  // sale/purchase/adjustment) rather than the JSON blob's cached number.
+  // Seeded once via fetchLiveStock() on bootstrap, then kept current by
+  // subscribeToLiveStock()'s realtime feed — see the bootstrap effect below.
+  const [liveStock, setLiveStock] = useState<Record<string, number>>({});
+  const stockOf = (product: Product): number =>
+    product.id in liveStock ? liveStock[product.id] : product.stock;
   const [cloudReady, setCloudReady] = useState(false);
   const [cloudStatus, setCloudStatus] = useState("offline");
   const [showCloudAuth, setShowCloudAuth] = useState(false);
@@ -544,6 +552,7 @@ export default function App() {
   useEffect(() => {
     let active = true;
     let channel: any = null;
+    let stockChannel: any = null;
     const bootstrap = async () => {
       try {
         setCloudStatus("connecting");
@@ -599,6 +608,17 @@ export default function App() {
           setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
           setCloudVersion(remote.version);
         }
+        // Phase 1 (data architecture fix): seed the live-stock map once,
+        // then keep it current via realtime — independent of the (slower,
+        // conflict-prone) store_state blob save/load cycle above.
+        try {
+          setLiveStock(await fetchLiveStock(profile.store_id));
+        } catch (e) {
+          console.warn("Live stock initial fetch failed; falling back to blob stock until realtime catches up", e);
+        }
+        stockChannel = subscribeToLiveStock(profile.store_id, (productId, stockQty) => {
+          setLiveStock(prev => ({ ...prev, [productId]: stockQty }));
+        });
         setCloudStatus("online");
         setCloudReady(true);
         if (profile.role !== "staff") {
@@ -614,7 +634,7 @@ export default function App() {
       } catch (e) { console.warn("Cloud bootstrap failed", e); setCloudStatus("error"); setCloudReady(true); }
     };
     bootstrap();
-    return () => { active = false; if (channel) supabase.removeChannel(channel); };
+    return () => { active = false; if (channel) supabase.removeChannel(channel); if (stockChannel) supabase.removeChannel(stockChannel); };
   }, []);
 
   useEffect(() => {
@@ -1144,7 +1164,8 @@ export default function App() {
 
   // Cart operations
   const addToCart = (product: Product, specificImei?: string) => {
-    if (product.stock <= 0) {
+    const availableStock = stockOf(product);
+    if (availableStock <= 0) {
       showToast("Product is out of stock!", "red");
       return;
     }
@@ -1152,7 +1173,7 @@ export default function App() {
     const existingIdx = cart.findIndex((c) => c.productId === product.id && !c.isGift);
     if (existingIdx >= 0) {
       const existing = cart[existingIdx];
-      if (existing.qty + 1 > product.stock) {
+      if (existing.qty + 1 > availableStock) {
         showToast("Not enough stock available!", "red");
         return;
       }
@@ -1205,7 +1226,7 @@ export default function App() {
   // total (which the profit engine already derives for free from the
   // line's FIFO `cost`).
   const addGiftToCart = (product: Product) => {
-    if (product.stock <= 0) {
+    if (stockOf(product) <= 0) {
       showToast("Yeh gift product abhi out of stock hai!", "red");
       return;
     }
@@ -1249,7 +1270,7 @@ export default function App() {
       newCart[existingIdx] = { ...newCart[existingIdx], price };
       setCart(newCart);
     } else {
-      if (product.stock <= 0) {
+      if (stockOf(product) <= 0) {
         showToast("Product is out of stock!", "red");
         return;
       }
@@ -1408,6 +1429,22 @@ export default function App() {
       const priceFloor = prod.confidentialPrice ?? prod.purchasePrice ?? 0;
       if (!item.isGift && item.price < priceFloor && cloudProfile?.role !== "owner") {
         showToast("SELLING PRICE CONFIDENTIAL PRICE SE KAM NAHI HO SAKTI.", "red");
+        return;
+      }
+    }
+
+    // Phase 1 (data architecture fix) — final pre-flight availability check
+    // against the *live* relational stock number (stockOf()), not the local
+    // JSON blob's cached count the FIFO simulation below uses. Two+ devices
+    // can each have a slightly stale local blob at the same moment; without
+    // this, a staff member could get all the way through checkout locally
+    // only to have the server's atomic_complete_sale reject it at the very
+    // last step with a raw "insufficient inventory" error. Catching it here
+    // first gives a clear, friendly message before any of that runs.
+    for (const item of cart) {
+      const prod = workingDb.products.find((p) => p.id === item.productId);
+      if (prod && stockOf(prod) < item.qty) {
+        showToast(`${prod.name}: sirf ${stockOf(prod)} bache hain (live), ${item.qty} nahi mil sakte.`, "red");
         return;
       }
     }
@@ -1925,7 +1962,7 @@ export default function App() {
         const returnsToday = visibleReturns.filter((r) => r.date === todayStr());
         const refundAmtToday = returnsToday.reduce((a, r) => a + r.subtotalRefund, 0);
         const todayNetSales = round2(grossSalesRev - refundAmtToday);
-        const lowStock = db.products.filter((p) => p.stock <= p.minStock);
+        const lowStock = db.products.filter((p) => stockOf(p) <= p.minStock);
         const totalDue = db.customers.reduce((a, c) => a + (c.totalDue || 0), 0);
         const openJobs = db.jobs.filter((j) => j.status !== "Delivered").length;
         const totalPayables = db.suppliers.reduce((a, s) => a + (s.totalPayable || 0), 0);
@@ -2151,7 +2188,7 @@ export default function App() {
                           <tr key={p.id}>
                             <td><b>{p.name}</b></td>
                             <td>{p.category}</td>
-                            <td style={{ color: "var(--red)", fontWeight: 800 }}>{p.stock}</td>
+                            <td style={{ color: "var(--red)", fontWeight: 800 }}>{stockOf(p)}</td>
                             <td><span className="badge low">Min: {p.minStock}</span></td>
                           </tr>
                         ))}
@@ -2227,7 +2264,7 @@ export default function App() {
         ];
 
         const filteredProds = db.products.filter((p) => {
-          if (p.stock <= 0) return false;
+          if (stockOf(p) <= 0) return false;
           if (sellCategoryFilter !== "ALL") {
             if (sellCategoryFilter === "Cyber & Xerox") {
               if (p.category !== "Cyber & Xerox" && p.category !== "Services") return false;
@@ -2302,7 +2339,7 @@ export default function App() {
                       <div className="nm">
                         <b>{p.name}</b> <span className="hint">({p.category})</span>
                         <div className="hint">
-                          Stock: <b style={{ color: p.stock <= p.minStock ? "var(--red)" : "inherit" }}>{p.stock}</b> • {inr(p.sellingPrice)}
+                          Stock: <b style={{ color: stockOf(p) <= p.minStock ? "var(--red)" : "inherit" }}>{stockOf(p)}</b> • {inr(p.sellingPrice)}
                           {p.warrantyEnabled ? ` • ${p.warrantyMonths}m Warranty` : ""}
                         </div>
                       </div>
@@ -2682,8 +2719,8 @@ export default function App() {
                         })()}
                       </td>
                         <td>
-                          <b style={{ color: p.stock <= p.minStock ? "var(--red)" : "var(--green)" }}>
-                            {p.stock}
+                          <b style={{ color: stockOf(p) <= p.minStock ? "var(--red)" : "var(--green)" }}>
+                            {stockOf(p)}
                           </b>
                         </td>
                         <td>{p.warrantyEnabled ? `${p.warrantyMonths}m` : "None"}</td>
@@ -3721,7 +3758,7 @@ export default function App() {
                 onDismiss={dismissAppUpdate}
               />
             )}
-            {db.products.filter(p => p.stock <= p.minStock).length > 0 && (
+            {db.products.filter(p => stockOf(p) <= p.minStock).length > 0 && (
               <div
                 style={{
                   padding: "4px 10px",
@@ -3735,7 +3772,7 @@ export default function App() {
                 }}
                 onClick={() => setCurrentPage("products")}
               >
-                LOW STOCK: {db.products.filter(p => p.stock <= p.minStock).length} SKUs
+                LOW STOCK: {db.products.filter(p => stockOf(p) <= p.minStock).length} SKUs
               </div>
             )}
 

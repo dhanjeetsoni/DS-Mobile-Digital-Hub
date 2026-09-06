@@ -107,6 +107,29 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
           items: [{ productId: product.id, qty, purchasePrice }],
         };
         try {
+          // BUG FIX (2026-09-06, Phase 1): same class of bug already fixed in
+          // StockAdjustView — a locally-created product only ever has a
+          // client id like "p_<uuid>", never a row in public.products.
+          // atomic_complete_purchase's product_id items are strict `uuid`,
+          // so passing product.id straight through fails every restock on
+          // such a product with "invalid input syntax for type uuid" before
+          // the RPC body (and isBusinessRejection()) ever runs. Resolve/
+          // find-or-create the real product uuid first, exactly like the
+          // sale flow and stock adjustments already do.
+          const { data: realProductId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+            p_store_id: storeId,
+            p_local_id: String(product.id),
+            p_sku: product.sku || null,
+            p_model: product.name || null,
+            p_brand: product.brand || null,
+            p_category: product.category || null,
+            p_cost_price: product.purchasePrice ?? 0,
+            p_selling_price: product.sellingPrice ?? 0,
+            p_stock_qty: product.stock ?? 0,
+            p_min_stock: product.minStock ?? 0,
+          });
+          if (resolveError) throw resolveError;
+
           const { error } = await supabase.rpc("atomic_complete_purchase", {
             p_store_id: storeId,
             p_supplier: purchasePayload.supplier,
@@ -115,7 +138,7 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
             p_notes: purchasePayload.notes,
             p_payment_status: purchasePayload.paymentStatus,
             p_idempotency_key: idempotencyKey,
-            p_items: [{ product_id: product.id, quantity: qty, purchase_price: purchasePrice }],
+            p_items: [{ product_id: realProductId, quantity: qty, purchase_price: purchasePrice }],
           });
           if (error) throw error;
         } catch (err: any) {

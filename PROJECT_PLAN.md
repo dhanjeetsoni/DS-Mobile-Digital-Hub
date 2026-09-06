@@ -1,6 +1,6 @@
 # DS Mobile & Digital Hub — Master Fix & Rebuild Plan
 
-_Last updated: 2026-09-05_
+_Last updated: 2026-09-06_
 
 This document is the single source of truth for the ongoing stabilization and
 rebuild effort. Each phase is worked on **only after the owner explicitly
@@ -132,29 +132,60 @@ obvious or quick.
       may be a real Phase 6 "AI Photo Scan accuracy" duplicate-detection
       gap worth folding in there rather than a one-off manual fix here.
 
-### ⬜ Phase 1: Data architecture fix (the root cause of the flicker/races)
-- [ ] Stop treating the single JSON `store_state` blob as the source of truth
-      for stock/sales/invoices
-- [ ] Make the relational tables (`products.stock_qty`, `sales`,
-      `sale_items`, row-locked RPCs) authoritative for anything transactional
-- [ ] Keep the JSON blob only for slow-changing settings/config
-- [ ] Add realtime subscriptions so every device reflects a sale/adjustment
-      within ~1 second, from whichever device made it (owner Windows, owner
-      Android, or staff Android)
-- [ ] Re-verify: sell from any one device → stock updates on all others
-      instantly, invoice fires to Telegram silently, every time, no misses
-- [ ] **Technical detail from research**: `resolve_product_for_sale()`
-      currently dedupes only by SKU — every product going forward must
-      always carry a SKU (already true for the in-app "Add Product" flow),
-      and the function should also backfill a `client_id` column (matching
-      the pattern already used by `suppliers`/`customers`) so a product's
-      *local* id and its *real* id are permanently linked, not just
-      re-derived by SKU lookup every time
-- [ ] **My own addition**: add a database constraint/trigger so a
-      `sale_items` row can never reference a `products.id` that doesn't
-      belong to the same `store_id` — a defence-in-depth check so a future
-      bug like the "invalid uuid" one fails immediately and loudly in
-      testing, instead of silently reaching production
+### 🟡 Phase 1: Data architecture fix (the root cause of the flicker/races) — mostly done, needs owner device-test
+_A prior session did real work on this but hit its time limit mid-way; per the
+ground rules above, everything below was independently re-verified against
+the live DB/repo rather than trusted, and what was actually missing was
+finished in this session (2026-09-06)._
+
+- [x] **DB-side, confirmed genuinely live** (was applied directly to
+      Supabase by the prior session, but had no matching migration file in
+      the repo — added one now, closing that drift):
+      `products.client_id` column + unique index, and
+      `resolve_product_for_sale()` checks it (after an exact-uuid match,
+      before falling back to SKU) and backfills it on every SKU match too —
+      read straight from the live function body, not assumed.
+- [x] Realtime already enabled on `products` and `sales` (confirmed live via
+      `supabase_realtime` publication) — also had no migration file in the
+      repo; added one.
+- [x] **Client-side — this was claimed done by the prior session but did not
+      exist anywhere in the actual repo** (lost when that session's time ran
+      out before it committed/pushed). Built it from scratch this session:
+  - `fetchLiveStock()` + `subscribeToLiveStock()` (repository.ts): one-shot
+    read of every product's real `stock_qty`, then a realtime feed that
+    updates it live as any device sells/adjusts/restocks.
+  - `liveStock` state + a `stockOf(product)` helper in App.tsx, seeded and
+    kept current via the two functions above.
+  - Every stock **gate** (add to cart, add gift, confidential-price add,
+    the new pre-checkout availability check added this session) and every
+    stock **display** (Product Catalog list, the dashboard low-stock table,
+    the header's "LOW STOCK: N SKUs" pill) now reads `stockOf()` — the live
+    relational number — instead of the JSON blob's cached `product.stock`.
+  - Found and fixed the same "raw client-local id sent straight into a
+    strict `uuid` column" bug in `PurchasesView.tsx`'s restock flow (both
+    the live path and the offline-queue replay path) — the same class of
+    bug already fixed earlier in `StockAdjustView`, just never applied here.
+- [x] Verified after every change: `tsc --noEmit`, full test suite (26
+      tests), static audit, production build — all clean.
+- [ ] **Not done yet, carried over from the prior session's list**: a
+      `sale_items` → `products` same-`store_id` defence-in-depth constraint.
+- [ ] **Owner needs to actually test this on a real device** — everything
+      above is verified against the live DB/repo and passes automated
+      checks, but the "sell from one device, see stock update on another
+      within ~1 second, no flicker" behaviour itself hasn't been watched
+      happen live yet. That's the one thing left before this can be ✅.
+- [ ] The JSON blob still carries the full product catalog (photos, MRP,
+      discount%, warranty text) — only stock quantity and sales were made
+      relational-authoritative here, which is what actually caused the
+      race/flicker. Migrating the rest of the catalog to relational tables
+      is a separate, bigger schema-migration effort, deliberately not
+      attempted in this pass.
+- [ ] **Technical detail, still open**: `resolve_product_for_sale()` now has
+      `client_id`, but only products that go through a resolve call (sale,
+      stock adjustment, purchase) get backfilled — a product that's never
+      been sold/adjusted/restocked since this shipped still has
+      `client_id = null` until the first time one of those happens to it.
+      Harmless (SKU fallback still works), just not instant.
 
 ### ⬜ Phase 2: Login & session redesign
 - [ ] Permanent background session (survives app close/reopen; only a true

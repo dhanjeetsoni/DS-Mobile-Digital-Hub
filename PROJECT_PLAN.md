@@ -169,17 +169,50 @@ finished in this session (2026-09-06)._
       tests), static audit, production build — all clean.
 - [ ] **Not done yet, carried over from the prior session's list**: a
       `sale_items` → `products` same-`store_id` defence-in-depth constraint.
+- [x] **Full product catalog (photo, MRP, discount%, warranty, notes,
+      compatible models, screen size, etc.) is now also relational — done
+      this session, per the owner's explicit ask to close this gap**:
+  - `products` table extended with every catalog field the Add/Edit
+    Product forms capture (previously only the scalar transactional
+    fields — sku/brand/model/category/prices/stock — existed there).
+  - New `upsert_product_catalog()` RPC (owner/manager only, matching the
+    "staff can't add/edit products" decision): resolves the same way
+    `resolve_product_for_sale()` does (uuid → `client_id` → sku) so
+    editing an already-resolved product updates the same row instead of
+    creating a duplicate, and writes/updates every catalog field in one
+    call.
+  - `AddProductModal` and `EditProductModal` now call this (via a new
+    `upsertProductCatalog()` in repository.ts) right alongside their
+    existing local blob save — best-effort/non-blocking, with the same
+    offline-queue fallback (a new `"product"` sync_queue operation type,
+    which already existed as a declared-but-unused type and is now
+    actually wired into `processOperation`) every other cloud write uses.
+  - **What "migrated" means here, precisely**: every new/edited product
+    is now durably, queryably relational going forward, and the
+    relational row is authoritative for that data. The **read** side
+    (every screen that displays a product) still reads from the JSON
+    blob, which stays in sync because it's written at the same moment as
+    the relational row — a full rip-and-replace of every catalog display
+    call site to read relationally instead was **not** attempted in this
+    pass (real scope, not a hidden gap: dozens of render sites across a
+    very large file, meaningfully higher regression risk, and not what
+    was actually causing the flicker — that was stock/sales, already
+    fixed above). Worth its own pass later if/when a reason to need it
+    directly emerges (e.g. Phase 7's e-commerce product pages).
+  - **Backfill limitation, found while implementing**: the live
+    `store_state` blob's `products` array is currently **empty (0
+    items)** — likely from the earlier data-loss incident/fresh-start
+    decision. That means the 3 existing relational product rows (the 2
+    flagged "Super X" duplicates + 1 more) have **no photo/MRP/warranty/
+    notes to backfill from** anywhere live; those 3 fields will stay
+    null on those 3 rows until the owner opens each in Edit Product and
+    re-saves once. Every product added/edited from now on will have full
+    data from the start.
 - [ ] **Owner needs to actually test this on a real device** — everything
       above is verified against the live DB/repo and passes automated
       checks, but the "sell from one device, see stock update on another
       within ~1 second, no flicker" behaviour itself hasn't been watched
       happen live yet. That's the one thing left before this can be ✅.
-- [ ] The JSON blob still carries the full product catalog (photos, MRP,
-      discount%, warranty text) — only stock quantity and sales were made
-      relational-authoritative here, which is what actually caused the
-      race/flicker. Migrating the rest of the catalog to relational tables
-      is a separate, bigger schema-migration effort, deliberately not
-      attempted in this pass.
 - [ ] **Technical detail, still open**: `resolve_product_for_sale()` now has
       `client_id`, but only products that go through a resolve call (sale,
       stock adjustment, purchase) get backfilled — a product that's never

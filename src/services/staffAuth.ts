@@ -11,6 +11,7 @@ import { supabase, isCloudConfigured } from "./supabaseClient";
 
 export interface StaffProfile {
   id: string;
+  role?: "staff" | "manager";
   staff_login_id: string | null;
   staff_name: string | null;
   access_enabled: boolean;
@@ -84,9 +85,13 @@ async function callStaffManage(action: string, payload: Record<string, unknown> 
   return data as any;
 }
 
-/** Owner: create a new staff login (ID + password). Returns the created staff row info. */
-export async function createStaffAccount(opts: { staffName: string; loginId: string; password: string }) {
-  return callStaffManage("create", opts);
+/** Owner: create a new login (ID + password). `role` decides the access level:
+ *  "staff" = time-boxed, owner-controlled access (existing behaviour).
+ *  "manager" = full owner-level access, generated so the owner doesn't have
+ *  to type their real Gmail-tied cloud email/password on every device.
+ *  Returns the created account row info. */
+export async function createStaffAccount(opts: { staffName: string; loginId: string; password: string; role?: "staff" | "manager" }) {
+  return callStaffManage("create", { ...opts, role: opts.role || "staff" });
 }
 
 /** Owner: change a staff member's password without knowing the old one. */
@@ -99,21 +104,21 @@ export async function deleteStaffAccount(staffId: string) {
   return callStaffManage("delete", { staffId });
 }
 
-/** Owner: list every staff account in this shop. */
+/** Owner: list every Android-Access-Area-issued account in this shop (both staff and manager/full-access). */
 export async function listStaffAccounts(storeId: string): Promise<StaffProfile[]> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("id,staff_login_id,staff_name,access_enabled,access_mode,access_expires_at,access_granted_at,visibility_from,created_at,last_active_at,last_offline_download_at")
+    .select("id,role,staff_login_id,staff_name,access_enabled,access_mode,access_expires_at,access_granted_at,visibility_from,created_at,last_active_at,last_offline_download_at")
     .eq("store_id", storeId)
-    .eq("role", "staff")
+    .in("role", ["staff", "manager"])
     .order("staff_name", { ascending: true });
   if (error) throw error;
   return (data || []) as StaffProfile[];
 }
 
-/** Owner: turn a staff member's access OFF. Immediate — they're logged out and blocked on next check. */
+/** Owner: turn an account's access OFF. Immediate — they're logged out and blocked on next check. */
 export async function revokeStaffAccess(staffId: string) {
-  const { error } = await supabase.from("profiles").update({ access_enabled: false }).eq("id", staffId).eq("role", "staff");
+  const { error } = await supabase.from("profiles").update({ access_enabled: false }).eq("id", staffId).in("role", ["staff", "manager"]);
   if (error) throw error;
 }
 
@@ -155,7 +160,7 @@ export async function grantStaffAccess(
       visibility_from: now.toISOString(),
     })
     .eq("id", staffId)
-    .eq("role", "staff");
+    .in("role", ["staff", "manager"]);
   if (error) throw error;
 }
 
@@ -229,9 +234,22 @@ export async function staffSignIn(loginId: string, password: string): Promise<St
     .eq("id", data.user.id)
     .maybeSingle();
 
-  if (!profile || profile.role !== "staff") {
+  // 2026-09-05: this login form now accepts BOTH kinds of Login ID/Password
+  // generated from the Android Access Area — a "staff" credential (limited,
+  // time-boxed access) and a "manager" credential (full owner-level access,
+  // generated so the real owner doesn't have to type their Gmail-tied
+  // email/password on every device). Anything else (or a genuine 'owner'
+  // row, which only ever exists via the original Cloud Sign In) is rejected
+  // here — this form is only for Android-Access-Area-issued credentials.
+  if (!profile || !["staff", "manager"].includes(profile.role)) {
     await supabase.auth.signOut();
-    return { status: "error", message: "Ye account staff account nahi hai." };
+    return { status: "error", message: "Ye account is login form se sign in ke liye valid nahi hai." };
+  }
+  if (profile.role === "manager") {
+    // Manager (owner-level) credentials have no access_enabled/time-window
+    // gate — that's a staff-only concept. Full access, same as the owner.
+    supabase.rpc("touch_staff_last_active").then(() => {}, () => {});
+    return { status: "ok", profile };
   }
   if (!profile.access_enabled) {
     await supabase.auth.signOut();

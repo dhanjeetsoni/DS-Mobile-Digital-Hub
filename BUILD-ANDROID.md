@@ -35,8 +35,12 @@ par kuch bhi install karne ki zaroorat nahi.
    - Yeh khud-ba-khud bhi chalega jab tum `v1.2.3` jaisa git tag push karoge.
 4. Build complete hone ke baad (~10-15 minute), us workflow-run ke andar
    **Artifacts** section mein alag-alag APK milenge:
-   - `staff-android-apk` → Staff Android App
-   - `owner-android-apk` → Owner Android App
+   - `staff-android-apk` → Staff Android App (dedicated, legacy)
+   - `owner-android-apk` → Owner Android App (dedicated, legacy)
+   - `mobile-android-apk` → **DS Mobile** (recommended) — ek hi app, koi bhi
+     Android Access Area se mila Login ID/Password daalega, uske role ke
+     hisaab se access mil jaayega (Staff ya Owner-level) — Gmail login ki
+     zaroorat nahi.
    - `windows-installer` → Windows `.exe`
    (Ek "release" job in sabko ek GitHub Release mein bhi jod deta hai.)
 5. Download karke seedha kisi bhi Android phone par install kar do

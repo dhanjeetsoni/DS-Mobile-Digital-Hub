@@ -701,3 +701,31 @@ I think it's necessary:_
 - [ ] Clean up dead code / old migrations
 - [ ] Update this document — everything checked off, or explicitly listed as
       known/accepted limitation
+
+**Note added 2026-09-06 (separate session, before switching to Phase 5 per
+owner's instruction) — flagging a fork, not fixing it right now:** while
+independently working on this same PIN item in parallel, a
+`public.profile_pins` table + `get_own_pin_status`/`set_own_pin`/
+`verify_own_pin`/`reset_staff_pin` RPCs were built and tested (11/11 test
+cases passed against the live DB) — this predates seeing that the
+`profiles.pin_hash`/`pin_salt` + `set_my_pin`/`admin_reset_pin`/
+`admin_clear_pin` approach above already existed from a different session.
+The frontend uses only the `profiles.pin_hash` approach — the
+`profile_pins` table/RPCs are live on Supabase but genuinely unused
+dead code right now, not a second active system to reconcile. Left in
+place rather than dropped, since deleting live DB objects without the
+owner's go-ahead didn't seem like the right call to make solo; whoever
+picks this up next should either wire the frontend to the isolated-table
+version instead (its advantage: `profiles`' existing owner/manager
+full-row SELECT policy structurally cannot expose `pin_hash`/`pin_salt`
+to a client at all, vs. today's approach where those two columns living
+directly on `profiles` means a future query change to the very common
+"list my staff" call is one mistake away from handing every staff
+member's PIN hash+salt to the owner's client, crackable near-instantly
+given a 4-digit PIN's 10,000-value keyspace — not exploitable by
+*today's* actual queries, which were checked and don't select those two
+columns, but structurally fragile going forward) — or simply drop the
+unused table+RPCs (`profile_pins`, `get_own_pin_status`, `set_own_pin`,
+`verify_own_pin`, `reset_staff_pin`) if the owner decides the offline-first
+design is worth keeping the fragility. Not deciding this alone; flagging
+it for whoever picks Phase 2 back up.

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Database,
   Product,
@@ -14,7 +14,7 @@ import {
   MobileFinanceDetails,
 } from "./types";
 import { inr, round2, numberToWordsIndian, computeSaleTotals, computeDiscountPercent } from "./utils/indianCurrency";
-import { uid, todayStr, nowTimeStr, genSku, addStockBatch, consumeFIFO, fifoCostTotal, getAvailableStock } from "./utils/fifoEngine";
+import { uid, todayStr, nowTimeStr, genSku, backfillMissingSkus, addStockBatch, consumeFIFO, fifoCostTotal, getAvailableStock } from "./utils/fifoEngine";
 import { naturalMatch } from "./utils/naturalSearch";
 import { Sidebar, SECONDARY_NAV_ITEMS } from "./components/Sidebar";
 import BottomTabBar from "./components/BottomTabBar";
@@ -65,14 +65,16 @@ import { ConfidentialPriceModal } from "./components/ConfidentialPriceModal";
 import { ConnectionStatusBadge } from "./components/ConnectionStatusBadge";
 import { AddGiftModal } from "./components/AddGiftModal";
 import { staffSignIn, isAccessWindowExpired, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
+import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured } from "./services/pinAuth";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
-import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, reconcileProductStockFromRelational } from "./services/repository";
+import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, type LiveCatalogEntry } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
 import { sqliteList } from "./services/localSqlite";
 import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert, sendWeeklyReportToTelegram } from "./services/telegram";
+import { getRepairDiagnosis } from "./services/aiOps";
 import { buildWeeklyReport, isWeeklyReportDue } from "./utils/weeklyReport";
 import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./services/whatsapp";
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
@@ -105,6 +107,7 @@ import {
   Loader2,
   Barcode,
   Gift,
+  Menu,
 } from "lucide-react";
 
 const LS_KEY = "dsmdh_db_v2";
@@ -194,9 +197,6 @@ export default function App() {
   // Start from an empty safe state. Local business cache is loaded only after
   // authentication is known, preventing a previous owner's data flashing on a staff device.
   const [db, setDb] = useState<Database>(() => defaultDB());
-  const dbRef = useRef(db);
-  useEffect(() => { dbRef.current = db; }, [db]);
-  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   const [ownerMode, setOwnerMode] = useState(false);
   const initialRoutePage = (() => {
@@ -209,6 +209,69 @@ export default function App() {
   const [cloudUser, setCloudUser] = useState<any>(null);
   const [cloudProfile, setCloudProfile] = useState<any>(null);
   const [cloudVersion, setCloudVersion] = useState(0);
+  // Phase 1 (data architecture fix): live per-product stock, sourced from
+  // the relational products.stock_qty (authoritative, row-locked on every
+  // sale/purchase/adjustment) rather than the JSON blob's cached number.
+  // Seeded once via fetchLiveStock() on bootstrap, then kept current by
+  // subscribeToLiveStock()'s realtime feed — see the bootstrap effect below.
+  const [liveStock, setLiveStock] = useState<Record<string, number>>({});
+  const stockOf = (product: Product): number =>
+    product.id in liveStock ? liveStock[product.id] : product.stock;
+
+  // Phase 1 completion (2026-09-06): same shape as liveStock/stockOf above,
+  // for the rest of the catalog. Read-only merge — NEVER mutates the
+  // product it's given, and deliberately never touches purchasePrice or
+  // confidentialPrice (those stay exactly as the blob has them, matching
+  // upsertProductCatalog's write side and every existing owner-only /
+  // Telegram-approval pricing flow untouched). Call sites that only ever
+  // read a product for display should use catalogOf(p) instead of p
+  // directly; call sites that find-then-mutate-then-save a product (e.g.
+  // ImeiAuditView's db.products.push/edit-in-place flows) must keep using
+  // the raw db.products entry — merging here would make that edit silently
+  // apply to a throwaway derived object instead of the real one that gets
+  // persisted.
+  const [liveCatalogByClientId, setLiveCatalogByClientId] = useState<Record<string, LiveCatalogEntry>>({});
+  const [liveCatalogBySku, setLiveCatalogBySku] = useState<Record<string, LiveCatalogEntry>>({});
+  const catalogOf = (product: Product): Product => {
+    const entry = liveCatalogByClientId[product.id] || (product.sku ? liveCatalogBySku[product.sku] : undefined);
+    if (!entry) return product;
+    return {
+      ...product,
+      sku: entry.sku || product.sku,
+      barcode: entry.barcode ?? product.barcode,
+      brand: entry.brand || product.brand,
+      category: entry.category || product.category,
+      mrp: entry.mrp !== null ? entry.mrp : product.mrp,
+      sellingPrice: entry.sellingPrice !== null ? entry.sellingPrice : product.sellingPrice,
+      photo: entry.photo || product.photo,
+      warrantyEnabled: entry.warrantyEnabled,
+      warrantyMonths: entry.warrantyMonths || product.warrantyMonths,
+      requireCustomerDetails: entry.requireCustomerDetails,
+      supplier: entry.supplier || product.supplier,
+      notes: entry.notes || product.notes,
+      compatibleModels: entry.compatibleModels.length ? entry.compatibleModels : product.compatibleModels,
+      screenSizeInches: entry.screenSizeInches ?? product.screenSizeInches,
+      screenSizeMaxInches: entry.screenSizeMaxInches ?? product.screenSizeMaxInches,
+      isMobilePhone: entry.isMobilePhone ?? product.isMobilePhone,
+      isSparePart: entry.isSparePart ?? product.isSparePart,
+      minStock: entry.minStock || product.minStock,
+    };
+  };
+  // Read-only, display-ready product list — every screen that only lists/
+  // shows products (not one that finds-then-mutates-then-saves) should
+  // read from this instead of db.products directly.
+  const catalogProducts = useMemo(
+    () => db.products.map(catalogOf),
+    [db.products, liveCatalogByClientId, liveCatalogBySku]
+  );
+  // For child components confirmed to only ever READ db.products (list/
+  // filter/display — never db.products.push/find-then-mutate-then-save).
+  // Passing this instead of the real `db` lets those screens show live
+  // catalog data with zero changes to their own internals. Do NOT use this
+  // for a component that mutates db.products in place (e.g. AddProductModal,
+  // SecondHandKycModal, ImeiAuditView, StockAdjustView, PurchasesView,
+  // ReturnsExchangesView all do — they keep the real `db` prop).
+  const catalogDb = useMemo(() => ({ ...db, products: catalogProducts }), [db, catalogProducts]);
   const [cloudReady, setCloudReady] = useState(false);
   const [cloudStatus, setCloudStatus] = useState("offline");
   const [showCloudAuth, setShowCloudAuth] = useState(false);
@@ -216,6 +279,12 @@ export default function App() {
 
   // Modals
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+  // 2026-09-04 — Android/narrow-screen nav drawer. Sidebar is fixed-width and
+  // always in the document flow at desktop widths (unchanged); below the
+  // 900px breakpoint (see index.css) it becomes an off-canvas drawer that
+  // this state toggles, closing itself automatically on every navigation so
+  // it never lingers open over the page like a modal would.
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [confidentialPriceProduct, setConfidentialPriceProduct] = useState<Product | null>(null);
   const [isAddGiftOpen, setIsAddGiftOpen] = useState(false);
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
@@ -229,11 +298,17 @@ export default function App() {
   const [viewingCreditNote, setViewingCreditNote] = useState<ReturnRecord | null>(null);
   const [viewingExchange, setViewingExchange] = useState<ExchangeRecord | null>(null);
   const [isOwnerLoginOpen, setIsOwnerLoginOpen] = useState(false);
+  // Phase 2: self-service "My PIN" form state (used by owner/manager in
+  // Settings, and by anyone via the account menu — see myPinForm usage).
+  const [myPinForm, setMyPinForm] = useState({ current: "", next: "", confirm: "", busy: false, msg: "" });
   const [isWindowsModalOpen, setIsWindowsModalOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   // ---- Access Gate: shown every time the app opens. Staff vs Owner Confidential ----
-  const GATE_ATTEMPTS_KEY = "dsmdh_owner_gate_state_v1";
+  // Phase 2: the lockout counter is now keyed per-profile — on a shared
+  // counter device, one staff member's wrong PIN attempts must not lock out
+  // a different person who logs in on the same machine.
+  const GATE_ATTEMPTS_KEY = `dsmdh_gate_state_v1_${cloudProfile?.id || "anon"}`;
   const [gateUnlocked, setGateUnlocked] = useState(false);
   // Step 1.5/1.8: the *same* codebase is packaged three ways —
   //   VITE_APP_VARIANT unset/"full"  -> Windows desktop app (today's behaviour, both tiles)
@@ -244,7 +319,7 @@ export default function App() {
   // See src-tauri/tauri.staff-android.conf.json / tauri.owner-android.conf.json and
   // BUILD-ANDROID.md for how these get built into two separate installable APKs.
   const APP_VARIANT = (import.meta as any).env?.VITE_APP_VARIANT || "full";
-  const [gateStage, setGateStage] = useState<"choose" | "ownerAuth" | "staffAuth" | "staffDenied">(
+  const [gateStage, setGateStage] = useState<"choose" | "ownerAuth" | "staffAuth" | "staffDenied" | "personalPin">(
     APP_VARIANT === "staff" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose"
   );
   // In a dedicated Staff/Owner build there is no "choose" screen to go back
@@ -279,6 +354,20 @@ export default function App() {
       localStorage.setItem(GATE_ATTEMPTS_KEY, JSON.stringify(next));
     } catch {}
   };
+
+  // The very first read of gateAttempts (above) happens before cloudProfile
+  // is known, so it reads the wrong ("anon") key. Re-read the real
+  // per-profile lockout state as soon as we know who's signing in.
+  useEffect(() => {
+    if (!cloudProfile?.id) return;
+    try {
+      const raw = localStorage.getItem(GATE_ATTEMPTS_KEY);
+      setGateAttempts(raw ? JSON.parse(raw) : { count: 0, lockUntil: 0 });
+    } catch {
+      setGateAttempts({ count: 0, lockUntil: 0 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudProfile?.id]);
 
   useEffect(() => {
     if (!gateAttempts.lockUntil) return;
@@ -323,11 +412,20 @@ export default function App() {
     try {
       const result = await staffSignIn(staffLoginId.trim(), staffLoginPassword);
       if (result.status === "ok") {
-        showToast(`Welcome, ${result.profile?.staff_name || staffLoginId}!`, "green");
+        const isFullAccess = result.profile?.role === "manager";
+        showToast(
+          isFullAccess
+            ? `Welcome! Full access signed in.`
+            : `Welcome, ${result.profile?.staff_name || staffLoginId}!`,
+          "green"
+        );
         // The Supabase session is now persisted to local storage by
         // supabase-js itself; reloading lets the existing bootstrap effect
         // (cloud profile load, realtime channel, offline queue flush) pick
-        // it up the normal way instead of duplicating that logic here.
+        // it up the normal way instead of duplicating that logic here — the
+        // bootstrap effect already sets ownerMode true for role
+        // owner/manager, so a "manager" (full-access) Android Access Area
+        // login lands straight in the full app, no separate PIN needed.
         window.location.reload();
         return;
       }
@@ -350,31 +448,36 @@ export default function App() {
   const handleGateOwnerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (gateAttempts.lockUntil > Date.now()) return;
-    const configuredPass = db.settings.ownerPasscode || "";
-    // If the shop hasn't set a custom owner passcode yet, fall back to the
-    // documented default "1234" so a fresh/local install is never locked
-    // out. Once the owner sets a real passcode in Settings, that becomes
-    // the only accepted value (the "1234" fallback stops applying).
-    //
-    // IMPORTANT: this PIN must ALWAYS be checked on its own merits. It is
-    // documented to the user (see the hint text on this screen) as a
-    // separate, device-only security layer from the Cloud account — it
-    // must never be silently bypassed just because a Supabase cloud
-    // session happens to already be authenticated as owner/manager (e.g.
-    // a persisted login from an earlier session on this device). A prior
-    // version of this check did exactly that, letting ANY typed value
-    // unlock Owner mode whenever a cloud-owner session was active.
-    const correct =
-      (configuredPass && gatePassInput === configuredPass) ||
-      (!configuredPass && gatePassInput === "1234");
+
+    // Phase 2 (2026-09-06): two different things share this same screen —
+    // 1) A real signed-in person (owner/manager/staff) re-entering their own
+    //    PIN after an app relaunch — checked against their personal
+    //    profiles.pin_hash via pinAuth.ts.
+    // 2) The old fully-offline "Owner Confidential Area" device passcode,
+    //    reachable with NO cloud account signed in at all (db.settings.
+    //    ownerPasscode, "1234" default) — kept exactly as before so a
+    //    mostly-offline shop doesn't lose local owner-mode access.
+    let correct = false;
+    if (cloudProfile?.id) {
+      correct = await verifyPin(cloudProfile.id, gatePassInput);
+    } else {
+      const configuredPass = db.settings.ownerPasscode || "";
+      // IMPORTANT: this PIN must ALWAYS be checked on its own merits — see
+      // the long-standing comment history on this check. It must never be
+      // silently bypassed just because some other session state looks
+      // authenticated.
+      correct =
+        (!!configuredPass && gatePassInput === configuredPass) ||
+        (!configuredPass && gatePassInput === "1234");
+    }
 
     if (correct) {
       persistGateAttempts({ count: 0, lockUntil: 0 });
-      setOwnerMode(true);
+      if (cloudProfile?.role === "owner" || cloudProfile?.role === "manager" || !cloudProfile) setOwnerMode(true);
       setGateUnlocked(true);
       setGatePassInput("");
       setIsOwnerLoginOpen(false);
-      showToast("Owner access unlocked.", "green");
+      showToast(cloudProfile ? `Welcome back, ${cloudProfile.staff_name || cloudProfile.full_name || "back"}!` : "Owner access unlocked.", "green");
       return;
     }
 
@@ -385,11 +488,11 @@ export default function App() {
 
     if (nextCount >= 3) {
       persistGateAttempts({ count: 0, lockUntil: Date.now() + 2 * 60 * 1000 });
-      showToast("3 incorrect attempts. Owner area locked for 2 minutes.", "red");
+      showToast("3 incorrect attempts. Access locked for 2 minutes.", "red");
       setGateBusy(true);
       try {
         await sendTelegramSecurityAlert(
-          `3 incorrect Owner passcode attempts on ${db.settings.shopName || "your shop"}'s counter device. If this wasn't you, check your shop immediately.`
+          `3 incorrect PIN attempts${cloudProfile?.staff_name ? ` for ${cloudProfile.staff_name}` : ""} on ${db.settings.shopName || "your shop"}'s counter device. If this wasn't you, check your shop immediately.`
         );
       } catch (err) {
         console.warn("Security alert failed to send", err);
@@ -443,6 +546,7 @@ export default function App() {
         setIsOwnerLoginOpen(false);
         setIsWindowsModalOpen(false);
         setIsJobModalOpen(false);
+        setJobAiDiagnosis({ loading: false, text: "", error: "" });
         return;
       }
 
@@ -513,6 +617,10 @@ export default function App() {
 
   // Repair ticket states
   const [isJobModalOpen, setIsJobModalOpen] = useState(false);
+  // 2026-09-04: AI first-look diagnosis for the "Reported Issue" text — a
+  // suggestion only, never a substitute for the technician actually
+  // opening the device (the AI prompt itself says this explicitly too).
+  const [jobAiDiagnosis, setJobAiDiagnosis] = useState<{ loading: boolean; text: string; error: string }>({ loading: false, text: "", error: "" });
   const [jobForm, setJobForm] = useState({
     customerName: "",
     phone: "",
@@ -535,8 +643,8 @@ export default function App() {
   useEffect(() => {
     let active = true;
     let channel: any = null;
-    let productsChannel: any = null;
-    let salesChannel: any = null;
+    let stockChannel: any = null;
+    let catalogChannel: any = null;
     const bootstrap = async () => {
       try {
         setCloudStatus("connecting");
@@ -583,26 +691,79 @@ export default function App() {
               visibilityFrom: profile.visibility_from,
             });
             setOwnerMode(false);
-            setGateUnlocked(true);
+            // Phase 2: staff now get the same per-person PIN lock as
+            // owner/manager, instead of always being waved straight in on a
+            // resumed session. If this staff member has never set a PIN,
+            // behaviour is unchanged (straight in) — the PIN is opt-in for
+            // everyone, same as it always was for the owner.
+            const staffPin = await syncPinFromServer(profile.id);
+            if (!staffPin) {
+              setGateUnlocked(true);
+            } else {
+              setGateStage("personalPin");
+            }
           }
         }
         if (!profile?.store_id) { setCloudStatus("offline"); setCloudReady(true); return; }
         const remote = await loadCloudState();
         if (remote?.state) {
-          let products = remote.state.products;
-          // products RLS only grants SELECT to owner/manager (see
-          // products_owner_manager_write) -- staff read stock via the
-          // load_store_state_for_user RPC's own field projection instead, so
-          // a direct table query here would just silently no-op for them.
-          if (profile.role !== "staff") {
-            try { products = await reconcileProductStockFromRelational(profile.store_id, products); }
-            catch (reconcileError) { console.warn("Stock reconciliation on bootstrap failed", reconcileError); }
-          }
-          setDb(prev => ({ ...prev, ...remote.state, products, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
+          setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
           setCloudVersion(remote.version);
         }
+        // Phase 1 (data architecture fix): seed the live-stock map once,
+        // then keep it current via realtime — independent of the (slower,
+        // conflict-prone) store_state blob save/load cycle above.
+        try {
+          setLiveStock(await fetchLiveStock(profile.store_id));
+        } catch (e) {
+          console.warn("Live stock initial fetch failed; falling back to blob stock until realtime catches up", e);
+        }
+        stockChannel = subscribeToLiveStock(profile.store_id, (productId, stockQty) => {
+          setLiveStock(prev => ({ ...prev, [productId]: stockQty }));
+        });
+        // Phase 1 completion (2026-09-06): same pattern as liveStock above,
+        // but for the rest of the catalog (photo, MRP, warranty, notes,
+        // compatible models, screen size) — the "read side still reads from
+        // the JSON blob" gap the plan explicitly left open when the write
+        // side (upsertProductCatalog) shipped. Deliberately independent of
+        // liveStock's channel/state so a bug here can't regress the
+        // already-verified stock-sync behaviour.
+        try {
+          const { byClientId, bySku } = await fetchLiveCatalog(profile.store_id);
+          setLiveCatalogByClientId(byClientId);
+          setLiveCatalogBySku(bySku);
+        } catch (e) {
+          console.warn("Live catalog initial fetch failed; falling back to blob catalog fields until realtime catches up", e);
+        }
+        catalogChannel = subscribeToLiveCatalog(profile.store_id, (clientId, sku, entry) => {
+          if (clientId) setLiveCatalogByClientId(prev => ({ ...prev, [clientId]: entry }));
+          else if (sku) setLiveCatalogBySku(prev => ({ ...prev, [sku]: entry }));
+        });
         setCloudStatus("online");
         setCloudReady(true);
+        // 2026-09-05 fix: a valid cloud session (real owner Cloud Sign In,
+        // or a "manager" full-access Login ID/Password from the Android
+        // Access Area) used to still hit the Owner Device PIN screen on
+        // every single app relaunch, with no way to skip it — "baar baar
+        // login" even though the account was already authenticated.
+        // Now: if this person has never set a personal PIN, a valid
+        // owner/manager cloud session skips the PIN screen and opens
+        // straight into the app, same relaunch behaviour as any other app.
+        // Setting a PIN is opt-in, not mandatory.
+        //
+        // Phase 2 update (2026-09-06): this used to check the single shared
+        // db.settings.ownerPasscode. Replaced with a real per-person PIN
+        // (profiles.pin_hash/pin_salt via pinAuth.ts) so owner, manager, and
+        // every staff member each have their own PIN instead of one shared
+        // device passcode — see PROJECT_PLAN.md Phase 2.
+        if (profile.role === "owner" || profile.role === "manager") {
+          const pin = await syncPinFromServer(profile.id);
+          if (!pin) {
+            setGateUnlocked(true);
+          } else {
+            setGateStage("personalPin");
+          }
+        }
         if (profile.role !== "staff") {
           channel = supabase.channel(`store-state-${profile.store_id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'store_state', filter: `store_id=eq.${profile.store_id}` }, (payload: any) => {
             const row = payload.new;
@@ -611,62 +772,31 @@ export default function App() {
               setDb(prev => ({ ...prev, ...row.state, settings: { ...prev.settings, ...(row.state.settings || {}) } }));
             }
           }).subscribe();
-          // Phase 1: a sale/adjustment/purchase writes straight to the
-          // relational `products` table via an atomic RPC (see
-          // atomic_complete_sale etc.) and never touches store_state at all
-          // -- so the store_state channel above never fires for it. Without
-          // this, another device only sees the new stock number once *this*
-          // device's next full-blob snapshot save happens to succeed, which
-          // is exactly the kind of delayed/racy path Phase 1 exists to get
-          // rid of. Subscribing directly to `products` patches local stock
-          // within ~1 second of the real write, independent of the blob.
-          // Owner/manager only for the same RLS/confidential-price reason as
-          // the reconciliation call above -- see this block's outer comment.
-          productsChannel = supabase
-            .channel(`products-${profile.store_id}`)
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'products', filter: `store_id=eq.${profile.store_id}` }, (payload: any) => {
-              const row = payload.new;
-              if (!row?.sku) return;
-              setDb(prev => ({
-                ...prev,
-                products: prev.products.map((p) => (p.sku === row.sku && Number(p.stock) !== Number(row.stock_qty)) ? { ...p, stock: Number(row.stock_qty) } : p),
-              }));
-            })
-            .subscribe();
-          // A new sale from another device lands directly in `sales` via
-          // atomic_complete_sale, same as products above -- it doesn't touch
-          // store_state either, so on its own it wouldn't show up here until
-          // the next periodic sync. Reuse the existing, already-correct
-          // full-state load (with stock reconciliation) instead of trying to
-          // reconstruct a Sale/Invoice locally from the relational row alone,
-          // which would lose fields (finance details, warranty, gift, etc.)
-          // that only exist in the richer local shape.
-          salesChannel = supabase
-            .channel(`sales-${profile.store_id}`)
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sales', filter: `store_id=eq.${profile.store_id}` }, async (payload: any) => {
-              const invoiceNo = payload.new?.invoice_no;
-              if (!invoiceNo) return;
-              const alreadyHaveIt = dbRef.current.sales.some((s) => s.invoiceNo === invoiceNo);
-              if (alreadyHaveIt) return; // this device made the sale itself; its own optimistic update already covers it
-              try {
-                const remote = await loadCloudState();
-                if (!remote?.state) return;
-                let products = remote.state.products;
-                try { products = await reconcileProductStockFromRelational(profile.store_id, products); }
-                catch (reconcileError) { console.warn("Stock reconciliation on sale-realtime refresh failed", reconcileError); }
-                setCloudVersion(remote.version);
-                setDb(prev => ({ ...prev, ...remote.state, products, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
-              } catch (refreshError) {
-                console.warn("Realtime sale refresh failed", refreshError);
-              }
-            })
-            .subscribe();
+        } else {
+          // 2026-09-05 fix: staff devices were never getting instant
+          // cross-device updates — realtime was skipped for them entirely.
+          // They can't subscribe to raw `store_state` (it has confidential
+          // fields like purchase price / lender data), but a redacted
+          // realtime mirror already exists server-side for exactly this —
+          // `store_state_staff_view`, kept in sync by a DB trigger, same
+          // redaction as the load_store_state_for_user() RPC (see migration
+          // 20260831064309_realtime_store_state_sync_v23.sql). Subscribing
+          // here is the missing wire-up: now a sale/stock change from
+          // Windows or another device reaches every staff Android device
+          // instantly, with no confidential data ever touching the socket.
+          channel = supabase.channel(`store-state-staff-${profile.store_id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'store_state_staff_view', filter: `store_id=eq.${profile.store_id}` }, (payload: any) => {
+            const row = payload.new;
+            if (row?.state) {
+              setCloudVersion(Number(row.version || 0));
+              setDb(prev => ({ ...prev, ...row.state, settings: { ...prev.settings, ...(row.state.settings || {}) } }));
+            }
+          }).subscribe();
         }
         await flushOfflineQueue();
       } catch (e) { console.warn("Cloud bootstrap failed", e); setCloudStatus("error"); setCloudReady(true); }
     };
     bootstrap();
-    return () => { active = false; if (channel) supabase.removeChannel(channel); if (productsChannel) supabase.removeChannel(productsChannel); if (salesChannel) supabase.removeChannel(salesChannel); };
+    return () => { active = false; if (channel) supabase.removeChannel(channel); if (stockChannel) supabase.removeChannel(stockChannel); if (catalogChannel) supabase.removeChannel(catalogChannel); };
   }, []);
 
   useEffect(() => {
@@ -687,13 +817,32 @@ export default function App() {
           try {
             const remote = await loadCloudState();
             if (remote?.state) {
-              setCloudVersion(remote.version);
-              let products = remote.state.products;
-              if (cloudProfile?.store_id && cloudProfile?.role !== "staff") {
-                try { products = await reconcileProductStockFromRelational(cloudProfile.store_id, products); }
-                catch (reconcileError) { console.warn("Stock reconciliation on version-conflict refresh failed", reconcileError); }
+              // BUG FIX (2026-09-04): this used to overwrite local `db`
+              // with `remote.state` unconditionally, discarding whatever
+              // hadn't been saved yet — e.g. the stock decrement from a
+              // sale that was still in-flight when the conflict hit. With
+              // two+ devices autosaving the whole store every ~650ms, this
+              // collided constantly (live sync_queue showed 8+ conflicts in
+              // under a minute), which is exactly what looked like "stock
+              // shows the new number for a moment, then reverts" — the sale
+              // itself always succeeded (it's committed atomically in
+              // Postgres separately), but the display-facing snapshot kept
+              // losing the local edit that would have shown it.
+              // Retrying the save against the now-current version resolves
+              // a single momentary race (the overwhelmingly common case)
+              // instead of throwing the local edit away immediately; only
+              // fall back to accepting the remote copy if that retry also
+              // collides.
+              try {
+                const retryVersion = await saveCloudState(db, remote.version);
+                setCloudVersion(retryVersion);
+                setCloudStatus("online");
+                return;
+              } catch (retryError) {
+                console.warn("Retry after version conflict also failed; accepting remote state instead", retryError);
+                setCloudVersion(remote.version);
+                setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
               }
-              setDb(prev => ({ ...prev, ...remote.state, products, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
             }
             setCloudStatus("online");
           } catch (refetchError) {
@@ -899,15 +1048,9 @@ export default function App() {
           try {
             const fresh = await loadCloudState();
             if (fresh?.state) {
-              let products = fresh.state.products;
-              if (cloudProfile?.store_id && cloudProfile?.role !== "staff") {
-                try { products = await reconcileProductStockFromRelational(cloudProfile.store_id, products); }
-                catch (reconcileError) { console.warn("Stock reconciliation after sync-flush failed", reconcileError); }
-              }
-              const reconciled = { ...fresh.state, products };
-              setDb(reconciled);
+              setDb(fresh.state);
               setCloudVersion(fresh.version);
-              persistLocalState(reconciled);
+              persistLocalState(fresh.state);
             }
           } catch (error) {
             console.warn("Cloud state refresh after sync failed", error);
@@ -937,6 +1080,24 @@ export default function App() {
     // which is enough to eventually catch every legacy photo.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudUser, cloudProfile?.store_id, cloudStatus]);
+
+  // One-time legacy-sku backfill: resolve_product_for_sale() (used by both
+  // the sale flow and stock adjustments) refuses to resolve a product that
+  // has no sku, since minting one there could create an untraceable
+  // duplicate row — by design, that's the server's job to guard, not to fix
+  // silently. Instead, give every legacy product a sku locally, the same
+  // way AddProductModal generates one for a brand-new product, so it stops
+  // hitting that guard entirely. Purely local (no network call); the
+  // regular autosave picks up the change afterwards.
+  useEffect(() => {
+    const { products, changed } = backfillMissingSkus(db.products);
+    if (changed) saveState({ ...db, products });
+    // Deliberately only depends on the product count, not the whole `db` —
+    // this only needs to run again when a new legacy-shaped product could
+    // have appeared (e.g. right after the cloud state loads), not on every
+    // keystroke elsewhere in the app.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db.products.length]);
 
   // Automatic weekly report → Telegram. There is no always-on server here,
   // so this runs the check whenever an owner/manager opens the app (at most
@@ -1146,7 +1307,7 @@ export default function App() {
     showToast(`Scanned: ${scannedValue}`, "green");
     const clean = scannedValue.trim();
     // Search in products by generated Barcode, SKU, or IMEI/Serial
-    const prodBySku = db.products.find(
+    const prodBySku = catalogProducts.find(
       (p) =>
         (p.barcode && p.barcode === clean) ||
         p.sku.toLowerCase() === clean.toLowerCase() ||
@@ -1165,7 +1326,8 @@ export default function App() {
 
   // Cart operations
   const addToCart = (product: Product, specificImei?: string) => {
-    if (product.stock <= 0) {
+    const availableStock = stockOf(product);
+    if (availableStock <= 0) {
       showToast("Product is out of stock!", "red");
       return;
     }
@@ -1173,7 +1335,7 @@ export default function App() {
     const existingIdx = cart.findIndex((c) => c.productId === product.id && !c.isGift);
     if (existingIdx >= 0) {
       const existing = cart[existingIdx];
-      if (existing.qty + 1 > product.stock) {
+      if (existing.qty + 1 > availableStock) {
         showToast("Not enough stock available!", "red");
         return;
       }
@@ -1226,7 +1388,7 @@ export default function App() {
   // total (which the profit engine already derives for free from the
   // line's FIFO `cost`).
   const addGiftToCart = (product: Product) => {
-    if (product.stock <= 0) {
+    if (stockOf(product) <= 0) {
       showToast("Yeh gift product abhi out of stock hai!", "red");
       return;
     }
@@ -1270,7 +1432,7 @@ export default function App() {
       newCart[existingIdx] = { ...newCart[existingIdx], price };
       setCart(newCart);
     } else {
-      if (product.stock <= 0) {
+      if (stockOf(product) <= 0) {
         showToast("Product is out of stock!", "red");
         return;
       }
@@ -1298,7 +1460,7 @@ export default function App() {
 
   const updateCartQty = (idx: number, delta: number) => {
     const item = cart[idx];
-    const prod = db.products.find((p) => p.id === item.productId);
+    const prod = catalogProducts.find((p) => p.id === item.productId);
     const newQty = item.qty + delta;
     if (newQty <= 0) {
       setCart(cart.filter((_, i) => i !== idx));
@@ -1429,6 +1591,22 @@ export default function App() {
       const priceFloor = prod.confidentialPrice ?? prod.purchasePrice ?? 0;
       if (!item.isGift && item.price < priceFloor && cloudProfile?.role !== "owner") {
         showToast("SELLING PRICE CONFIDENTIAL PRICE SE KAM NAHI HO SAKTI.", "red");
+        return;
+      }
+    }
+
+    // Phase 1 (data architecture fix) — final pre-flight availability check
+    // against the *live* relational stock number (stockOf()), not the local
+    // JSON blob's cached count the FIFO simulation below uses. Two+ devices
+    // can each have a slightly stale local blob at the same moment; without
+    // this, a staff member could get all the way through checkout locally
+    // only to have the server's atomic_complete_sale reject it at the very
+    // last step with a raw "insufficient inventory" error. Catching it here
+    // first gives a clear, friendly message before any of that runs.
+    for (const item of cart) {
+      const prod = workingDb.products.find((p) => p.id === item.productId);
+      if (prod && stockOf(prod) < item.qty) {
+        showToast(`${prod.name}: sirf ${stockOf(prod)} bache hain (live), ${item.qty} nahi mil sakte.`, "red");
         return;
       }
     }
@@ -1740,6 +1918,7 @@ export default function App() {
     db.jobs.push(newJob);
     saveState({ ...db });
     setIsJobModalOpen(false);
+    setJobAiDiagnosis({ loading: false, text: "", error: "" });
     setJobForm({
       customerName: "",
       phone: "",
@@ -1945,7 +2124,7 @@ export default function App() {
         const returnsToday = visibleReturns.filter((r) => r.date === todayStr());
         const refundAmtToday = returnsToday.reduce((a, r) => a + r.subtotalRefund, 0);
         const todayNetSales = round2(grossSalesRev - refundAmtToday);
-        const lowStock = db.products.filter((p) => p.stock <= p.minStock);
+        const lowStock = catalogProducts.filter((p) => stockOf(p) <= p.minStock);
         const totalDue = db.customers.reduce((a, c) => a + (c.totalDue || 0), 0);
         const openJobs = db.jobs.filter((j) => j.status !== "Delivered").length;
         const totalPayables = db.suppliers.reduce((a, s) => a + (s.totalPayable || 0), 0);
@@ -1981,7 +2160,7 @@ export default function App() {
               </div>
             </div>
 
-            <AiAdviceCard db={db} ownerMode={ownerMode} />
+            <AiAdviceCard db={catalogDb} ownerMode={ownerMode} />
 
             {/* Simple 1-Touch Fast Counter Hub */}
             <div className="section" style={{ marginBottom: "16px" }}>
@@ -2171,7 +2350,7 @@ export default function App() {
                           <tr key={p.id}>
                             <td><b>{p.name}</b></td>
                             <td>{p.category}</td>
-                            <td style={{ color: "var(--red)", fontWeight: 800 }}>{p.stock}</td>
+                            <td style={{ color: "var(--red)", fontWeight: 800 }}>{stockOf(p)}</td>
                             <td><span className="badge low">Min: {p.minStock}</span></td>
                           </tr>
                         ))}
@@ -2246,8 +2425,8 @@ export default function App() {
           { id: "Cyber & Xerox", label: "🖨️ Cyber/Xerox" },
         ];
 
-        const filteredProds = db.products.filter((p) => {
-          if (p.stock <= 0) return false;
+        const filteredProds = catalogProducts.filter((p) => {
+          if (stockOf(p) <= 0) return false;
           if (sellCategoryFilter !== "ALL") {
             if (sellCategoryFilter === "Cyber & Xerox") {
               if (p.category !== "Cyber & Xerox" && p.category !== "Services") return false;
@@ -2322,7 +2501,7 @@ export default function App() {
                       <div className="nm">
                         <b>{p.name}</b> <span className="hint">({p.category})</span>
                         <div className="hint">
-                          Stock: <b style={{ color: p.stock <= p.minStock ? "var(--red)" : "inherit" }}>{p.stock}</b> • {inr(p.sellingPrice)}
+                          Stock: <b style={{ color: stockOf(p) <= p.minStock ? "var(--red)" : "inherit" }}>{stockOf(p)}</b> • {inr(p.sellingPrice)}
                           {p.warrantyEnabled ? ` • ${p.warrantyMonths}m Warranty` : ""}
                         </div>
                       </div>
@@ -2370,7 +2549,7 @@ export default function App() {
                 <div>
                   <div style={{ maxHeight: "300px", overflowY: "auto" }}>
                     {cart.map((item, idx) => {
-                      const prod = db.products.find((p) => p.id === item.productId);
+                      const prod = catalogProducts.find((p) => p.id === item.productId);
                       const priceFloor = prod?.confidentialPrice ?? prod?.purchasePrice ?? 0;
                       const belowFloor = !item.isGift && !ownerMode && priceFloor > 0 && item.price < priceFloor;
                       return (
@@ -2634,7 +2813,7 @@ export default function App() {
         return <SupplierKhataView db={db} onUpdate={() => saveState({ ...db })} toast={showToast} />;
 
       case "labels":
-        return <BarcodeTagStudio db={db} />;
+        return <BarcodeTagStudio db={catalogDb} />;
 
       case "products":
         return (
@@ -2681,7 +2860,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {db.products.map((p) => (
+                    {catalogProducts.map((p) => (
                       <tr key={p.id}>
                         <td><ProductThumb photo={p.photo} name={p.name} /></td>
                         <td><b>{p.name}</b></td>
@@ -2702,8 +2881,8 @@ export default function App() {
                         })()}
                       </td>
                         <td>
-                          <b style={{ color: p.stock <= p.minStock ? "var(--red)" : "var(--green)" }}>
-                            {p.stock}
+                          <b style={{ color: stockOf(p) <= p.minStock ? "var(--red)" : "var(--green)" }}>
+                            {stockOf(p)}
                           </b>
                         </td>
                         <td>{p.warrantyEnabled ? `${p.warrantyMonths}m` : "None"}</td>
@@ -3064,7 +3243,7 @@ export default function App() {
         );
 
       case "ownerreports":
-        return <OwnerReportsView db={db} onUpdate={() => saveState({ ...db })} toast={showToast} />;
+        return <OwnerReportsView db={catalogDb} onUpdate={() => saveState({ ...db })} toast={showToast} />;
 
       case "exportClear":
         return (
@@ -3079,7 +3258,7 @@ export default function App() {
       case "modelsearch":
         return (
           <ModelSearchView
-            db={db}
+            db={catalogDb}
             onAddToCart={(p) => {
               addToCart(p);
               showToast(`Added ${p.name} to cart!`, "green");
@@ -3091,7 +3270,7 @@ export default function App() {
       case "photoFinder":
         return (
           <PhotoStockFinderView
-            db={db}
+            db={catalogDb}
             onAddToCart={(p) => {
               addToCart(p);
               showToast(`Added ${p.name} to cart!`, "green");
@@ -3104,6 +3283,7 @@ export default function App() {
         return (
           <ReturnsExchangesView
             db={db}
+            catalogProducts={catalogProducts}
             storeId={cloudProfile?.store_id}
             onUpdate={() => saveState({ ...db })}
             toast={showToast}
@@ -3114,6 +3294,7 @@ export default function App() {
         return (
           <StockAdjustView
             db={db}
+            catalogProducts={catalogProducts}
             storeId={cloudProfile?.store_id}
             onUpdate={() => saveState({ ...db })}
             toast={showToast}
@@ -3124,6 +3305,7 @@ export default function App() {
         return (
           <PurchasesView
             db={db}
+            catalogProducts={catalogProducts}
             storeId={cloudProfile?.store_id}
             onUpdate={() => saveState({ ...db })}
             toast={showToast}
@@ -3192,10 +3374,10 @@ export default function App() {
         return <ProfitLossDashboardView db={db} />;
 
       case "lowstock":
-        return <LowStockAlertsView db={db} showToast={showToast} />;
+        return <LowStockAlertsView db={catalogDb} showToast={showToast} />;
 
       case "downloadArea":
-        return <DownloadAreaView db={db} isStaff={cloudProfile?.role === "staff"} showToast={showToast} />;
+        return <DownloadAreaView db={catalogDb} isStaff={cloudProfile?.role === "staff"} showToast={showToast} />;
 
       case "loyalty":
         return (
@@ -3286,7 +3468,7 @@ export default function App() {
       case "setupWizard":
         return (
           <SetupWizardView
-            db={db}
+            db={catalogDb}
             storeId={cloudProfile?.store_id}
             telegramConnected={Boolean(telegramStatus?.connected)}
             onConnectTelegram={async () => {
@@ -3365,20 +3547,56 @@ export default function App() {
                     placeholder="e.g. storename@upi"
                   />
                 </div>
-                <div className="field">
-                  <label>Owner Device PIN (Passcode)</label>
-                  <input
-                    type="password"
-                    value={db.settings.ownerPasscode}
-                    onChange={(e) => setDb({ ...db, settings: { ...db.settings, ownerPasscode: e.target.value } })}
-                    placeholder="Khali chhodne par default 1234 chalega"
-                  />
-                  <span className="hint">
-                    Ye sirf is counter/device par "Owner Confidential Area" jaldi kholne ka chhota PIN hai — aapka
-                    Cloud account email/password isse bilkul alag cheez hai (neeche "Cloud Sign In" dekho, wahi
-                    aapke data ko doosre devices ke saath sync karta hai). Shop shuru karte hi isko 1234 se badalke
-                    apna khud ka PIN set kar lena chahiye.
-                  </span>
+                <div className="field full">
+                  <label>My PIN (personal, this account only)</label>
+                  <div className="card" style={{ padding: 12, display: "grid", gap: 8 }}>
+                    <span className="hint" style={{ margin: 0 }}>
+                      Har account (aap, ya har staff) ka apna alag 4-digit PIN hota hai — app dobara khulne par isi
+                      se jaldi unlock hota hai, aapka Cloud email/password baar-baar nahi maangta. Yeh PIN is
+                      device par offline bhi kaam karta hai.
+                    </span>
+                    {!cloudProfile?.id ? (
+                      <span className="hint" style={{ margin: 0, color: "#f59e0b" }}>Pehle Cloud Sign In karein PIN set karne ke liye.</span>
+                    ) : (
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          if (myPinForm.next !== myPinForm.confirm) {
+                            setMyPinForm((f) => ({ ...f, msg: "Naya PIN dono jagah same hona chahiye." }));
+                            return;
+                          }
+                          setMyPinForm((f) => ({ ...f, busy: true, msg: "" }));
+                          const result = await setMyPin(cloudProfile.id, myPinForm.next, myPinForm.current || undefined);
+                          if (!result.ok) {
+                            setMyPinForm((f) => ({ ...f, busy: false, msg: result.message }));
+                            return;
+                          }
+                          setMyPinForm({ current: "", next: "", confirm: "", busy: false, msg: "PIN set ho gaya." });
+                          showToast("PIN updated.", "green");
+                        }}
+                        style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(3, 1fr)", alignItems: "end" }}
+                      >
+                        <div className="field" style={{ margin: 0 }}>
+                          <label style={{ fontSize: 12 }}>Current PIN {!hasPinConfigured(cloudProfile.id) && "(pehli baar khali chhodo)"}</label>
+                          <input type="password" inputMode="numeric" maxLength={4} value={myPinForm.current} onChange={(e) => setMyPinForm((f) => ({ ...f, current: e.target.value }))} />
+                        </div>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label style={{ fontSize: 12 }}>New PIN</label>
+                          <input type="password" inputMode="numeric" maxLength={4} value={myPinForm.next} onChange={(e) => setMyPinForm((f) => ({ ...f, next: e.target.value }))} />
+                        </div>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label style={{ fontSize: 12 }}>Confirm New PIN</label>
+                          <input type="password" inputMode="numeric" maxLength={4} value={myPinForm.confirm} onChange={(e) => setMyPinForm((f) => ({ ...f, confirm: e.target.value }))} />
+                        </div>
+                        <div style={{ gridColumn: "1 / -1" }}>
+                          <button type="submit" className="btn primary sm" disabled={myPinForm.busy || myPinForm.next.length !== 4}>
+                            {myPinForm.busy ? <Loader2 size={14} className="spin" /> : <Lock size={14} />} Save PIN
+                          </button>
+                          {myPinForm.msg && <span className="hint" style={{ marginLeft: 10 }}>{myPinForm.msg}</span>}
+                        </div>
+                      </form>
+                    )}
+                  </div>
                 </div>
                 <div className="field full">
                   <label>Invoice Terms &amp; Rules (printed on every bill)</label>
@@ -3498,8 +3716,8 @@ export default function App() {
             <div className="gate-options">
               <div className="gate-option staff" onClick={handleGateStaffAreaTap}>
                 <div className="icon-wrap"><Users size={24} /></div>
-                <h3>Staff Area</h3>
-                <p>Quick access for daily sales &amp; billing. Selling prices only — no financial reports.</p>
+                <h3>Login (ID / Password)</h3>
+                <p>Android Access Area se mila Login ID + Password daalo — Staff ya Owner-level, dono is se sign in hote hain.</p>
                 <ArrowRightIcon size={18} className="go-arrow" color="#60a5fa" />
               </div>
               <div className="gate-option owner" onClick={() => setGateStage("ownerAuth")}>
@@ -3514,13 +3732,13 @@ export default function App() {
           </div>
         )}
 
-        {gateStage === "ownerAuth" && (
+        {(gateStage === "ownerAuth" || gateStage === "personalPin") && (
           <div className={`gate-auth-card ${gateShakeError ? "shake" : ""}`}>
             <div className="gate-auth-head">
               <div className="warn-badge"><ShieldAlert size={22} /></div>
               <div>
-                <h3>Owner Confidential Area</h3>
-                <p>Authorized personnel only</p>
+                <h3>{cloudProfile ? `Welcome back${cloudProfile.staff_name ? `, ${cloudProfile.staff_name}` : ""}` : "Owner Confidential Area"}</h3>
+                <p>{cloudProfile ? "Enter your PIN to continue" : "Authorized personnel only"}</p>
               </div>
             </div>
 
@@ -3536,12 +3754,17 @@ export default function App() {
                   className="gate-pass-input"
                   type="password"
                   inputMode="numeric"
+                  maxLength={4}
                   autoFocus
-                  placeholder="Enter Owner Device PIN"
+                  placeholder={cloudProfile ? "Enter your 4-digit PIN" : "Enter Owner Device PIN"}
                   value={gatePassInput}
                   onChange={(e) => setGatePassInput(e.target.value)}
                 />
-                <div className="hint" style={{ marginTop: 6 }}>Ye aapka Cloud account password nahi hai — sirf is device ka chhota PIN hai (Owner Settings mein set/badal sakte ho).</div>
+                <div className="hint" style={{ marginTop: 6 }}>
+                  {cloudProfile
+                    ? "Ye aapka apna personal PIN hai (Settings mein badal sakte ho) — aapke Cloud login password se alag."
+                    : "Ye aapka Cloud account password nahi hai — sirf is device ka chhota PIN hai (Owner Settings mein set/badal sakte ho)."}
+                </div>
                 <div className="gate-attempts-row">
                   {[0, 1, 2].map((i) => (
                     <span key={i} className={`gate-attempt-dot ${i < gateAttempts.count ? "used" : ""}`} />
@@ -3549,21 +3772,37 @@ export default function App() {
                 </div>
                 <div className="modal-actions" style={{ marginTop: 18 }}>
                   <button type="submit" className="btn primary" style={{ width: "100%", justifyContent: "center", background: "#dc2626" }} disabled={gateBusy}>
-                    {gateBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {gateBusy ? "Sending alert…" : "Unlock Owner Access"}
+                    {gateBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {gateBusy ? "Sending alert…" : "Unlock"}
                   </button>
                 </div>
               </form>
             )}
 
-            <button
-              className="gate-back-link"
-              onClick={() => {
-                setGateStage(gateBackStage);
-                setGatePassInput("");
-              }}
-            >
-              ← Back to selection
-            </button>
+            {cloudProfile ? (
+              <button
+                className="gate-back-link"
+                onClick={async () => {
+                  clearCachedStaffSession();
+                  await supabase.auth.signOut().catch(() => {});
+                  setCloudUser(null);
+                  setCloudProfile(null);
+                  setGatePassInput("");
+                  setGateStage(APP_VARIANT === "staff" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose");
+                }}
+              >
+                Not you? Sign out and use a different account
+              </button>
+            ) : (
+              <button
+                className="gate-back-link"
+                onClick={() => {
+                  setGateStage(gateBackStage);
+                  setGatePassInput("");
+                }}
+              >
+                ← Back to selection
+              </button>
+            )}
           </div>
         )}
 
@@ -3572,8 +3811,8 @@ export default function App() {
             <div className="gate-auth-head">
               <div className="warn-badge" style={{ background: "#1d4ed8" }}><Users size={22} /></div>
               <div>
-                <h3>Staff Login</h3>
-                <p>Apni shop se mila Login ID &amp; Password daalo</p>
+                <h3>Login</h3>
+                <p>Android Access Area se mila Login ID &amp; Password daalo (Staff ya Owner-level)</p>
               </div>
             </div>
 
@@ -3652,26 +3891,55 @@ export default function App() {
     );
   }
 
-  const navigateWithOwnerGate = (page: string) => {
-    // Any owner-only tool (financial reports, loan/byaj tracker, purchases, expenses, etc.)
-    // must re-prompt for the owner passcode even if reached via a direct route change,
-    // not just when clicked from the (already-filtered) sidebar list.
-    const isOwnerOnlyPage = SECONDARY_NAV_ITEMS.some((item) => item.key === page && item.ownerOnly);
-    if (isOwnerOnlyPage && !ownerMode) {
-      setIsOwnerLoginOpen(true);
-      return;
-    }
-    setCurrentPage(page);
-    setIsMobileNavOpen(false);
-  };
+  // Phase 2: on a fresh login (new device, or right after reinstall), the
+  // gate can unlock (no PIN configured yet) slightly before the cloud data
+  // has actually finished loading — without this, a person could briefly
+  // see what looks like an empty store instead of their real stock/
+  // invoices. Block on that gap explicitly rather than flashing emptiness.
+  //
+  // (Independently built twice this session — this version kept for its
+  // gate-screen/gate-auth-card styling, consistent with the rest of the
+  // gate UI; functionally identical either way, since by this point in the
+  // render `gateUnlocked` is already guaranteed true — the `if
+  // (!gateUnlocked)` block above already returned otherwise. `cloudReady`
+  // is confirmed set `true` in every bootstrap exit path — success,
+  // offline/no store_id, staff-denied, and the catch-all error handler —
+  // so this can never hang forever, and gating on `cloudUser` means a
+  // local-only/offline device that never touches the cloud never sees it.)
+  if (cloudUser && !cloudReady) {
+    return (
+      <div className="gate-screen">
+        <div className="gate-auth-card">
+          <div className="gate-auth-head">
+            <div className="warn-badge"><Loader2 size={22} className="spin" /></div>
+            <div>
+              <h3>Restoring your data…</h3>
+              <p>Aapka stock, invoices aur customers cloud se load ho rahe hain</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div id="app">
       <MoneyAnimation />
       <Sidebar
-        db={db}
+        db={catalogDb}
         currentPage={currentPage}
-        onNavigate={navigateWithOwnerGate}
+        onNavigate={(page) => {
+          // Any owner-only tool (financial reports, loan/byaj tracker, purchases, expenses, etc.)
+          // must re-prompt for the owner passcode even if reached via a direct route change,
+          // not just when clicked from the (already-filtered) sidebar list.
+          const isOwnerOnlyPage = SECONDARY_NAV_ITEMS.some((item) => item.key === page && item.ownerOnly);
+          if (isOwnerOnlyPage && !ownerMode) {
+            setIsOwnerLoginOpen(true);
+            return;
+          }
+          setCurrentPage(page);
+          setIsMobileNavOpen(false);
+        }}
         ownerMode={ownerMode}
         onToggleOwnerMode={() => {
           if (!ownerMode) setIsOwnerLoginOpen(true);
@@ -3683,13 +3951,31 @@ export default function App() {
       />
       <BottomTabBar
         currentPage={currentPage}
-        onNavigate={navigateWithOwnerGate}
+        onNavigate={(page) => {
+          // Same owner-passcode gate as <Sidebar>'s onNavigate above (kept
+          // duplicated rather than refactored into a shared function, to
+          // avoid touching that existing, already-working handler).
+          const isOwnerOnlyPage = SECONDARY_NAV_ITEMS.some((item) => item.key === page && item.ownerOnly);
+          if (isOwnerOnlyPage && !ownerMode) {
+            setIsOwnerLoginOpen(true);
+            return;
+          }
+          setCurrentPage(page);
+          setIsMobileNavOpen(false);
+        }}
         onOpenMore={() => setIsMobileNavOpen(true)}
       />
 
       <div id="main">
         <div id="topbar">
-          <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+          <button
+            className="mobile-hamburger"
+            aria-label="Menu kholo"
+            onClick={() => setIsMobileNavOpen(true)}
+          >
+            <Menu size={20} />
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "20px" }} className="topbar-title">
             <div>
               <h1 style={{ fontSize: "17px", margin: 0, fontWeight: 800, letterSpacing: "-0.02em", color: "var(--ink)" }}>
                 {db.settings.shopName || "MOBILE HUB"} <span style={{ color: "var(--accent)" }}>PRO</span>
@@ -3741,7 +4027,7 @@ export default function App() {
                 onDismiss={dismissAppUpdate}
               />
             )}
-            {db.products.filter(p => p.stock <= p.minStock).length > 0 && (
+            {catalogProducts.filter(p => stockOf(p) <= p.minStock).length > 0 && (
               <div
                 style={{
                   padding: "4px 10px",
@@ -3755,7 +4041,7 @@ export default function App() {
                 }}
                 onClick={() => setCurrentPage("products")}
               >
-                LOW STOCK: {db.products.filter(p => p.stock <= p.minStock).length} SKUs
+                LOW STOCK: {catalogProducts.filter(p => stockOf(p) <= p.minStock).length} SKUs
               </div>
             )}
 
@@ -3934,7 +4220,7 @@ export default function App() {
 
       {isAddGiftOpen && (
         <AddGiftModal
-          db={db}
+          db={catalogDb}
           excludeGiftedProductIds={cart.filter((c) => c.isGift).map((c) => c.productId)}
           onSelect={(product) => {
             addGiftToCart(product);
@@ -4111,7 +4397,7 @@ export default function App() {
           <div className="modal wide">
             <div className="modal-head">
               <h3>Create Repair / Service Ticket</h3>
-              <button onClick={() => setIsJobModalOpen(false)}>&times;</button>
+              <button onClick={() => { setIsJobModalOpen(false); setJobAiDiagnosis({ loading: false, text: "", error: "" }); }}>&times;</button>
             </div>
             <form onSubmit={handleCreateJobTicket}>
               <div className="formgrid">
@@ -4180,6 +4466,37 @@ export default function App() {
                     placeholder="e.g. Display glass broken, touch working partially"
                     required
                   />
+                  <div style={{ marginTop: "6px" }}>
+                    {!jobAiDiagnosis.loading && !jobAiDiagnosis.text && (
+                      <button
+                        type="button"
+                        className="btn sm"
+                        disabled={jobForm.issue.trim().length < 3}
+                        onClick={async () => {
+                          setJobAiDiagnosis({ loading: true, text: "", error: "" });
+                          try {
+                            const diagnosis = await getRepairDiagnosis({ device: jobForm.device, issue: jobForm.issue });
+                            setJobAiDiagnosis({ loading: false, text: diagnosis, error: "" });
+                          } catch (e) {
+                            setJobAiDiagnosis({ loading: false, text: "", error: e instanceof Error ? e.message : "AI diagnosis failed." });
+                          }
+                        }}
+                      >
+                        <Sparkles size={13} /> AI Diagnosis Suggest karo
+                      </button>
+                    )}
+                    {jobAiDiagnosis.loading && (
+                      <span className="hint">AI issue soch raha hai...</span>
+                    )}
+                    {jobAiDiagnosis.error && (
+                      <div className="hint" style={{ color: "var(--red)" }}>{jobAiDiagnosis.error}</div>
+                    )}
+                    {jobAiDiagnosis.text && (
+                      <div className="notice" style={{ marginTop: "4px", fontSize: "12px", whiteSpace: "pre-line" }}>
+                        🤖 {jobAiDiagnosis.text}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="field">
                   <label>Spare Part to Auto-Deduct (Optional)</label>
@@ -4188,7 +4505,7 @@ export default function App() {
                     onChange={(e) => setJobForm({ ...jobForm, selectedSparePartId: e.target.value })}
                   >
                     <option value="">-- No spare part used --</option>
-                    {db.products
+                    {catalogProducts
                       .filter((p) => p.isSparePart || p.category.includes("Repair"))
                       .map((sp) => (
                         <option key={sp.id} value={sp.id}>
@@ -4234,7 +4551,7 @@ export default function App() {
                 )}
               </div>
               <div className="modal-actions" style={{ marginTop: "16px" }}>
-                <button type="button" className="btn" onClick={() => setIsJobModalOpen(false)}>Cancel</button>
+                <button type="button" className="btn" onClick={() => { setIsJobModalOpen(false); setJobAiDiagnosis({ loading: false, text: "", error: "" }); }}>Cancel</button>
                 <button type="submit" className="btn primary">Create Ticket</button>
               </div>
             </form>
@@ -4349,7 +4666,25 @@ export default function App() {
         try {
           const { data } = await supabase.auth.getUser();
           setCloudUser(data.user ?? null);
-          setCloudProfile(await getCurrentProfile());
+          const profile = await getCurrentProfile();
+          setCloudProfile(profile);
+          // CRITICAL: must pull the real store_state down here, the exact
+          // same way the initial bootstrap effect does on app load. Without
+          // this, `db` stays whatever it already was in this session — on
+          // a fresh install/reinstall that's an empty defaultDB() — and the
+          // save-effect below (which fires the moment cloudReady flips back
+          // to true) then pushes that EMPTY state up to the cloud,
+          // permanently overwriting the real synced data. This was
+          // confirmed live: store_state had a high version number (many
+          // past syncs) but 0 products/0 sales — i.e. a sign-in had already
+          // wiped it this way before this fix.
+          if (profile?.store_id) {
+            const remote = await loadCloudState();
+            if (remote?.state) {
+              setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
+              setCloudVersion(remote.version);
+            }
+          }
         } finally {
           setCloudReady(true);
         }

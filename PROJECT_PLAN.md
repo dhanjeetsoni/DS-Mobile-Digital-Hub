@@ -462,8 +462,48 @@ actual code, per this document's own ground rule — not assumed or guessed._
 - [ ] Camera-based barcode scanning
 - [ ] Bluetooth/USB thermal printer support for receipts
 
-### ⬜ Phase 5: Operational features
-- [ ] Daily + weekly sales/profit summary → Telegram, automatic
+### 🟡 Phase 5: Operational features — daily/weekly digest fixed, rest not started
+- [x] **Daily + weekly sales/profit summary → Telegram, automatic — was
+      silently completely broken, now fixed and deep-verified live.**
+      Both already existed (built in an earlier phase) but stopped working
+      the moment Phase 1's catalog migration emptied out the JSON blob they
+      read from — since then they'd been sending "0 sales" or nothing at
+      all, silently, for days, with no error visible anywhere:
+  - `weekly_report_payload()` SQL function: confirmed already fixed and
+    live (hybrid — sales/sale_items/products/purchases from the relational
+    tables, expenses still from the JSON blob since `expenses` was never
+    migrated relationally — see the JSON-vs-relational status table
+    elsewhere in this file).
+  - Daily digest: a separate `daily-digest-worker` edge function (same
+    relational-data fix, kept deliberately apart from the large
+    `ai-gateway` function to avoid risking its other working AI routes)
+    was built and deployed — **but the cron job was never actually
+    repointed at it**. It kept calling the old, still-broken
+    `ai-gateway/cron-daily-digest` route every night. Confirmed by reading
+    `ai-gateway`'s live source directly: its `runDailyDigestSweep()` still
+    reads `state.sales`/`state.products` off the empty blob. Fixed this
+    session: repointed the `ai-daily-digest-sweep` cron job at
+    `daily-digest-worker`, live-tested it end-to-end (`net.http_post` +
+    checked the actual HTTP response: `200`, ran cleanly, correctly
+    skipped since there were 0 real sales today — confirmed that's the
+    real reason via a direct query, not a hidden failure).
+  - **Repo/DB drift closed while verifying this** (same pattern as
+    before — live changes with no matching committed file): added the
+    `daily-digest-worker` function's source (was deployed with zero
+    source in the repo), the `ai_features_v36` migration (added
+    `ai_digest_enabled` + its RPCs — existed live since 2026-09-04,
+    never committed), and the cron-repoint migration.
+  - **UI gap found and fixed**: `ai_digest_enabled`'s owner/manager-only
+    getter/setter RPCs (`get_ai_digest_enabled`/`set_ai_digest_enabled`)
+    existed live with nothing in the app ever calling them — the owner
+    had no way to turn the digest on. Added a "Daily AI Digest: ON/OFF"
+    toggle next to the Telegram controls in the owner settings area.
+  - Verified: typecheck clean, full test suite (26 tests) pass, static
+    audit passes, production build clean.
+  - **Still to actually watch happen**: tonight's 9pm IST run, for real,
+    with real sales in it (today's manual test correctly found 0 sales to
+    report, which proves the plumbing works but isn't the same as seeing
+    an actual populated digest land in Telegram).
 - [ ] Instant low-stock alerts → Telegram + in-app
 - [ ] Audit log (who added/edited/deleted what, and when)
 - [ ] Manual backup file export (daily/weekly)

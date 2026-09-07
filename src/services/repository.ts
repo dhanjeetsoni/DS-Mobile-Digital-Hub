@@ -132,8 +132,14 @@ export function subscribeToLiveStock(storeId: string, onChange: (productId: stri
  * blob-only/UI-gated exactly as before, untouched by this change, so the
  * existing owner-only / Telegram-approval-gated pricing flows keep working
  * exactly as they do today. This is display-catalog data only (photo, MRP,
- * warranty, notes, compatible models, screen size, etc.) — the same fields
- * `upsert_product_catalog()` accepts, minus the two price tiers.
+ * selling price, warranty, notes, compatible models, screen size, etc.) —
+ * the same fields `upsert_product_catalog()` accepts, minus the two
+ * confidential price tiers.
+ *
+ * 2026-09-06: added `selling_price` — this was the one catalog field left
+ * reading from the JSON blob after the rest of this migration, so every
+ * device still saw a stale selling price until its next full blob sync.
+ * Same non-confidential, safe-for-every-role field as everything else here.
  *
  * Keyed by `client_id` (the app's own product.id, which is what every
  * screen actually indexes by) with a `sku` fallback map for the small
@@ -141,7 +147,7 @@ export function subscribeToLiveStock(storeId: string, onChange: (productId: stri
  */
 export interface LiveCatalogEntry {
   sku: string; barcode: string | null; brand: string; category: string;
-  mrp: number | null; photo: string; warrantyEnabled: boolean; warrantyMonths: number;
+  mrp: number | null; sellingPrice: number | null; photo: string; warrantyEnabled: boolean; warrantyMonths: number;
   requireCustomerDetails: boolean; supplier: string; notes: string;
   compatibleModels: string[]; screenSizeInches?: number; screenSizeMaxInches?: number;
   isMobilePhone?: boolean; isSparePart?: boolean; minStock: number;
@@ -154,6 +160,7 @@ function rowToLiveCatalogEntry(row: any): LiveCatalogEntry {
     brand: row.brand || "",
     category: row.category || "",
     mrp: row.mrp === null || row.mrp === undefined ? null : Number(row.mrp),
+    sellingPrice: row.selling_price === null || row.selling_price === undefined ? null : Number(row.selling_price),
     photo: row.photo || "",
     warrantyEnabled: !!row.warranty_enabled,
     warrantyMonths: Number(row.warranty_months || 0),
@@ -170,7 +177,7 @@ function rowToLiveCatalogEntry(row: any): LiveCatalogEntry {
 }
 
 const LIVE_CATALOG_COLUMNS =
-  "id,client_id,sku,barcode,brand,model,category,mrp,photo,warranty_enabled,warranty_months," +
+  "id,client_id,sku,barcode,brand,model,category,mrp,selling_price,photo,warranty_enabled,warranty_months," +
   "require_customer_details,supplier,notes,compatible_models,screen_size_inches,screen_size_max_inches," +
   "is_mobile_phone,is_spare_part,min_stock";
 

@@ -240,6 +240,7 @@ export default function App() {
       brand: entry.brand || product.brand,
       category: entry.category || product.category,
       mrp: entry.mrp !== null ? entry.mrp : product.mrp,
+      sellingPrice: entry.sellingPrice !== null ? entry.sellingPrice : product.sellingPrice,
       photo: entry.photo || product.photo,
       warrantyEnabled: entry.warrantyEnabled,
       warrantyMonths: entry.warrantyMonths || product.warrantyMonths,

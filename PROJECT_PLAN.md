@@ -339,18 +339,16 @@ explicitly, answered precisely rather than "mostly migrated"):**
 |---|---|---|
 | `stock_qty` | ✅ Relational (`products.stock_qty`, via atomic RPCs) | ✅ Yes — owner **and staff** (`products_staff_view`, fixed this session) |
 | Catalog fields (photo, MRP, warranty, notes, compatible models, screen size, min stock) | ✅ Relational (`products`, via `upsert_product_catalog()`) | ✅ Yes — owner **and staff** (`products_staff_view`, fixed this session) |
-| `selling_price` | ✅ Relational (`products.selling_price`, written by the same RPCs) | ❌ **No** — every render site (`p.sellingPrice`) still reads it off the JSON `db.products` blob, not `liveCatalogByClientId`/`bySku`. Not included in `LIVE_CATALOG_COLUMNS` or the new `products_staff_view` mirror. Same class of gap as the catalog-fields one above, just not closed yet. |
+| `selling_price` | ✅ Relational (`products.selling_price`, written by the same RPCs) | ✅ **Fixed 2026-09-06** — added to `LIVE_CATALOG_COLUMNS`, `products_staff_view` (backfilled, 0 mismatches verified live), and `catalogOf()`'s merge. Every `addToCart`/POS/catalog-list call site already reads through `catalogProducts`/`catalogOf(p)`, confirmed by tracing every `.sellingPrice` usage — so this one change fixes it everywhere, owner and staff, with no per-screen edits needed. |
 | `cost_price` / `confidential_price` | ✅ Relational (`products`) | 🚫 Intentionally blob/UI-gated only — never meant to be in any realtime feed (staff must never see it; owner's existing Confidential Price flow is untouched) |
 | Full product object everywhere else it's rendered (most screens) | ⚠️ Still the JSON blob (`store_state.state.products[]`) | Only as fast as the blob save/load cycle (the slower path Phase 1 exists to move away from) — explicitly logged above as "not attempted in this pass" |
 | Sales/invoices | ✅ Relational (`sales`, `sale_items`) + `supabase_realtime` publication enabled | ⚠️ Enabled at the DB level, but **nothing in the client subscribes to it yet** — no live "new sale from another device" feed exists; this was never actually wired, only the publication flag was added |
 | Everything else (settings, customers, expenses, loans, staff-advice text, etc.) | JSON blob (`store_state.state`) | Owner/manager: yes, via the existing `store_state` realtime channel. Staff: yes, via `store_state_staff_view` (this session) |
 
-Net: the two things that were actually *causing* the flicker bug (stock
-count, and the "0 ↔ 5" race) are now fully relational and instantly synced
-for every role. Selling price and the sales-table realtime hookup are the
-two concrete items still left in the "JSON blob" or "enabled but unused"
-column — real, specific, not yet touched, not a vague "still some work
-left."
+Net: stock count, the "0 ↔ 5" race, and selling price are now all fully
+relational and instantly synced for every role. The sales/sale_items
+realtime hookup (enabled at the DB level, never wired client-side) is the
+one concrete item left in the "enabled but unused" column.
 
 ### ⬜ Phase 2: Login & session redesign
 - [ ] Permanent background session (survives app close/reopen; only a true

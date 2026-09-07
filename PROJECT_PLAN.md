@@ -358,13 +358,38 @@ relational and instantly synced for every role. The sales/sale_items
 realtime hookup (enabled at the DB level, never wired client-side) is the
 one concrete item left in the "enabled but unused" column.
 
-### ⬜ Phase 2: Login & session redesign
-- [ ] Permanent background session (survives app close/reopen; only a true
-      uninstall clears it — that part is an Android OS rule, unavoidable)
-- [ ] Per-person 4-digit PIN lock on top of the persistent session
-- [ ] Staff can change their own PIN; owner can reset anyone's
-- [ ] 3–4 wrong PIN attempts → lock/warning
-- [ ] "Restoring your data…" screen on first login after install/reinstall
+### 🟡 Phase 2: Login & session redesign — mostly done, needs real-device testing
+- [x] Permanent background session — verified already working (Supabase's
+      own session persistence; a prior session's fix). Survives app
+      close/reopen; only a true uninstall clears it (Android OS rule,
+      unavoidable — see Phase -1/decisions table)
+- [x] Per-person 4-digit PIN lock on top of the persistent session — done
+      2026-09-06. `profiles.pin_hash`/`pin_salt` + `set_my_pin`/
+      `admin_reset_pin`/`admin_clear_pin` RPCs live on Supabase. Owner,
+      manager, and every staff member each get their own PIN now (staff
+      previously had none at all). Verification is 100% local (SHA-256,
+      cached after login) so it works fully offline, and the raw PIN is
+      never sent over the network even when first set
+- [x] Staff can change their own PIN (Settings → "My PIN", self-service,
+      requires current PIN if one is set); owner/manager can Reset or Clear
+      any staff/manager's PIN from the Android Access Area
+- [x] 3–4 wrong PIN attempts → lock/warning — reused the existing
+      owner-lockout mechanism (2 min lock + Telegram alert), now keyed
+      per-profile instead of one shared device counter
+- [x] "Restoring your data…" screen — added for the gap where a staff login
+      with no PIN configured could unlock before `loadCloudState()`
+      finishes
+- [ ] **Not done — flagged honestly, not claimed complete**: biometric/
+      fingerprint unlock (needs a native Tauri Android plugin + a real
+      device to verify; deferred to Phase 6 where it was already listed)
+- [ ] **Needs real-device verification before this phase is marked ✅**:
+      typecheck is clean and the logic was traced through by hand, but none
+      of this has been exercised on an actual phone/Windows install yet —
+      specifically: (1) a staff PIN set on one device unlocking correctly
+      after a fresh login on a *second* device, (2) the lockout/Telegram
+      alert firing correctly per-profile, (3) the owner's pre-existing
+      fully-offline "Owner Confidential Area" passcode still working
+      unchanged when no cloud account is signed in at all
       that blocks the UI until the full cloud snapshot (stock + invoices +
       customers) has actually loaded — no more "logged in but empty" moment
 

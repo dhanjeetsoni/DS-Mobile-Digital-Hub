@@ -355,10 +355,31 @@ one concrete item left in the "enabled but unused" column.
       uninstall clears it — that part is an Android OS rule, unavoidable)
 - [ ] Per-person 4-digit PIN lock on top of the persistent session
 - [ ] Staff can change their own PIN; owner can reset anyone's
-- [ ] 3–4 wrong PIN attempts → lock/warning
-- [ ] "Restoring your data…" screen on first login after install/reinstall
+- [x] 3–4 wrong PIN attempts → lock/warning — **already built (found this
+      session, verified, not newly written)**: the Owner Device PIN gate
+      (`GATE_ATTEMPTS_KEY`/`gateAttempts` in `App.tsx`) locks after 3 wrong
+      tries for 2 minutes, with a live countdown, a shake animation, used-dot
+      indicators, and a toast warning. Confirmed the PIN check itself has no
+      bypass (an earlier version let any input through if a cloud-owner
+      session was already active — already fixed, per the comment at the
+      check itself — this session did not need to touch it further).
+      Scoped to the single device-level PIN that exists today; carries
+      forward automatically once per-person PINs (the item above) land.
+- [x] "Restoring your data…" screen on first login after install/reinstall
       that blocks the UI until the full cloud snapshot (stock + invoices +
-      customers) has actually loaded — no more "logged in but empty" moment
+      customers) has actually loaded — no more "logged in but empty" moment.
+      **New this session.** Root cause: the PIN/login gate unlocking and the
+      cloud bootstrap fetch (`loadCloudState` + live stock/catalog) are two
+      independent async paths racing each other — a fast typed PIN or quick
+      staff login could easily finish before the cloud fetch had, showing
+      the fully-empty `defaultDB()` for a few seconds on a slow connection
+      or fresh install. Fix: a full-screen "Restoring your data…" blocker
+      shown whenever `gateUnlocked && cloudUser && !cloudReady`. Traced every
+      code path that can end the bootstrap effect (success, offline/no
+      store_id, staff denied, and the catch-all error handler) — `cloudReady`
+      is set `true` in every single one, so this can never hang forever; and
+      gating on `cloudUser` (not `!cloudReady` alone) means a local-only/
+      offline device that never touches the cloud never sees it at all.
 
 ### ⬜ Phase 3: Multi-device sync verification
 - [ ] Test matrix: Windows (owner) + Android (owner) + Android (staff) all

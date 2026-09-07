@@ -3787,6 +3787,35 @@ export default function App() {
     );
   }
 
+  // Phase 2 (2026-09-06): "Restoring your data…" blocking screen. Without
+  // this, a fresh install/reinstall shows the fully-empty defaultDB() the
+  // instant the PIN/login gate unlocks — which for a fast typed PIN or a
+  // quick staff login can easily be BEFORE the cloud fetch (loadCloudState +
+  // live stock/catalog) has actually finished, since that gate-unlock and
+  // the cloud bootstrap are two independent async paths racing each other.
+  // "Logged in but empty" was exactly the moment this was written to close.
+  // Gated on `cloudUser` (not just `!cloudReady`) so it never appears for a
+  // local-only/offline device that was never meant to fetch anything —
+  // `cloudReady` flips true in every other real code path (offline, no
+  // store_id, or a genuine fetch error) so this can never hang forever.
+  if (gateUnlocked && cloudUser && !cloudReady) {
+    return (
+      <div
+        style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 16, background: "var(--bg, #0f172a)", color: "var(--ink, #e2e8f0)", textAlign: "center", padding: 24,
+        }}
+      >
+        <Loader2 size={40} className="spin" style={{ color: "#60a5fa" }} />
+        <div style={{ fontSize: 18, fontWeight: 600 }}>Restoring your data…</div>
+        <div style={{ fontSize: 14, opacity: 0.75, maxWidth: 320 }}>
+          Stock, invoices aur customers cloud se load ho rahe hain. Ek pal ruko — abhi kuch nahi dikhega, ye normal hai.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div id="app">
       <MoneyAnimation />

@@ -22,6 +22,14 @@ obvious or quick.
   earlier session is a starting point to double-check, not a fact to trust.
 - No silent "I think this is fixed" claims — call out what was verified vs.
   what still needs the owner to test on a real device.
+- **Before starting any phase/item, always check first whether it's already
+  partially built** — other sessions (automated pipelines or other Claude
+  sessions) may have already started or finished pieces of it. Deeply
+  verify what already exists in both GitHub (code/commit history) and the
+  live Supabase project (tables, RPCs, migrations) before writing anything
+  new. If something exists but is incomplete or rough, finish and improve
+  it to the maximum reasonable level rather than building a parallel
+  version next to it.
 
 ## Decisions locked in with the owner (2026-09-05)
 
@@ -350,36 +358,49 @@ relational and instantly synced for every role. The sales/sale_items
 realtime hookup (enabled at the DB level, never wired client-side) is the
 one concrete item left in the "enabled but unused" column.
 
-### ⬜ Phase 2: Login & session redesign
-- [ ] Permanent background session (survives app close/reopen; only a true
-      uninstall clears it — that part is an Android OS rule, unavoidable)
-- [ ] Per-person 4-digit PIN lock on top of the persistent session
-- [ ] Staff can change their own PIN; owner can reset anyone's
-- [x] 3–4 wrong PIN attempts → lock/warning — **already built (found this
-      session, verified, not newly written)**: the Owner Device PIN gate
-      (`GATE_ATTEMPTS_KEY`/`gateAttempts` in `App.tsx`) locks after 3 wrong
-      tries for 2 minutes, with a live countdown, a shake animation, used-dot
-      indicators, and a toast warning. Confirmed the PIN check itself has no
-      bypass (an earlier version let any input through if a cloud-owner
-      session was already active — already fixed, per the comment at the
-      check itself — this session did not need to touch it further).
-      Scoped to the single device-level PIN that exists today; carries
-      forward automatically once per-person PINs (the item above) land.
-- [x] "Restoring your data…" screen on first login after install/reinstall
-      that blocks the UI until the full cloud snapshot (stock + invoices +
-      customers) has actually loaded — no more "logged in but empty" moment.
-      **New this session.** Root cause: the PIN/login gate unlocking and the
-      cloud bootstrap fetch (`loadCloudState` + live stock/catalog) are two
-      independent async paths racing each other — a fast typed PIN or quick
-      staff login could easily finish before the cloud fetch had, showing
-      the fully-empty `defaultDB()` for a few seconds on a slow connection
-      or fresh install. Fix: a full-screen "Restoring your data…" blocker
-      shown whenever `gateUnlocked && cloudUser && !cloudReady`. Traced every
-      code path that can end the bootstrap effect (success, offline/no
-      store_id, staff denied, and the catch-all error handler) — `cloudReady`
-      is set `true` in every single one, so this can never hang forever; and
-      gating on `cloudUser` (not `!cloudReady` alone) means a local-only/
-      offline device that never touches the cloud never sees it at all.
+### 🟡 Phase 2: Login & session redesign — mostly done, needs real-device testing
+- [x] Permanent background session — verified already working (Supabase's
+      own session persistence; a prior session's fix). Survives app
+      close/reopen; only a true uninstall clears it (Android OS rule,
+      unavoidable — see Phase -1/decisions table)
+- [x] Per-person 4-digit PIN lock on top of the persistent session — done
+      2026-09-06. `profiles.pin_hash`/`pin_salt` + `set_my_pin`/
+      `admin_reset_pin`/`admin_clear_pin` RPCs live on Supabase. Owner,
+      manager, and every staff member each get their own PIN now (staff
+      previously had none at all). Verification is 100% local (SHA-256,
+      cached after login) so it works fully offline, and the raw PIN is
+      never sent over the network even when first set
+- [x] Staff can change their own PIN (Settings → "My PIN", self-service,
+      requires current PIN if one is set); owner/manager can Reset or Clear
+      any staff/manager's PIN from the Android Access Area
+- [x] 3–4 wrong PIN attempts → lock/warning — reused the existing
+      owner-lockout mechanism (2 min lock + Telegram alert), now keyed
+      per-profile instead of one shared device counter. (An earlier pass
+      this same session independently re-verified the *original*
+      shared-device-counter version of this — 3 wrong tries, 2-minute lock,
+      countdown, shake animation, used-dot indicators, no bypass — before
+      this per-profile upgrade landed; superseded by the per-profile version
+      above, noted here so that verification isn't lost.)
+- [x] "Restoring your data…" screen — added independently twice this same
+      session (merged into one, the `gate-screen`/`gate-auth-card`-styled
+      version, for consistency with the rest of the gate UI) for the gap
+      where a fast PIN entry or quick staff login could unlock before
+      `loadCloudState()`/live stock+catalog finish fetching, on a fresh
+      install/slow connection. Traced every bootstrap exit path (success,
+      offline/no store_id, staff-denied, catch-all error) — `cloudReady` is
+      set `true` in every one, so this can never hang forever; gated on
+      `cloudUser` so a local-only/offline device never sees it
+- [ ] **Not done — flagged honestly, not claimed complete**: biometric/
+      fingerprint unlock (needs a native Tauri Android plugin + a real
+      device to verify; deferred to Phase 6 where it was already listed)
+- [ ] **Needs real-device verification before this phase is marked ✅**:
+      typecheck is clean and the logic was traced through by hand, but none
+      of this has been exercised on an actual phone/Windows install yet —
+      specifically: (1) a staff PIN set on one device unlocking correctly
+      after a fresh login on a *second* device, (2) the lockout/Telegram
+      alert firing correctly per-profile, (3) the owner's pre-existing
+      fully-offline "Owner Confidential Area" passcode still working
+      unchanged when no cloud account is signed in at all
 
 ### ⬜ Phase 3: Multi-device sync verification
 - [ ] Test matrix: Windows (owner) + Android (owner) + Android (staff) all

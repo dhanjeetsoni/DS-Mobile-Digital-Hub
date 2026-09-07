@@ -64,6 +64,7 @@ import { ConfidentialPriceModal } from "./components/ConfidentialPriceModal";
 import { ConnectionStatusBadge } from "./components/ConnectionStatusBadge";
 import { AddGiftModal } from "./components/AddGiftModal";
 import { staffSignIn, isAccessWindowExpired, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
+import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured } from "./services/pinAuth";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
 import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, type LiveCatalogEntry } from "./services/repository";
@@ -296,11 +297,17 @@ export default function App() {
   const [viewingCreditNote, setViewingCreditNote] = useState<ReturnRecord | null>(null);
   const [viewingExchange, setViewingExchange] = useState<ExchangeRecord | null>(null);
   const [isOwnerLoginOpen, setIsOwnerLoginOpen] = useState(false);
+  // Phase 2: self-service "My PIN" form state (used by owner/manager in
+  // Settings, and by anyone via the account menu — see myPinForm usage).
+  const [myPinForm, setMyPinForm] = useState({ current: "", next: "", confirm: "", busy: false, msg: "" });
   const [isWindowsModalOpen, setIsWindowsModalOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   // ---- Access Gate: shown every time the app opens. Staff vs Owner Confidential ----
-  const GATE_ATTEMPTS_KEY = "dsmdh_owner_gate_state_v1";
+  // Phase 2: the lockout counter is now keyed per-profile — on a shared
+  // counter device, one staff member's wrong PIN attempts must not lock out
+  // a different person who logs in on the same machine.
+  const GATE_ATTEMPTS_KEY = `dsmdh_gate_state_v1_${cloudProfile?.id || "anon"}`;
   const [gateUnlocked, setGateUnlocked] = useState(false);
   // Step 1.5/1.8: the *same* codebase is packaged three ways —
   //   VITE_APP_VARIANT unset/"full"  -> Windows desktop app (today's behaviour, both tiles)
@@ -311,7 +318,7 @@ export default function App() {
   // See src-tauri/tauri.staff-android.conf.json / tauri.owner-android.conf.json and
   // BUILD-ANDROID.md for how these get built into two separate installable APKs.
   const APP_VARIANT = (import.meta as any).env?.VITE_APP_VARIANT || "full";
-  const [gateStage, setGateStage] = useState<"choose" | "ownerAuth" | "staffAuth" | "staffDenied">(
+  const [gateStage, setGateStage] = useState<"choose" | "ownerAuth" | "staffAuth" | "staffDenied" | "personalPin">(
     APP_VARIANT === "staff" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose"
   );
   // In a dedicated Staff/Owner build there is no "choose" screen to go back
@@ -346,6 +353,20 @@ export default function App() {
       localStorage.setItem(GATE_ATTEMPTS_KEY, JSON.stringify(next));
     } catch {}
   };
+
+  // The very first read of gateAttempts (above) happens before cloudProfile
+  // is known, so it reads the wrong ("anon") key. Re-read the real
+  // per-profile lockout state as soon as we know who's signing in.
+  useEffect(() => {
+    if (!cloudProfile?.id) return;
+    try {
+      const raw = localStorage.getItem(GATE_ATTEMPTS_KEY);
+      setGateAttempts(raw ? JSON.parse(raw) : { count: 0, lockUntil: 0 });
+    } catch {
+      setGateAttempts({ count: 0, lockUntil: 0 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudProfile?.id]);
 
   useEffect(() => {
     if (!gateAttempts.lockUntil) return;
@@ -426,31 +447,36 @@ export default function App() {
   const handleGateOwnerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (gateAttempts.lockUntil > Date.now()) return;
-    const configuredPass = db.settings.ownerPasscode || "";
-    // If the shop hasn't set a custom owner passcode yet, fall back to the
-    // documented default "1234" so a fresh/local install is never locked
-    // out. Once the owner sets a real passcode in Settings, that becomes
-    // the only accepted value (the "1234" fallback stops applying).
-    //
-    // IMPORTANT: this PIN must ALWAYS be checked on its own merits. It is
-    // documented to the user (see the hint text on this screen) as a
-    // separate, device-only security layer from the Cloud account — it
-    // must never be silently bypassed just because a Supabase cloud
-    // session happens to already be authenticated as owner/manager (e.g.
-    // a persisted login from an earlier session on this device). A prior
-    // version of this check did exactly that, letting ANY typed value
-    // unlock Owner mode whenever a cloud-owner session was active.
-    const correct =
-      (configuredPass && gatePassInput === configuredPass) ||
-      (!configuredPass && gatePassInput === "1234");
+
+    // Phase 2 (2026-09-06): two different things share this same screen —
+    // 1) A real signed-in person (owner/manager/staff) re-entering their own
+    //    PIN after an app relaunch — checked against their personal
+    //    profiles.pin_hash via pinAuth.ts.
+    // 2) The old fully-offline "Owner Confidential Area" device passcode,
+    //    reachable with NO cloud account signed in at all (db.settings.
+    //    ownerPasscode, "1234" default) — kept exactly as before so a
+    //    mostly-offline shop doesn't lose local owner-mode access.
+    let correct = false;
+    if (cloudProfile?.id) {
+      correct = await verifyPin(cloudProfile.id, gatePassInput);
+    } else {
+      const configuredPass = db.settings.ownerPasscode || "";
+      // IMPORTANT: this PIN must ALWAYS be checked on its own merits — see
+      // the long-standing comment history on this check. It must never be
+      // silently bypassed just because some other session state looks
+      // authenticated.
+      correct =
+        (!!configuredPass && gatePassInput === configuredPass) ||
+        (!configuredPass && gatePassInput === "1234");
+    }
 
     if (correct) {
       persistGateAttempts({ count: 0, lockUntil: 0 });
-      setOwnerMode(true);
+      if (cloudProfile?.role === "owner" || cloudProfile?.role === "manager" || !cloudProfile) setOwnerMode(true);
       setGateUnlocked(true);
       setGatePassInput("");
       setIsOwnerLoginOpen(false);
-      showToast("Owner access unlocked.", "green");
+      showToast(cloudProfile ? `Welcome back, ${cloudProfile.staff_name || cloudProfile.full_name || "back"}!` : "Owner access unlocked.", "green");
       return;
     }
 
@@ -461,11 +487,11 @@ export default function App() {
 
     if (nextCount >= 3) {
       persistGateAttempts({ count: 0, lockUntil: Date.now() + 2 * 60 * 1000 });
-      showToast("3 incorrect attempts. Owner area locked for 2 minutes.", "red");
+      showToast("3 incorrect attempts. Access locked for 2 minutes.", "red");
       setGateBusy(true);
       try {
         await sendTelegramSecurityAlert(
-          `3 incorrect Owner passcode attempts on ${db.settings.shopName || "your shop"}'s counter device. If this wasn't you, check your shop immediately.`
+          `3 incorrect PIN attempts${cloudProfile?.staff_name ? ` for ${cloudProfile.staff_name}` : ""} on ${db.settings.shopName || "your shop"}'s counter device. If this wasn't you, check your shop immediately.`
         );
       } catch (err) {
         console.warn("Security alert failed to send", err);
@@ -664,7 +690,17 @@ export default function App() {
               visibilityFrom: profile.visibility_from,
             });
             setOwnerMode(false);
-            setGateUnlocked(true);
+            // Phase 2: staff now get the same per-person PIN lock as
+            // owner/manager, instead of always being waved straight in on a
+            // resumed session. If this staff member has never set a PIN,
+            // behaviour is unchanged (straight in) — the PIN is opt-in for
+            // everyone, same as it always was for the owner.
+            const staffPin = await syncPinFromServer(profile.id);
+            if (!staffPin) {
+              setGateUnlocked(true);
+            } else {
+              setGateStage("personalPin");
+            }
           }
         }
         if (!profile?.store_id) { setCloudStatus("offline"); setCloudReady(true); return; }
@@ -709,13 +745,23 @@ export default function App() {
         // Access Area) used to still hit the Owner Device PIN screen on
         // every single app relaunch, with no way to skip it — "baar baar
         // login" even though the account was already authenticated.
-        // Now: if this shop has never set an Owner Device PIN, a valid
+        // Now: if this person has never set a personal PIN, a valid
         // owner/manager cloud session skips the PIN screen and opens
         // straight into the app, same relaunch behaviour as any other app.
-        // Setting a PIN in Settings brings the lock screen back — the PIN
-        // is opt-in, not mandatory.
-        if ((profile.role === "owner" || profile.role === "manager") && !remote?.state?.settings?.ownerPasscode) {
-          setGateUnlocked(true);
+        // Setting a PIN is opt-in, not mandatory.
+        //
+        // Phase 2 update (2026-09-06): this used to check the single shared
+        // db.settings.ownerPasscode. Replaced with a real per-person PIN
+        // (profiles.pin_hash/pin_salt via pinAuth.ts) so owner, manager, and
+        // every staff member each have their own PIN instead of one shared
+        // device passcode — see PROJECT_PLAN.md Phase 2.
+        if (profile.role === "owner" || profile.role === "manager") {
+          const pin = await syncPinFromServer(profile.id);
+          if (!pin) {
+            setGateUnlocked(true);
+          } else {
+            setGateStage("personalPin");
+          }
         }
         if (profile.role !== "staff") {
           channel = supabase.channel(`store-state-${profile.store_id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'store_state', filter: `store_id=eq.${profile.store_id}` }, (payload: any) => {
@@ -3500,20 +3546,56 @@ export default function App() {
                     placeholder="e.g. storename@upi"
                   />
                 </div>
-                <div className="field">
-                  <label>Owner Device PIN (Passcode)</label>
-                  <input
-                    type="password"
-                    value={db.settings.ownerPasscode}
-                    onChange={(e) => setDb({ ...db, settings: { ...db.settings, ownerPasscode: e.target.value } })}
-                    placeholder="Khali chhodne par default 1234 chalega"
-                  />
-                  <span className="hint">
-                    Ye sirf is counter/device par "Owner Confidential Area" jaldi kholne ka chhota PIN hai — aapka
-                    Cloud account email/password isse bilkul alag cheez hai (neeche "Cloud Sign In" dekho, wahi
-                    aapke data ko doosre devices ke saath sync karta hai). Shop shuru karte hi isko 1234 se badalke
-                    apna khud ka PIN set kar lena chahiye.
-                  </span>
+                <div className="field full">
+                  <label>My PIN (personal, this account only)</label>
+                  <div className="card" style={{ padding: 12, display: "grid", gap: 8 }}>
+                    <span className="hint" style={{ margin: 0 }}>
+                      Har account (aap, ya har staff) ka apna alag 4-digit PIN hota hai — app dobara khulne par isi
+                      se jaldi unlock hota hai, aapka Cloud email/password baar-baar nahi maangta. Yeh PIN is
+                      device par offline bhi kaam karta hai.
+                    </span>
+                    {!cloudProfile?.id ? (
+                      <span className="hint" style={{ margin: 0, color: "#f59e0b" }}>Pehle Cloud Sign In karein PIN set karne ke liye.</span>
+                    ) : (
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          if (myPinForm.next !== myPinForm.confirm) {
+                            setMyPinForm((f) => ({ ...f, msg: "Naya PIN dono jagah same hona chahiye." }));
+                            return;
+                          }
+                          setMyPinForm((f) => ({ ...f, busy: true, msg: "" }));
+                          const result = await setMyPin(cloudProfile.id, myPinForm.next, myPinForm.current || undefined);
+                          if (!result.ok) {
+                            setMyPinForm((f) => ({ ...f, busy: false, msg: result.message }));
+                            return;
+                          }
+                          setMyPinForm({ current: "", next: "", confirm: "", busy: false, msg: "PIN set ho gaya." });
+                          showToast("PIN updated.", "green");
+                        }}
+                        style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(3, 1fr)", alignItems: "end" }}
+                      >
+                        <div className="field" style={{ margin: 0 }}>
+                          <label style={{ fontSize: 12 }}>Current PIN {!hasPinConfigured(cloudProfile.id) && "(pehli baar khali chhodo)"}</label>
+                          <input type="password" inputMode="numeric" maxLength={4} value={myPinForm.current} onChange={(e) => setMyPinForm((f) => ({ ...f, current: e.target.value }))} />
+                        </div>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label style={{ fontSize: 12 }}>New PIN</label>
+                          <input type="password" inputMode="numeric" maxLength={4} value={myPinForm.next} onChange={(e) => setMyPinForm((f) => ({ ...f, next: e.target.value }))} />
+                        </div>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label style={{ fontSize: 12 }}>Confirm New PIN</label>
+                          <input type="password" inputMode="numeric" maxLength={4} value={myPinForm.confirm} onChange={(e) => setMyPinForm((f) => ({ ...f, confirm: e.target.value }))} />
+                        </div>
+                        <div style={{ gridColumn: "1 / -1" }}>
+                          <button type="submit" className="btn primary sm" disabled={myPinForm.busy || myPinForm.next.length !== 4}>
+                            {myPinForm.busy ? <Loader2 size={14} className="spin" /> : <Lock size={14} />} Save PIN
+                          </button>
+                          {myPinForm.msg && <span className="hint" style={{ marginLeft: 10 }}>{myPinForm.msg}</span>}
+                        </div>
+                      </form>
+                    )}
+                  </div>
                 </div>
                 <div className="field full">
                   <label>Invoice Terms &amp; Rules (printed on every bill)</label>
@@ -3649,13 +3731,13 @@ export default function App() {
           </div>
         )}
 
-        {gateStage === "ownerAuth" && (
+        {(gateStage === "ownerAuth" || gateStage === "personalPin") && (
           <div className={`gate-auth-card ${gateShakeError ? "shake" : ""}`}>
             <div className="gate-auth-head">
               <div className="warn-badge"><ShieldAlert size={22} /></div>
               <div>
-                <h3>Owner Confidential Area</h3>
-                <p>Authorized personnel only</p>
+                <h3>{cloudProfile ? `Welcome back${cloudProfile.staff_name ? `, ${cloudProfile.staff_name}` : ""}` : "Owner Confidential Area"}</h3>
+                <p>{cloudProfile ? "Enter your PIN to continue" : "Authorized personnel only"}</p>
               </div>
             </div>
 
@@ -3671,12 +3753,17 @@ export default function App() {
                   className="gate-pass-input"
                   type="password"
                   inputMode="numeric"
+                  maxLength={4}
                   autoFocus
-                  placeholder="Enter Owner Device PIN"
+                  placeholder={cloudProfile ? "Enter your 4-digit PIN" : "Enter Owner Device PIN"}
                   value={gatePassInput}
                   onChange={(e) => setGatePassInput(e.target.value)}
                 />
-                <div className="hint" style={{ marginTop: 6 }}>Ye aapka Cloud account password nahi hai — sirf is device ka chhota PIN hai (Owner Settings mein set/badal sakte ho).</div>
+                <div className="hint" style={{ marginTop: 6 }}>
+                  {cloudProfile
+                    ? "Ye aapka apna personal PIN hai (Settings mein badal sakte ho) — aapke Cloud login password se alag."
+                    : "Ye aapka Cloud account password nahi hai — sirf is device ka chhota PIN hai (Owner Settings mein set/badal sakte ho)."}
+                </div>
                 <div className="gate-attempts-row">
                   {[0, 1, 2].map((i) => (
                     <span key={i} className={`gate-attempt-dot ${i < gateAttempts.count ? "used" : ""}`} />
@@ -3684,21 +3771,37 @@ export default function App() {
                 </div>
                 <div className="modal-actions" style={{ marginTop: 18 }}>
                   <button type="submit" className="btn primary" style={{ width: "100%", justifyContent: "center", background: "#dc2626" }} disabled={gateBusy}>
-                    {gateBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {gateBusy ? "Sending alert…" : "Unlock Owner Access"}
+                    {gateBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {gateBusy ? "Sending alert…" : "Unlock"}
                   </button>
                 </div>
               </form>
             )}
 
-            <button
-              className="gate-back-link"
-              onClick={() => {
-                setGateStage(gateBackStage);
-                setGatePassInput("");
-              }}
-            >
-              ← Back to selection
-            </button>
+            {cloudProfile ? (
+              <button
+                className="gate-back-link"
+                onClick={async () => {
+                  clearCachedStaffSession();
+                  await supabase.auth.signOut().catch(() => {});
+                  setCloudUser(null);
+                  setCloudProfile(null);
+                  setGatePassInput("");
+                  setGateStage(APP_VARIANT === "staff" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose");
+                }}
+              >
+                Not you? Sign out and use a different account
+              </button>
+            ) : (
+              <button
+                className="gate-back-link"
+                onClick={() => {
+                  setGateStage(gateBackStage);
+                  setGatePassInput("");
+                }}
+              >
+                ← Back to selection
+              </button>
+            )}
           </div>
         )}
 
@@ -3787,30 +3890,32 @@ export default function App() {
     );
   }
 
-  // Phase 2 (2026-09-06): "Restoring your data…" blocking screen. Without
-  // this, a fresh install/reinstall shows the fully-empty defaultDB() the
-  // instant the PIN/login gate unlocks — which for a fast typed PIN or a
-  // quick staff login can easily be BEFORE the cloud fetch (loadCloudState +
-  // live stock/catalog) has actually finished, since that gate-unlock and
-  // the cloud bootstrap are two independent async paths racing each other.
-  // "Logged in but empty" was exactly the moment this was written to close.
-  // Gated on `cloudUser` (not just `!cloudReady`) so it never appears for a
-  // local-only/offline device that was never meant to fetch anything —
-  // `cloudReady` flips true in every other real code path (offline, no
-  // store_id, or a genuine fetch error) so this can never hang forever.
-  if (gateUnlocked && cloudUser && !cloudReady) {
+  // Phase 2: on a fresh login (new device, or right after reinstall), the
+  // gate can unlock (no PIN configured yet) slightly before the cloud data
+  // has actually finished loading — without this, a person could briefly
+  // see what looks like an empty store instead of their real stock/
+  // invoices. Block on that gap explicitly rather than flashing emptiness.
+  //
+  // (Independently built twice this session — this version kept for its
+  // gate-screen/gate-auth-card styling, consistent with the rest of the
+  // gate UI; functionally identical either way, since by this point in the
+  // render `gateUnlocked` is already guaranteed true — the `if
+  // (!gateUnlocked)` block above already returned otherwise. `cloudReady`
+  // is confirmed set `true` in every bootstrap exit path — success,
+  // offline/no store_id, staff-denied, and the catch-all error handler —
+  // so this can never hang forever, and gating on `cloudUser` means a
+  // local-only/offline device that never touches the cloud never sees it.)
+  if (cloudUser && !cloudReady) {
     return (
-      <div
-        style={{
-          position: "fixed", inset: 0, zIndex: 9999,
-          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          gap: 16, background: "var(--bg, #0f172a)", color: "var(--ink, #e2e8f0)", textAlign: "center", padding: 24,
-        }}
-      >
-        <Loader2 size={40} className="spin" style={{ color: "#60a5fa" }} />
-        <div style={{ fontSize: 18, fontWeight: 600 }}>Restoring your data…</div>
-        <div style={{ fontSize: 14, opacity: 0.75, maxWidth: 320 }}>
-          Stock, invoices aur customers cloud se load ho rahe hain. Ek pal ruko — abhi kuch nahi dikhega, ye normal hai.
+      <div className="gate-screen">
+        <div className="gate-auth-card">
+          <div className="gate-auth-head">
+            <div className="warn-badge"><Loader2 size={22} className="spin" /></div>
+            <div>
+              <h3>Restoring your data…</h3>
+              <p>Aapka stock, invoices aur customers cloud se load ho rahe hain</p>
+            </div>
+          </div>
         </div>
       </div>
     );

@@ -402,13 +402,57 @@ one concrete item left in the "enabled but unused" column.
       fully-offline "Owner Confidential Area" passcode still working
       unchanged when no cloud account is signed in at all
 
-### ⬜ Phase 3: Multi-device sync verification
-- [ ] Test matrix: Windows (owner) + Android (owner) + Android (staff) all
-      open at once
-- [ ] Confirm a sale from each one instantly reflects stock everywhere else
-- [ ] Confirm Telegram gets every single transaction, no exceptions
+### 🟡 Phase 3: Multi-device sync verification — DB/code side verified, needs the owner's hands-on test
+_I can't physically operate three devices at once from here, so "verified"
+below means: checked directly against the live Supabase project and the
+actual code, per this document's own ground rule — not assumed or guessed._
+
+- [x] **RLS/publication audit for all three sessions running concurrently**
+      (owner Windows + owner Android + staff Android — these are just three
+      independent Supabase auth sessions, which Supabase supports natively;
+      nothing in this app artificially limits concurrent sessions):
+  - `products`, `products_staff_view`, `store_state`,
+    `store_state_staff_view`, `confidential_price_requests`, `profiles`,
+    and `sales` are all confirmed live in the `supabase_realtime`
+    publication (read directly from `pg_publication_tables`)
+  - **Found and fixed**: `sales` had SELECT policies for owner/manager only
+    — the exact same class of gap already found once for `products` and
+    fixed with `products_staff_view`. Nothing in the client reads `sales`
+    directly today (the sales list still comes through the already-working
+    blob path), so this wasn't an active bug, but it would have silently
+    broken the moment something *did* query it for staff (e.g. Phase 6's
+    staff performance tracking). Added `sales_staff_select` policy,
+    matching the same access-window cutoff already used elsewhere.
+    Migration: `sales_staff_select_policy`.
+  - `sale_items` is confirmed **not** in the realtime publication — matches
+    this document's own earlier note ("sales/sale_items ... enabled at the
+    DB level" was slightly imprecise; only `sales` itself is). Not fixed in
+    this pass — nothing reads it live today either.
+- [x] **Traced the actual conflict-handling code for the specific race this
+      phase exists to catch** ("two devices sell at nearly the same
+      moment — does either sale silently vanish from the display?"): a
+      prior session had already fixed this properly — on a version
+      conflict, the code now **retries the save against the fresh version
+      first** (preserving the local device's own just-made sale in the
+      process) and only falls back to accepting the remote copy outright if
+      that retry also collides. This is a real fix, not just a comment —
+      read the live code, not assumed.
+- [ ] **What still needs the owner, specifically** (nothing further to
+      verify from this side without hardware):
+  1. Open Windows (owner) + an Android device logged in as owner + a
+     second Android device logged in as staff, all three at once
+  2. Make a sale from the staff device → confirm stock updates on both
+     owner screens within ~1 second (this part — the stock number itself —
+     was already device-tested and closed out in Phase 1)
+  3. Make a sale from Windows *and* the owner-Android device at nearly the
+     same moment (both tap "Complete Sale" within a second or two of each
+     other) → confirm **both** sales end up in the sales list on all three
+     screens, none silently missing — this is the specific scenario the
+     retry-first fix above targets
+  4. Confirm the Telegram bot gets both of those invoices, not just one
 - [ ] Confirm offline sale on staff Android queues correctly and syncs the
-      moment internet returns
+      moment internet returns (turn on airplane mode, sell, turn it back
+      off, watch it appear elsewhere)
 
 ### ⬜ Phase 4: Android UI redesign
 - [ ] New navigation: bottom tab bar (Home / Sell / Inventory / Reports /

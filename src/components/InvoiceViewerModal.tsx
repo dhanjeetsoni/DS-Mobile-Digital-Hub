@@ -1,8 +1,15 @@
 import React, { useState } from "react";
-import { Printer, MessageCircle, RotateCcw, RefreshCw, X, ShieldCheck, Sparkles, Gift } from "lucide-react";
+import { Printer, MessageCircle, RotateCcw, RefreshCw, X, ShieldCheck, Sparkles, Gift, Bluetooth, Usb } from "lucide-react";
 import { Database, Sale, ReturnRecord, ExchangeRecord } from "../types";
 import { inr, numberToWordsIndian, computeDiscountPercent } from "../utils/indianCurrency";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
+import {
+  buildEscPosReceipt,
+  printViaBluetooth,
+  printViaSerial,
+  isBluetoothPrintSupported,
+  isSerialPrintSupported,
+} from "../services/thermalPrinter";
 
 const MOTIVATIONAL_LINES = [
   "Great choice! Take care of it well and it'll take care of you for years. 📱✨",
@@ -44,11 +51,75 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
   const [printFormat, setPrintFormat] = useState<"a4" | "thermal">(
     db.settings.thermalDefault ? "thermal" : "a4"
   );
+  // 2026-09-06 (Phase 4) — direct ESC/POS printing over Bluetooth/USB,
+  // bypassing the OS print pipeline entirely (the "thermal" option above
+  // still goes through window.print(), which needs an OS printer driver —
+  // fine on Windows, but the cheap Bluetooth counter printers used on
+  // Android almost never have one). Kept as inline status, not a toast
+  // prop, since a Bluetooth pairing prompt/failure is specific to this one
+  // action and shouldn't need wiring a new prop through every caller of
+  // this modal.
+  const [btStatus, setBtStatus] = useState<{ loading: boolean; error: string; ok: string }>({ loading: false, error: "", ok: "" });
+  const [serialStatus, setSerialStatus] = useState<{ loading: boolean; error: string; ok: string }>({ loading: false, error: "", ok: "" });
+  // Not persisted to db.settings (no settings-write prop reaches this
+  // modal) — a shop's printer width essentially never changes, so
+  // defaulting from the saved setting and letting it be overridden
+  // per-print here is an acceptable, much lower-risk trade-off than
+  // threading a new settings-write callback through every caller of this
+  // modal just for this one field.
+  const [paperWidth, setPaperWidth] = useState<"58mm" | "80mm">(db.settings.thermalPaperWidth === "80mm" ? "80mm" : "58mm");
 
   if (!sale && !creditNote && !exchange) return null;
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const buildReceiptBytes = () => {
+    if (!sale) return null;
+    return buildEscPosReceipt(
+      { shopName: db.settings.shopName, address: db.settings.address, phone: db.settings.phone, gstin: db.settings.gstin },
+      {
+        invoiceNo: sale.invoiceNo,
+        date: sale.date,
+        time: sale.time,
+        payment: sale.payment,
+        customerName: sale.customer?.name,
+        customerPhone: sale.customer?.phone,
+        items: sale.items.map((i) => ({ name: i.name, qty: i.qty, price: i.price, isGift: i.isGift })),
+        subtotal: sale.subtotal,
+        discount: sale.discount,
+        taxAmount: sale.taxAmount,
+        total: sale.total,
+        amountPaid: sale.amountPaid,
+        dueAmount: sale.dueAmount,
+      },
+      paperWidth
+    );
+  };
+
+  const handleBluetoothPrint = async () => {
+    const bytes = buildReceiptBytes();
+    if (!bytes) return;
+    setBtStatus({ loading: true, error: "", ok: "" });
+    try {
+      await printViaBluetooth(bytes);
+      setBtStatus({ loading: false, error: "", ok: "Print bhej diya!" });
+    } catch (e) {
+      setBtStatus({ loading: false, error: e instanceof Error ? e.message : "Bluetooth print fail ho gaya.", ok: "" });
+    }
+  };
+
+  const handleSerialPrint = async () => {
+    const bytes = buildReceiptBytes();
+    if (!bytes) return;
+    setSerialStatus({ loading: true, error: "", ok: "" });
+    try {
+      await printViaSerial(bytes);
+      setSerialStatus({ loading: false, error: "", ok: "Print bhej diya!" });
+    } catch (e) {
+      setSerialStatus({ loading: false, error: e instanceof Error ? e.message : "USB print fail ho gaya.", ok: "" });
+    }
   };
 
   const handleWhatsAppShare = () => {
@@ -135,6 +206,19 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
               <option value="a4">📄 Standard A4 Full Invoice</option>
               <option value="thermal">🧾 58mm / 80mm POS Thermal Slip</option>
             </select>
+            {(isBluetoothPrintSupported() || isSerialPrintSupported()) && (
+              <>
+                <span style={{ fontSize: "12.5px", color: "var(--ink-soft)" }}>Printer Width:</span>
+                <select
+                  value={paperWidth}
+                  onChange={(e) => setPaperWidth(e.target.value as "58mm" | "80mm")}
+                  style={{ padding: "6px 10px", borderRadius: "8px", border: "1px solid var(--line)" }}
+                >
+                  <option value="58mm">58mm</option>
+                  <option value="80mm">80mm</option>
+                </select>
+              </>
+            )}
           </div>
         )}
 
@@ -519,6 +603,16 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
           <button className="btn primary" onClick={handlePrint}>
             <Printer size={14} /> Print Document
           </button>
+          {sale && isBluetoothPrintSupported() && (
+            <button className="btn" onClick={handleBluetoothPrint} disabled={btStatus.loading}>
+              <Bluetooth size={14} /> {btStatus.loading ? "Printing..." : "Bluetooth Print"}
+            </button>
+          )}
+          {sale && isSerialPrintSupported() && (
+            <button className="btn" onClick={handleSerialPrint} disabled={serialStatus.loading}>
+              <Usb size={14} /> {serialStatus.loading ? "Printing..." : "USB Print"}
+            </button>
+          )}
           {sale && onOpenReturn && (
             <button className="btn danger" onClick={() => onOpenReturn(sale)}>
               <RotateCcw size={14} /> Return
@@ -530,6 +624,14 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
             </button>
           )}
         </div>
+        {(btStatus.error || btStatus.ok || serialStatus.error || serialStatus.ok) && (
+          <div style={{ marginTop: "8px", fontSize: "12.5px" }}>
+            {btStatus.error && <div style={{ color: "var(--red)" }}>Bluetooth: {btStatus.error}</div>}
+            {btStatus.ok && <div style={{ color: "var(--green)" }}>Bluetooth: {btStatus.ok}</div>}
+            {serialStatus.error && <div style={{ color: "var(--red)" }}>USB: {serialStatus.error}</div>}
+            {serialStatus.ok && <div style={{ color: "var(--green)" }}>USB: {serialStatus.ok}</div>}
+          </div>
+        )}
       </div>
     </div>
   );

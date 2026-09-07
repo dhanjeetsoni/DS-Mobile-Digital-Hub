@@ -454,13 +454,63 @@ actual code, per this document's own ground rule — not assumed or guessed._
       moment internet returns (turn on airplane mode, sell, turn it back
       off, watch it appear elsewhere)
 
-### ⬜ Phase 4: Android UI redesign
-- [ ] New navigation: bottom tab bar (Home / Sell / Inventory / Reports /
-      More)
-- [ ] Redesign each screen for touch/mobile ergonomics, section by section
-- [ ] Light + dark theme
-- [ ] Camera-based barcode scanning
-- [ ] Bluetooth/USB thermal printer support for receipts
+### 🟡 Phase 4: Android UI redesign
+- [x] New navigation: bottom tab bar (Home / Sell / Inventory / Reports /
+      More) — done in an earlier session (Phase 4.1), confirmed still wired
+      up after this session's merges.
+- [ ] Redesign each screen for touch/mobile ergonomics, section by section —
+      still open. Large, open-ended, screen-by-screen effort; not attempted
+      in this pass.
+- [x] Light + dark theme — already existed (`theme/useAppearance.ts`'s
+      `toggleMode`/`setMode`, surfaced via the Appearance Studio screen), an
+      earlier session also switched the fresh-install default to light.
+      Re-verified present, not re-touched.
+- [x] Camera-based barcode scanning — already existed and already wired up
+      (`CameraScannerModal.tsx`, real `@zxing/browser` + native
+      `BarcodeDetector` decoding, not just AI photo-OCR), reachable from the
+      Sell page, F4 shortcut, and the sidebar's Quick Scan button. Re-verified
+      present, not re-touched.
+- [x] **Bluetooth/USB thermal printer support for receipts — built this
+      session.** The existing "thermal" print format only ever went through
+      `window.print()`, which needs an OS-registered printer driver — fine
+      on Windows, but the cheap Bluetooth 58mm counter printers actually
+      used at these shops essentially never have an Android print driver, so
+      that path was never going to work for the Android app specifically
+      (the actual point of this phase). Added a real ESC/POS path instead
+      that bypasses the OS print pipeline entirely:
+      - `src/services/thermalPrinter.ts` — dependency-free ESC/POS byte
+        builder (shop header, items, totals, cut) mirroring the existing
+        thermal CSS layout's content, plus two transports: Web Bluetooth
+        (BLE, the realistic Android path — auto-detects a writable GATT
+        characteristic rather than hardcoding one vendor's UUID, since
+        counter-printer models vary widely) and Web Serial (USB,
+        desktop/Windows-only, `navigator.serial`).
+      - `InvoiceViewerModal.tsx`: "Bluetooth Print" / "USB Print" buttons,
+        each only rendered when the browser actually exposes that API
+        (`isBluetoothPrintSupported()`/`isSerialPrintSupported()`), plus a
+        58mm/80mm width selector.
+      - `scripts/ci-wire-android-bluetooth-permissions.mjs` (new, same
+        pattern as the existing `ci-wire-android-signing.mjs`): patches the
+        CI-regenerated `AndroidManifest.xml` with
+        BLUETOOTH/BLUETOOTH_ADMIN (≤ API 30), ACCESS_FINE_LOCATION (≤ API
+        30, required for BLE scanning pre-Android-12), and
+        BLUETOOTH_SCAN/BLUETOOTH_CONNECT (API 31+) — wired into
+        `build-and-release.yml` right after `tauri android init`. Verified
+        against a realistic sample manifest, including idempotency.
+      - **Honest caveat, not glossed over**: manifest + runtime permissions
+        are necessary but not sufficient — whether `navigator.bluetooth` is
+        actually exposed inside Tauri's Android WebView at all depends on
+        the installed Android System WebView version/build (Web Bluetooth
+        support in WebView, vs. full Chrome for Android, has historically
+        been inconsistent across OEMs/OS versions). This cannot be verified
+        from this sandboxed build environment — no Android SDK/emulator or
+        real device available here. Worst case on an unsupported device:
+        the Bluetooth Print button simply doesn't render (feature-detected),
+        not a crash — but **please test this on the actual Android APK with
+        a real Bluetooth thermal printer** before relying on it at the
+        counter.
+      - Verified in this environment: `tsc --noEmit`, full test suite (26
+        tests), static audit, production build all clean.
 
 ### ⬜ Phase 5: Operational features
 - [ ] Daily + weekly sales/profit summary → Telegram, automatic

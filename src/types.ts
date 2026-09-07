@@ -15,6 +15,11 @@ export interface Settings {
   upiId: string;
   invoiceTerms: string;
   thermalDefault: boolean;
+  // Phase 4 — 58mm is the far more common cheap counter-printer size in
+  // India; 80mm optional for shops with the wider roll. Drives both the
+  // existing thermal CSS print layout's width and the ESC/POS
+  // Bluetooth/USB receipt's characters-per-line.
+  thermalPaperWidth?: "58mm" | "80mm";
   theme: string;
   jobPrefix: string;
   staffReturnLimit: number;

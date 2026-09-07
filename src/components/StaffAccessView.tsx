@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { Check, Clock, Copy, KeyRound, Loader2, Plus, Power, RefreshCcw, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
+import { Check, Clock, Copy, KeyRound, Loader2, Lock, Plus, Power, RefreshCcw, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { isCloudConfigured } from "../services/supabaseClient";
+import { adminResetPin, adminClearPin } from "../services/pinAuth";
 import {
   createStaffAccount,
   deleteStaffAccount,
@@ -71,6 +72,11 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<StaffProfile | null>(null);
+  // Phase 2: owner/manager PIN-reset for a staff/manager account, mirroring
+  // the existing password-reset flow above.
+  const [pinResetTarget, setPinResetTarget] = useState<StaffProfile | null>(null);
+  const [pinResetValue, setPinResetValue] = useState("");
+  const [pinResetBusy, setPinResetBusy] = useState(false);
   const [form, setForm] = useState<{ staffName: string; loginId: string; password: string; role: "staff" | "manager" }>({
     staffName: "",
     loginId: "",
@@ -237,6 +243,44 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
     }
   };
 
+  const handlePinReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinResetTarget) return;
+    if (!/^\d{4}$/.test(pinResetValue)) {
+      toast("PIN exactly 4 digits ka hona chahiye.", "amber");
+      return;
+    }
+    setPinResetBusy(true);
+    try {
+      const result = await adminResetPin(pinResetTarget.id, pinResetValue);
+      if (!result.ok) {
+        toast(result.message, "red");
+        return;
+      }
+      toast(`${pinResetTarget.staff_name || pinResetTarget.staff_login_id} ka naya PIN set ho gaya — unhe agli baar app kholte hi yehi PIN daalna hoga.`, "green");
+      setPinResetTarget(null);
+      setPinResetValue("");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "PIN reset fail hua.", "red");
+    } finally {
+      setPinResetBusy(false);
+    }
+  };
+
+  const handlePinClear = async (member: StaffProfile) => {
+    if (!window.confirm(`${member.staff_name || member.staff_login_id} ka PIN hata dein? Unhe agli baar app kholte hi naya PIN set karne ke liye kaha jayega.`)) return;
+    setBusyId(member.id);
+    try {
+      const result = await adminClearPin(member.id);
+      if (!result.ok) toast(result.message, "red");
+      else toast("PIN hata diya gaya.", "green");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "PIN clear fail hua.", "red");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleDelete = async (member: StaffProfile) => {
     if (!window.confirm(`${member.staff_name || member.staff_login_id} ka account permanently delete karein? Ye undo nahi ho sakta.`)) return;
     setBusyId(member.id);
@@ -376,6 +420,12 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
                       )}
                       <button className="btn sm" onClick={() => { setResetTarget(s); setResetPassword(generateStaffPassword()); }}>
                         <KeyRound size={12} /> Regenerate Password
+                      </button>
+                      <button className="btn sm" onClick={() => { setPinResetTarget(s); setPinResetValue(""); }}>
+                        <Lock size={12} /> Reset PIN
+                      </button>
+                      <button className="btn sm" onClick={() => handlePinClear(s)} disabled={busyId === s.id}>
+                        {busyId === s.id ? <Loader2 size={12} className="spin" /> : <Lock size={12} />} Clear PIN
                       </button>
                       <button className="btn sm danger" onClick={() => handleDelete(s)} disabled={busyId === s.id}>
                         <Trash2 size={12} /> Delete
@@ -563,6 +613,38 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
                 <button type="button" className="btn" onClick={() => setResetTarget(null)}>Cancel</button>
                 <button type="submit" className="btn primary" disabled={saving}>
                   {saving ? <Loader2 size={15} className="spin" /> : <KeyRound size={15} />} {saving ? "Saving…" : "Save New Password"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {pinResetTarget && (
+        <div className="modal-backdrop" onMouseDown={() => setPinResetTarget(null)}>
+          <div className="modal" style={{ maxWidth: 420 }} onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3 style={{ margin: 0 }}><Lock size={16} /> Reset PIN — {pinResetTarget.staff_name || pinResetTarget.staff_login_id}</h3>
+              <button className="icon-btn" onClick={() => setPinResetTarget(null)}>&times;</button>
+            </div>
+            <form onSubmit={handlePinReset}>
+              <div className="field">
+                <label>New 4-digit PIN</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={pinResetValue}
+                  onChange={(e) => setPinResetValue(e.target.value.replace(/\D/g, ""))}
+                  placeholder="e.g. 4821"
+                  autoFocus
+                />
+                <span className="hint">Unhe yeh naya PIN bata dein — agli baar app kholte hi purana PIN kaam nahi karega.</span>
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn" onClick={() => setPinResetTarget(null)}>Cancel</button>
+                <button type="submit" className="btn primary" disabled={pinResetBusy || pinResetValue.length !== 4}>
+                  {pinResetBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {pinResetBusy ? "Saving…" : "Save New PIN"}
                 </button>
               </div>
             </form>

@@ -276,6 +276,12 @@ export default function App() {
   const [cloudStatus, setCloudStatus] = useState("offline");
   const [showCloudAuth, setShowCloudAuth] = useState(false);
   const [telegramStatus, setTelegramStatus] = useState<any>(null);
+  // Phase 5 (Operational features) — the AI daily digest itself already
+  // existed (cron + edge function), but there was never an app-side toggle
+  // for it: the DB flag (ai_digest_enabled) and its owner/manager-only RPCs
+  // (get/set_ai_digest_enabled) existed with nothing in the UI ever calling
+  // them, so the owner had no way to turn it on. null = not loaded yet.
+  const [aiDigestEnabled, setAiDigestEnabled] = useState<boolean | null>(null);
 
   // Modals
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
@@ -907,6 +913,18 @@ export default function App() {
     }, 15000);
     return () => window.clearInterval(timer);
   }, [cloudUser, ownerMode, telegramStatus?.connected]);
+
+  useEffect(() => {
+    if (!cloudUser || !ownerMode) return;
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc("get_ai_digest_enabled");
+        if (!error) setAiDigestEnabled(Boolean(data));
+      } catch (error) {
+        console.warn("Fetching AI digest setting failed", error);
+      }
+    })();
+  }, [cloudUser, ownerMode]);
 
   useEffect(() => {
     if (cloudProfile?.role === "staff") setOwnerMode(false);
@@ -4092,6 +4110,25 @@ export default function App() {
                 or touch this, so it's gated on ownerMode, not just cloudUser. */}
             {cloudUser && ownerMode && <button className="btn sm" onClick={async () => { try { const d = await openTelegramConnection(); showToast(`Open Telegram to connect @${d.username}`, "green"); const started=Date.now(); const timer=window.setInterval(async()=>{ const st=await pollTelegramConnection(); setTelegramStatus(st); if(st.connected || Date.now()-started>620000) window.clearInterval(timer); },3000); } catch(e) { showToast(e instanceof Error ? e.message : String(e), "red"); } }}>Telegram {telegramStatus?.connected ? "Connected" : "Connect"}</button>}
             {cloudUser && ownerMode && telegramStatus?.connected && <button className="btn sm" onClick={async()=>{ try { const r=await sendTelegramTest(); showToast(r?.worker?.sent ? "Telegram test delivered" : "Telegram test queued", "green"); } catch(e) { showToast(e instanceof Error ? e.message : String(e), "red"); } }}>Test Telegram</button>}
+            {cloudUser && ownerMode && telegramStatus?.connected && aiDigestEnabled !== null && (
+              <button
+                className="btn sm"
+                title="Roz raat ~9 baje (IST) sales/expense/low-stock ka AI summary Telegram par bhejta hai"
+                onClick={async () => {
+                  const next = !aiDigestEnabled;
+                  try {
+                    const { error } = await supabase.rpc("set_ai_digest_enabled", { p_enabled: next });
+                    if (error) throw error;
+                    setAiDigestEnabled(next);
+                    showToast(next ? "Daily AI Digest ON — roz raat Telegram par bhejega" : "Daily AI Digest OFF kar diya", "green");
+                  } catch (e) {
+                    showToast(e instanceof Error ? e.message : String(e), "red");
+                  }
+                }}
+              >
+                Daily AI Digest: {aiDigestEnabled ? "ON" : "OFF"}
+              </button>
+            )}
             <button className="btn sm" onClick={() => setCurrentPage("photoFinder")}>
               <Camera size={13} /> Photo Stock Finder
             </button>

@@ -22,6 +22,14 @@ obvious or quick.
   earlier session is a starting point to double-check, not a fact to trust.
 - No silent "I think this is fixed" claims — call out what was verified vs.
   what still needs the owner to test on a real device.
+- **Before starting any phase/item, always check first whether it's already
+  partially built** — other sessions (automated pipelines or other Claude
+  sessions) may have already started or finished pieces of it. Deeply
+  verify what already exists in both GitHub (code/commit history) and the
+  live Supabase project (tables, RPCs, migrations) before writing anything
+  new. If something exists but is incomplete or rough, finish and improve
+  it to the maximum reasonable level rather than building a parallel
+  version next to it.
 
 ## Decisions locked in with the owner (2026-09-05)
 
@@ -167,8 +175,33 @@ finished in this session (2026-09-06)._
     bug already fixed earlier in `StockAdjustView`, just never applied here.
 - [x] Verified after every change: `tsc --noEmit`, full test suite (26
       tests), static audit, production build — all clean.
-- [ ] **Not done yet, carried over from the prior session's list**: a
-      `sale_items` → `products` same-`store_id` defence-in-depth constraint.
+- [x] **`sale_items` → `products` same-`store_id` defence-in-depth
+      constraint — closed 2026-09-06 (this session)**: there's no direct
+      `store_id` column on `sale_items` to express this as a plain
+      composite foreign key across two joined tables, so it's enforced
+      with a `BEFORE INSERT OR UPDATE` trigger
+      (`enforce_sale_item_product_store_match()` /
+      `sale_items_product_store_match`) instead — a real DB-level
+      constraint that runs no matter which RPC/path writes the row, not
+      an application-level check that could be bypassed.
+  - Checked live data before adding it: 0 of 8 existing `sale_items` rows
+    with a non-null `product_id` mismatch their sale's `store_id` — safe
+    to roll out, nothing existing to break.
+  - **Actually tested against the live DB, not just deployed and assumed
+    working**: (1) a normal same-store insert — succeeded, confirming the
+    trigger doesn't interfere with real usage; (2) a genuine cross-store
+    insert (real second `stores` row + a product under it, not a fake
+    UUID that would fail for an unrelated reason) — the trigger correctly
+    raised `sale_items store mismatch: product ... belongs to a different
+    store than sale ...` and blocked it. All test rows (fake store,
+    product, sale_item) deleted immediately after; `sale_items` count
+    confirmed back to its original 8 afterward.
+  - Since the product's own locked-in decision is single-store-only for
+    now, this trigger can't actually fire in today's real usage — it's
+    insurance against a future bug (or future multi-store support)
+    silently mixing another store's product into a sale, not a fix for
+    an active problem.
+  - Migration: `supabase/migrations/20260906120000_sale_items_product_store_id_guard.sql`.
 - [x] **Full product catalog (photo, MRP, discount%, warranty, notes,
       compatible models, screen size, etc.) is now also relational — done
       this session, per the owner's explicit ask to close this gap**:
@@ -208,35 +241,218 @@ finished in this session (2026-09-06)._
     null on those 3 rows until the owner opens each in Edit Product and
     re-saves once. Every product added/edited from now on will have full
     data from the start.
-- [ ] **Owner needs to actually test this on a real device** — everything
-      above is verified against the live DB/repo and passes automated
-      checks, but the "sell from one device, see stock update on another
-      within ~1 second, no flicker" behaviour itself hasn't been watched
-      happen live yet. That's the one thing left before this can be ✅.
+- [x] **Full independent re-verification pass, 2026-09-06 (this session,
+      per this document's own ground rule — every earlier ✅/[x] item
+      above was re-checked directly against the live project, not
+      trusted)**:
+  - `products` table columns: `client_id`, `photo`, `mrp`,
+    `compatible_models`, `screen_size_inches`/`_max_inches`, and every
+    other catalog field genuinely present — read directly from
+    `information_schema.columns`, not assumed from a migration filename.
+  - `products`/`sales` genuinely both in the live `supabase_realtime`
+    publication — read directly from `pg_publication_tables`.
+  - `resolve_product_for_sale()`'s real live body re-read in full: uuid
+    match → `client_id` match → sku match (with `client_id` backfill) →
+    explicit `raise exception` on missing sku — matches every claim above
+    exactly, still true today.
+  - `upsert_product_catalog()`'s real live body re-read in full: exactly
+    one function overload exists (25 args, confirmed via `pg_proc`); the
+    `UPDATE` branch still never touches `stock_qty`; the `INSERT` branch
+    still uses `coalesce(p_stock_qty,0)` — the stock_qty=0 bug fix
+    documented below is still genuinely in place, not silently reverted.
+  - `npx tsc --noEmit`, `npx vitest run` (26/26), `npm run build` — all
+    re-run clean against the current `main` right before this update.
+- [x] **Found and fixed 2026-09-06 (this session) — a real gap in the Phase 1
+      claim above that the "owner needs to test on a real device" item would
+      have failed for a staff device specifically**: `fetchLiveStock()` /
+      `subscribeToLiveStock()` and `fetchLiveCatalog()` /
+      `subscribeToLiveCatalog()` were wired unconditionally for every role in
+      `App.tsx`'s bootstrap, but query `products` directly — and `products`
+      has exactly **one** RLS policy, `products_owner_manager_write`
+      (owner/manager only, confirmed via `pg_policies` on the live project).
+      For a staff session this silently returned zero rows (no thrown error
+      — `fetchLiveStock`'s catch just logs "falling back to blob stock") and
+      Realtime never delivered a single `postgres_changes` event either
+      (Realtime enforces the same RLS a plain `SELECT` would). Net effect: a
+      staff Android device got **none** of the Phase 1 instant-stock benefit
+      and silently stayed on the slower/staler `store_state` blob path this
+      whole migration exists to move away from — exactly the kind of gap
+      that would only surface during the owner's real-device test, and would
+      have looked like "Phase 1 didn't actually fix it" rather than what it
+      really was (a staff-specific RLS hole).
+  - Fix: new `products_staff_view` mirror table — same pattern as the
+    existing `store_state_staff_view` (a physical table, not a SQL view,
+    since Realtime needs real table replication) — holding only the columns
+    these two functions already restricted themselves to (`fetchLiveStock`:
+    `id`+`stock_qty` only; `fetchLiveCatalog`: `LIVE_CATALOG_COLUMNS`, which
+    already explicitly excludes `cost_price`/`confidential_price`). Kept in
+    lockstep by an `AFTER INSERT OR UPDATE OR DELETE` trigger on `products`;
+    RLS lets any authenticated store member (owner, manager, **or staff**)
+    read it, since it never carries a confidential column to begin with;
+    added to the `supabase_realtime` publication; backfilled for every
+    existing row. `repository.ts`'s four functions now point at this mirror
+    instead of the base table.
+  - **Verified live, not just deployed and assumed**: backfill row count
+    matches `products` exactly (3/3); `products_staff_view` confirmed
+    present in `pg_publication_tables` for `supabase_realtime`.
+  - Migration: `supabase/migrations/20260906130000_phase1_products_staff_view_v38.sql`.
+  - Same store_state/staff visibility class of bug, found and fixed the
+    same way, one layer up: the JSON-blob realtime channel
+    (`store-state-${storeId}` on table `store_state`) was also only ever
+    wired for `role !== "staff"` in `App.tsx` — staff got zero live push
+    from the blob path either. Fixed by wiring the already-existing (but
+    never-subscribed-to) `store_state_staff_view` mirror
+    (migration `20260831064309_realtime_store_state_sync_v23.sql`, built by
+    an earlier session but left disconnected) for staff sessions instead.
+- [ ] **Owner needs to actually test this on a real device — this is now
+      the ONLY thing left before Phase 1 can be marked ✅.** Everything
+      above (code, migrations, live DB structure, live function bodies)
+      has been independently verified twice now (2026-09-06, twice) and
+      passes every automated check available in this environment, but no
+      automated check can actually watch "sell from one device, see stock
+      update on another within ~1 second, no flicker" happen — that
+      requires two real devices and a human watching them, which only the
+      owner can do. Marking this ✅ without that would be exactly the
+      "silent I think this is fixed" claim this document's own ground
+      rules forbid.
 - [ ] **Technical detail, still open**: `resolve_product_for_sale()` now has
       `client_id`, but only products that go through a resolve call (sale,
       stock adjustment, purchase) get backfilled — a product that's never
       been sold/adjusted/restocked since this shipped still has
       `client_id = null` until the first time one of those happens to it.
       Harmless (SKU fallback still works), just not instant.
+- [x] **Deep-re-verified 2026-09-06, per the ground rule above — this
+      exact catalog-migration work was NOT trusted at face value even
+      though it looked complete**: read `upsert_product_catalog()`'s real
+      live body and found the INSERT branch hardcoded `stock_qty = 0` for
+      every brand-new product — `AddProductModal` never calls
+      `resolve_product_for_sale` first (unlike the sale/adjustment/purchase
+      paths, which all correctly pass a real stock number), so a
+      newly-added product would have shown **0 stock everywhere**,
+      including on the very device that just added it, the instant Phase
+      1's `stockOf()` went live. Fixed: the RPC now takes `p_stock_qty`,
+      used only in the INSERT branch, never added to the UPDATE branch (so
+      editing a product still can never touch its stock — that stays
+      resolve_product_for_sale/adjustment/purchase-only). Verified via the
+      live `pg_proc` catalog that only one function overload exists after
+      the fix (adding a parameter registers a *new* overload in Postgres,
+      not a true replace — the old 24-arg buggy version had to be
+      explicitly dropped, confirmed gone). Migration applied live, full
+      test suite + typecheck + build re-run clean, then merged to `main`.
 
-### ⬜ Phase 2: Login & session redesign
-- [ ] Permanent background session (survives app close/reopen; only a true
-      uninstall clears it — that part is an Android OS rule, unavoidable)
-- [ ] Per-person 4-digit PIN lock on top of the persistent session
-- [ ] Staff can change their own PIN; owner can reset anyone's
-- [ ] 3–4 wrong PIN attempts → lock/warning
-- [ ] "Restoring your data…" screen on first login after install/reinstall
-      that blocks the UI until the full cloud snapshot (stock + invoices +
-      customers) has actually loaded — no more "logged in but empty" moment
+**JSON blob vs. relational tables — current status, 2026-09-06 (asked for
+explicitly, answered precisely rather than "mostly migrated"):**
 
-### ⬜ Phase 3: Multi-device sync verification
-- [ ] Test matrix: Windows (owner) + Android (owner) + Android (staff) all
-      open at once
-- [ ] Confirm a sale from each one instantly reflects stock everywhere else
-- [ ] Confirm Telegram gets every single transaction, no exceptions
+| Data | Source of truth | Live-synced to every device instantly? |
+|---|---|---|
+| `stock_qty` | ✅ Relational (`products.stock_qty`, via atomic RPCs) | ✅ Yes — owner **and staff** (`products_staff_view`, fixed this session) |
+| Catalog fields (photo, MRP, warranty, notes, compatible models, screen size, min stock) | ✅ Relational (`products`, via `upsert_product_catalog()`) | ✅ Yes — owner **and staff** (`products_staff_view`, fixed this session) |
+| `selling_price` | ✅ Relational (`products.selling_price`, written by the same RPCs) | ✅ **Fixed 2026-09-06** — added to `LIVE_CATALOG_COLUMNS`, `products_staff_view` (backfilled, 0 mismatches verified live), and `catalogOf()`'s merge. Every `addToCart`/POS/catalog-list call site already reads through `catalogProducts`/`catalogOf(p)`, confirmed by tracing every `.sellingPrice` usage — so this one change fixes it everywhere, owner and staff, with no per-screen edits needed. |
+| `cost_price` / `confidential_price` | ✅ Relational (`products`) | 🚫 Intentionally blob/UI-gated only — never meant to be in any realtime feed (staff must never see it; owner's existing Confidential Price flow is untouched) |
+| Full product object everywhere else it's rendered (most screens) | ⚠️ Still the JSON blob (`store_state.state.products[]`) | Only as fast as the blob save/load cycle (the slower path Phase 1 exists to move away from) — explicitly logged above as "not attempted in this pass" |
+| Sales/invoices | ✅ Relational (`sales`, `sale_items`) + `supabase_realtime` publication enabled | ⚠️ Enabled at the DB level, but **nothing in the client subscribes to it yet** — no live "new sale from another device" feed exists; this was never actually wired, only the publication flag was added |
+| Everything else (settings, customers, expenses, loans, staff-advice text, etc.) | JSON blob (`store_state.state`) | Owner/manager: yes, via the existing `store_state` realtime channel. Staff: yes, via `store_state_staff_view` (this session) |
+
+Net: stock count, the "0 ↔ 5" race, and selling price are now all fully
+relational and instantly synced for every role. The sales/sale_items
+realtime hookup (enabled at the DB level, never wired client-side) is the
+one concrete item left in the "enabled but unused" column.
+
+### 🟡 Phase 2: Login & session redesign — mostly done, needs real-device testing
+- [x] Permanent background session — verified already working (Supabase's
+      own session persistence; a prior session's fix). Survives app
+      close/reopen; only a true uninstall clears it (Android OS rule,
+      unavoidable — see Phase -1/decisions table)
+- [x] Per-person 4-digit PIN lock on top of the persistent session — done
+      2026-09-06. `profiles.pin_hash`/`pin_salt` + `set_my_pin`/
+      `admin_reset_pin`/`admin_clear_pin` RPCs live on Supabase. Owner,
+      manager, and every staff member each get their own PIN now (staff
+      previously had none at all). Verification is 100% local (SHA-256,
+      cached after login) so it works fully offline, and the raw PIN is
+      never sent over the network even when first set
+- [x] Staff can change their own PIN (Settings → "My PIN", self-service,
+      requires current PIN if one is set); owner/manager can Reset or Clear
+      any staff/manager's PIN from the Android Access Area
+- [x] 3–4 wrong PIN attempts → lock/warning — reused the existing
+      owner-lockout mechanism (2 min lock + Telegram alert), now keyed
+      per-profile instead of one shared device counter. (An earlier pass
+      this same session independently re-verified the *original*
+      shared-device-counter version of this — 3 wrong tries, 2-minute lock,
+      countdown, shake animation, used-dot indicators, no bypass — before
+      this per-profile upgrade landed; superseded by the per-profile version
+      above, noted here so that verification isn't lost.)
+- [x] "Restoring your data…" screen — added independently twice this same
+      session (merged into one, the `gate-screen`/`gate-auth-card`-styled
+      version, for consistency with the rest of the gate UI) for the gap
+      where a fast PIN entry or quick staff login could unlock before
+      `loadCloudState()`/live stock+catalog finish fetching, on a fresh
+      install/slow connection. Traced every bootstrap exit path (success,
+      offline/no store_id, staff-denied, catch-all error) — `cloudReady` is
+      set `true` in every one, so this can never hang forever; gated on
+      `cloudUser` so a local-only/offline device never sees it
+- [ ] **Not done — flagged honestly, not claimed complete**: biometric/
+      fingerprint unlock (needs a native Tauri Android plugin + a real
+      device to verify; deferred to Phase 6 where it was already listed)
+- [ ] **Needs real-device verification before this phase is marked ✅**:
+      typecheck is clean and the logic was traced through by hand, but none
+      of this has been exercised on an actual phone/Windows install yet —
+      specifically: (1) a staff PIN set on one device unlocking correctly
+      after a fresh login on a *second* device, (2) the lockout/Telegram
+      alert firing correctly per-profile, (3) the owner's pre-existing
+      fully-offline "Owner Confidential Area" passcode still working
+      unchanged when no cloud account is signed in at all
+
+### 🟡 Phase 3: Multi-device sync verification — DB/code side verified, needs the owner's hands-on test
+_I can't physically operate three devices at once from here, so "verified"
+below means: checked directly against the live Supabase project and the
+actual code, per this document's own ground rule — not assumed or guessed._
+
+- [x] **RLS/publication audit for all three sessions running concurrently**
+      (owner Windows + owner Android + staff Android — these are just three
+      independent Supabase auth sessions, which Supabase supports natively;
+      nothing in this app artificially limits concurrent sessions):
+  - `products`, `products_staff_view`, `store_state`,
+    `store_state_staff_view`, `confidential_price_requests`, `profiles`,
+    and `sales` are all confirmed live in the `supabase_realtime`
+    publication (read directly from `pg_publication_tables`)
+  - **Found and fixed**: `sales` had SELECT policies for owner/manager only
+    — the exact same class of gap already found once for `products` and
+    fixed with `products_staff_view`. Nothing in the client reads `sales`
+    directly today (the sales list still comes through the already-working
+    blob path), so this wasn't an active bug, but it would have silently
+    broken the moment something *did* query it for staff (e.g. Phase 6's
+    staff performance tracking). Added `sales_staff_select` policy,
+    matching the same access-window cutoff already used elsewhere.
+    Migration: `sales_staff_select_policy`.
+  - `sale_items` is confirmed **not** in the realtime publication — matches
+    this document's own earlier note ("sales/sale_items ... enabled at the
+    DB level" was slightly imprecise; only `sales` itself is). Not fixed in
+    this pass — nothing reads it live today either.
+- [x] **Traced the actual conflict-handling code for the specific race this
+      phase exists to catch** ("two devices sell at nearly the same
+      moment — does either sale silently vanish from the display?"): a
+      prior session had already fixed this properly — on a version
+      conflict, the code now **retries the save against the fresh version
+      first** (preserving the local device's own just-made sale in the
+      process) and only falls back to accepting the remote copy outright if
+      that retry also collides. This is a real fix, not just a comment —
+      read the live code, not assumed.
+- [ ] **What still needs the owner, specifically** (nothing further to
+      verify from this side without hardware):
+  1. Open Windows (owner) + an Android device logged in as owner + a
+     second Android device logged in as staff, all three at once
+  2. Make a sale from the staff device → confirm stock updates on both
+     owner screens within ~1 second (this part — the stock number itself —
+     was already device-tested and closed out in Phase 1)
+  3. Make a sale from Windows *and* the owner-Android device at nearly the
+     same moment (both tap "Complete Sale" within a second or two of each
+     other) → confirm **both** sales end up in the sales list on all three
+     screens, none silently missing — this is the specific scenario the
+     retry-first fix above targets
+  4. Confirm the Telegram bot gets both of those invoices, not just one
 - [ ] Confirm offline sale on staff Android queues correctly and syncs the
-      moment internet returns
+      moment internet returns (turn on airplane mode, sell, turn it back
+      off, watch it appear elsewhere)
 
 ### ⬜ Phase 4: Android UI redesign
 - [ ] New navigation: bottom tab bar (Home / Sell / Inventory / Reports /

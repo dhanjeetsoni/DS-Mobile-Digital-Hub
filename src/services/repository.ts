@@ -73,10 +73,19 @@ export async function loadCloudState() {
  * one-shot read of just {id, stock_qty} for every product — used to seed the
  * live-stock map on bootstrap, before the realtime subscription below takes
  * over keeping it current.
+ *
+ * 2026-09-06: reads from `products_staff_view` (a redacted, always-current
+ * mirror of `products`, kept in sync by a trigger — see migration
+ * 20260906130000_phase1_products_staff_view_v38.sql), not `products`
+ * directly. `products` only has an owner/manager RLS policy, so a staff
+ * session silently got zero rows here before — this function looked like it
+ * worked (no thrown error reached the UI) while actually leaving staff on
+ * the stale blob-only stock the whole time. The mirror carries no
+ * confidential column, so it's safe for every role, staff included.
  */
 export async function fetchLiveStock(storeId: string): Promise<Record<string, number>> {
   const { data, error } = await supabase
-    .from("products")
+    .from("products_staff_view")
     .select("id,stock_qty")
     .eq("store_id", storeId);
   if (error) throw error;
@@ -91,16 +100,128 @@ export async function fetchLiveStock(storeId: string): Promise<Record<string, nu
  * device updates stock_qty via its atomic RPC, which this picks up in
  * ~1 second) so every open device's live-stock map stays current without
  * waiting for the slower store_state blob save/load round trip.
+ *
+ * 2026-09-06: subscribes to `products_staff_view`, not `products` — see the
+ * fetchLiveStock comment above. Realtime enforces the same RLS as a normal
+ * SELECT, so a staff session subscribing directly to `products` never
+ * receives a single event (no error either — it just silently never fires).
  */
 export function subscribeToLiveStock(storeId: string, onChange: (productId: string, stockQty: number) => void) {
   const channel = supabase
     .channel(`live-stock-${storeId}`)
     .on(
       "postgres_changes",
-      { event: "*", schema: "public", table: "products", filter: `store_id=eq.${storeId}` },
+      { event: "*", schema: "public", table: "products_staff_view", filter: `store_id=eq.${storeId}` },
       (payload: any) => {
         const row = payload.new || payload.old;
         if (row?.id) onChange(row.id, Number(row.stock_qty || 0));
+      }
+    )
+    .subscribe();
+  return channel;
+}
+
+/**
+ * Phase 1 completion (2026-09-06) — read-side companion to
+ * upsertProductCatalog() above. That function already writes the full
+ * catalog relationally on every Add/Edit Product save; this is what was
+ * explicitly left undone at the time ("the read side still reads from the
+ * JSON blob... a full rip-and-replace... not attempted in this pass").
+ *
+ * Deliberately EXCLUDES cost_price and confidential_price — those stay
+ * blob-only/UI-gated exactly as before, untouched by this change, so the
+ * existing owner-only / Telegram-approval-gated pricing flows keep working
+ * exactly as they do today. This is display-catalog data only (photo, MRP,
+ * selling price, warranty, notes, compatible models, screen size, etc.) —
+ * the same fields `upsert_product_catalog()` accepts, minus the two
+ * confidential price tiers.
+ *
+ * 2026-09-06: added `selling_price` — this was the one catalog field left
+ * reading from the JSON blob after the rest of this migration, so every
+ * device still saw a stale selling price until its next full blob sync.
+ * Same non-confidential, safe-for-every-role field as everything else here.
+ *
+ * Keyed by `client_id` (the app's own product.id, which is what every
+ * screen actually indexes by) with a `sku` fallback map for the small
+ * number of pre-Phase-1 rows that predate client_id backfill.
+ */
+export interface LiveCatalogEntry {
+  sku: string; barcode: string | null; brand: string; category: string;
+  mrp: number | null; sellingPrice: number | null; photo: string; warrantyEnabled: boolean; warrantyMonths: number;
+  requireCustomerDetails: boolean; supplier: string; notes: string;
+  compatibleModels: string[]; screenSizeInches?: number; screenSizeMaxInches?: number;
+  isMobilePhone?: boolean; isSparePart?: boolean; minStock: number;
+}
+
+function rowToLiveCatalogEntry(row: any): LiveCatalogEntry {
+  return {
+    sku: row.sku || "",
+    barcode: row.barcode ?? null,
+    brand: row.brand || "",
+    category: row.category || "",
+    mrp: row.mrp === null || row.mrp === undefined ? null : Number(row.mrp),
+    sellingPrice: row.selling_price === null || row.selling_price === undefined ? null : Number(row.selling_price),
+    photo: row.photo || "",
+    warrantyEnabled: !!row.warranty_enabled,
+    warrantyMonths: Number(row.warranty_months || 0),
+    requireCustomerDetails: !!row.require_customer_details,
+    supplier: row.supplier || "",
+    notes: row.notes || "",
+    compatibleModels: Array.isArray(row.compatible_models) ? row.compatible_models : [],
+    screenSizeInches: row.screen_size_inches === null || row.screen_size_inches === undefined ? undefined : Number(row.screen_size_inches),
+    screenSizeMaxInches: row.screen_size_max_inches === null || row.screen_size_max_inches === undefined ? undefined : Number(row.screen_size_max_inches),
+    isMobilePhone: row.is_mobile_phone === null || row.is_mobile_phone === undefined ? undefined : !!row.is_mobile_phone,
+    isSparePart: row.is_spare_part === null || row.is_spare_part === undefined ? undefined : !!row.is_spare_part,
+    minStock: Number(row.min_stock || 0),
+  };
+}
+
+const LIVE_CATALOG_COLUMNS =
+  "id,client_id,sku,barcode,brand,model,category,mrp,selling_price,photo,warranty_enabled,warranty_months," +
+  "require_customer_details,supplier,notes,compatible_models,screen_size_inches,screen_size_max_inches," +
+  "is_mobile_phone,is_spare_part,min_stock";
+
+export async function fetchLiveCatalog(storeId: string): Promise<{ byClientId: Record<string, LiveCatalogEntry>; bySku: Record<string, LiveCatalogEntry> }> {
+  // 2026-09-06: reads from `products_staff_view`, same reasoning as
+  // fetchLiveStock above — `products` has no staff SELECT policy at all, so
+  // this silently returned zero rows for every staff session. The mirror
+  // carries the exact same LIVE_CATALOG_COLUMNS set (still excluding
+  // cost_price/confidential_price), so this is a like-for-like swap.
+  const { data, error } = await supabase
+    .from("products_staff_view")
+    .select(LIVE_CATALOG_COLUMNS)
+    .eq("store_id", storeId) as { data: any[] | null; error: any };
+  if (error) throw error;
+  const byClientId: Record<string, LiveCatalogEntry> = {};
+  const bySku: Record<string, LiveCatalogEntry> = {};
+  for (const row of data || []) {
+    const entry = rowToLiveCatalogEntry(row);
+    if (row.client_id) byClientId[row.client_id] = entry;
+    else if (row.sku) bySku[row.sku] = entry;
+  }
+  return { byClientId, bySku };
+}
+
+/**
+ * Realtime companion to fetchLiveCatalog() — separate channel from
+ * subscribeToLiveStock() above (deliberately not merged into it) so this
+ * addition can never regress the already-device-tested Phase 1 stock feed;
+ * worst case if this one has a bug, stock sync keeps working unaffected.
+ *
+ * 2026-09-06: subscribes to `products_staff_view`, not `products` — same
+ * "staff has no SELECT policy on the base table, so Realtime silently never
+ * fires" issue as subscribeToLiveStock above.
+ */
+export function subscribeToLiveCatalog(storeId: string, onChange: (clientId: string | null, sku: string, entry: LiveCatalogEntry) => void) {
+  const channel = supabase
+    .channel(`live-catalog-${storeId}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "products_staff_view", filter: `store_id=eq.${storeId}` },
+      (payload: any) => {
+        const row = payload.new || payload.old;
+        if (!row) return;
+        onChange(row.client_id || null, row.sku || "", rowToLiveCatalogEntry(row));
       }
     )
     .subscribe();
@@ -142,6 +263,11 @@ export async function upsertProductCatalog(storeId: string, product: any): Promi
     p_screen_size_max_inches: product.screenSizeMaxInches ?? null,
     p_is_mobile_phone: !!product.isMobilePhone,
     p_is_spare_part: !!product.isSparePart,
+    // 2026-09-06 bug fix (see accompanying migration): only ever used on
+    // first-creation INSERT inside the RPC, never on an UPDATE of an
+    // existing product — so this can never clobber a stock count that's
+    // changed since via a sale/adjustment on another device.
+    p_stock_qty: product.stock ?? 0,
   });
   if (error) throw error;
   return data as string;

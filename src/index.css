@@ -458,6 +458,55 @@ html[data-font-style="mono"] {
   display: none;
 }
 
+/* Phase 4.1 — bottom tab bar. Hidden entirely on desktop/Windows; only
+   shown under the same ~900px breakpoint the off-canvas sidebar uses. */
+.bottom-tab-bar {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .bottom-tab-bar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 90; /* under the off-canvas sidebar (100) and its backdrop (95) */
+    background: var(--card);
+    border-top: 1px solid var(--line);
+    padding: 4px 2px calc(4px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
+  }
+
+  .bottom-tab-btn {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 6px 2px;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+
+  .bottom-tab-btn.active {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  /* Room at the bottom of the page so content never sits underneath the
+     fixed tab bar — same technique #topbar already uses at the top. */
+  #page {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 @media (max-width: 900px) {
   .mobile-hamburger {
     display: inline-flex;

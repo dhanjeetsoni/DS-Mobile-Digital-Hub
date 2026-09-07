@@ -21,6 +21,8 @@
     "android:staff:build": "tauri android build --config src-tauri/tauri.staff-android.conf.json",
     "android:owner:dev": "tauri android dev --config src-tauri/tauri.owner-android.conf.json",
     "android:owner:build": "tauri android build --config src-tauri/tauri.owner-android.conf.json",
+    "android:mobile:dev": "tauri android dev --config src-tauri/tauri.mobile-android.conf.json",
+    "android:mobile:build": "tauri android build --config src-tauri/tauri.mobile-android.conf.json",
     "audit:hardening": "npm run typecheck && npm run test:static",
     "build:production": "npm run audit:hardening && npm run build"
   },

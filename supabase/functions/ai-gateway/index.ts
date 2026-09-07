@@ -315,21 +315,56 @@ function hasAI(): boolean {
   return ENV_GEMINI_KEYS.length > 0 || Boolean(supabaseAdmin);
 }
 
+// ---------------------------------------------------------------------------
+// 2026-09-04 fix — see PROJECT-STATUS-NOTES / DS_Mobile_Master_Plan_Completed_Points
+// entry of the same date for the full writeup. Root cause found via Supabase
+// function_logs: EVERY route (business-insights, staff-advice, ocr-accessory,
+// etc.) was intermittently hitting Gemini's own 503 "This model is currently
+// experiencing high demand" — a real, model-wide capacity error on Google's
+// side, not a problem with any specific key (all 10 configured keys were
+// verified active with zero cooldowns). The OLD retry strategy made this
+// worse in two ways:
+//   1. It retried the SAME (possibly-overloaded) key up to 3 times with
+//      growing sleeps (600ms/1200ms/1800ms) before rotating — burning time
+//      on a key that had already just failed instead of trying a fresh one.
+//   2. With 10 keys x up to 3 tries x up to 1.8s of sleep, a fully-unlucky
+//      request could take 50+ seconds — long enough to hit the Edge
+//      Function's own request timeout (504, seen once in production logs)
+//      before ever getting a real answer back to the user.
+// New strategy: cycle through ALL keys fast with NO inter-attempt sleep
+// first (a different key is a fresh shot at Google's load balancer, so this
+// alone resolves most "high demand" blips almost immediately). Only if that
+// full pass fails does it wait once (1.5s, matching Google's own "usually
+// temporary" guidance) and do a second full pass. A hard wall-clock budget
+// (22s, safely under Supabase's Edge Function timeout) guarantees this
+// function always returns an answer instead of timing out silently.
+// ---------------------------------------------------------------------------
+const FAILOVER_TIME_BUDGET_MS = 22_000;
+
 async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
   const poolId = storeId && supabaseAdmin ? storeId : ENV_POOL_ID;
   const keys = await loadKeyPool(storeId);
   if (keys.length === 0) throw new Error("AI unavailable — no Gemini API keys configured. Owner: add keys in Settings.");
 
+  const startedAt = Date.now();
   let activeIdx = activeKeyIndexByPool.get(poolId) || 0;
   let lastError: any = null;
-  for (let attempt = 0; attempt < keys.length; attempt++) {
-    const idx = (activeIdx + attempt) % keys.length;
-    const entry = keys[idx];
-    // Up to 2 quick retries on the SAME key for a transient "model
-    // overloaded" 503 (Google's own message says these are usually a few
-    // seconds, not a real outage) before treating it like any other
-    // failure and rotating to the next key.
-    for (let overloadRetry = 0; overloadRetry <= 2; overloadRetry++) {
+  let anyUnavailable = false;
+
+  for (let pass = 0; pass < 2; pass++) {
+    if (pass === 1) {
+      // Every key failed on the fast pass — give Google's "usually
+      // temporary" overload a real chance to clear before trying again.
+      if (!anyUnavailable) break; // nothing but quota/invalid failures — a second pass won't help.
+      await sleep(1500);
+    }
+
+    for (let attempt = 0; attempt < keys.length; attempt++) {
+      if (Date.now() - startedAt > FAILOVER_TIME_BUDGET_MS) {
+        throw lastError || new Error("AI busy hai (high demand) — thodi der mein dobara try karein.");
+      }
+      const idx = (activeIdx + attempt) % keys.length;
+      const entry = keys[idx];
       try {
         const result = await callWithTimeout(fn(clientForKey(entry.apiKey)), GEMINI_TIMEOUT_MS);
         activeKeyIndexByPool.set(poolId, idx);
@@ -338,17 +373,19 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
       } catch (err) {
         lastError = err;
         const failure = classifyGeminiFailure(err);
-        if (failure === "unavailable" && overloadRetry < 2) {
-          await sleep(600 * (overloadRetry + 1));
+        if (!failure) throw err; // Not a key/capacity problem (bad input, etc) — fail fast, don't burn other keys retrying it.
+        if (failure === "unavailable") {
+          anyUnavailable = true;
+          // Model-overload: this key itself is fine, just don't rotate it
+          // to the front next time — move straight to the next key with no
+          // sleep (a fresh key is a fresh shot at Google's load balancer).
           continue;
         }
-        if (!failure) throw err; // Not a key problem (bad input, timeout classified separately above, etc) — fail fast.
         console.warn(
           `Gemini key (store=${poolId}, slot=${entry.slot}) failed (${failure}) — ` +
             (failure === "invalid" ? "marking invalid, removing from rotation." : "cooling down, rotating to next key.")
         );
         void markKeyResult(storeId, entry.slot, false, err?.message || (err instanceof GeminiTimeoutError ? "Timed out" : String(err)), failure === "invalid" ? "invalid" : "exhausted");
-        break;
       }
     }
   }
@@ -1108,6 +1145,19 @@ ${JSON.stringify(summary)}`;
   return `📊 ${summary.shopName} — Daily AI Digest (${summary.date})\n\n${(response.text || "").trim()}`;
 }
 
+// Turns a raw Gemini/failover error into a short, honest Hinglish message
+// for the shopkeeper. Distinguishes "Google's AI is momentarily overloaded,
+// try again in a bit" (true almost all the time in practice — see the
+// runWithGeminiFailover comment above) from every other failure, instead of
+// showing the same generic "AI scan failed" for both.
+function friendlyAiError(err: any, fallback: string): string {
+  const failure = classifyGeminiFailure(err);
+  if (failure === "unavailable") {
+    return "AI abhi high demand mein hai (Google ki taraf se) — 15-20 second baad ek baar phir try karein.";
+  }
+  return fallback;
+}
+
 function decodeImage(image: unknown): { mimeType: string; base64Data: string } | null {
   if (!image || typeof image !== "string") return null;
   if (image.length > 14_000_000) return null;
@@ -1173,7 +1223,7 @@ Deno.serve(async (req: Request) => {
           return json({ success: false, error: "AI unavailable — enter manually." }, 503);
         } catch (error) {
           console.error("OCR endpoint error", error);
-          return json({ success: false, error: "OCR service failed. Enter manually." }, 500);
+          return json({ success: false, error: friendlyAiError(error, "OCR service failed. Enter manually.") }, 500);
         }
       }
 
@@ -1193,7 +1243,7 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, provider: "gemini", data });
         } catch (error) {
           console.error("Accessory OCR endpoint error", error);
-          return json({ success: false, error: "AI scan failed. Enter manually." }, 500);
+          return json({ success: false, error: friendlyAiError(error, "AI scan failed. Enter manually.") }, 500);
         }
       }
 
@@ -1254,7 +1304,7 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, insights });
         } catch (error) {
           console.error("Business insights endpoint error", error);
-          return json({ success: false, error: "AI insights failed. Try again shortly." }, 500);
+          return json({ success: false, error: friendlyAiError(error, "AI insights failed. Try again shortly.") }, 500);
         }
       }
 
@@ -1273,7 +1323,7 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, advice });
         } catch (error) {
           console.error("Staff advice endpoint error", error);
-          return json({ success: false, error: "AI advice failed. Try again shortly." }, 500);
+          return json({ success: false, error: friendlyAiError(error, "AI advice failed. Try again shortly.") }, 500);
         }
       }
 
@@ -1293,7 +1343,7 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, provider: "gemini", data });
         } catch (error) {
           console.error("Product photo search endpoint error", error);
-          return json({ success: false, error: "AI photo search failed. Search manually." }, 500);
+          return json({ success: false, error: friendlyAiError(error, "AI photo search failed. Search manually.") }, 500);
         }
       }
 
@@ -1311,7 +1361,7 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, data: result });
         } catch (error) {
           console.error("Resale price advisor error", error);
-          return json({ success: false, error: "AI price suggestion failed. Enter manually." }, 500);
+          return json({ success: false, error: friendlyAiError(error, "AI price suggestion failed. Enter manually.") }, 500);
         }
       }
 
@@ -1331,7 +1381,7 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, draft });
         } catch (error) {
           console.error("Customer reply draft error", error);
-          return json({ success: false, error: "AI reply draft failed. Write manually." }, 500);
+          return json({ success: false, error: friendlyAiError(error, "AI reply draft failed. Write manually.") }, 500);
         }
       }
 
@@ -1349,7 +1399,7 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, data: result });
         } catch (error) {
           console.error("Demand forecast error", error);
-          return json({ success: false, error: "AI forecast failed. Try again shortly." }, 500);
+          return json({ success: false, error: friendlyAiError(error, "AI forecast failed. Try again shortly.") }, 500);
         }
       }
 
@@ -1369,7 +1419,7 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, provider: "gemini", data });
         } catch (error) {
           console.error("Expense OCR error", error);
-          return json({ success: false, error: "AI scan failed. Enter manually." }, 500);
+          return json({ success: false, error: friendlyAiError(error, "AI scan failed. Enter manually.") }, 500);
         }
       }
 
@@ -1387,7 +1437,7 @@ Deno.serve(async (req: Request) => {
           return json({ success: true, data: result });
         } catch (error) {
           console.error("Churn risk error", error);
-          return json({ success: false, error: "AI churn analysis failed. Try again shortly." }, 500);
+          return json({ success: false, error: friendlyAiError(error, "AI churn analysis failed. Try again shortly.") }, 500);
         }
       }
 

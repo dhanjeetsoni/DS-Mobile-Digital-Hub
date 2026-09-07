@@ -31,17 +31,32 @@ const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SU
 const STAFF_EMAIL_DOMAIN = "staff.dsmdh.internal";
 const loginIdToEmail = (loginId: string) => `${loginId.trim().toLowerCase()}@${STAFF_EMAIL_DOMAIN}`;
 
+// 2026-09-05: tightened to letters+digits only — no dot/underscore/hyphen/
+// any other symbol, in either the Login ID or the Password. The built-in
+// generator (generateStaffLoginId/generateStaffPassword) already only ever
+// produces plain alphanumeric strings; this just makes the server reject
+// anything else too, including a hand-typed override.
 function validateLoginId(id: string) {
   const v = String(id || "").trim();
-  if (!/^[a-zA-Z0-9._-]{3,24}$/.test(v)) {
-    throw new Error("Login ID must be 3-24 characters: letters, numbers, dot, underscore or hyphen only.");
+  if (!/^[a-zA-Z0-9]{3,24}$/.test(v)) {
+    throw new Error("Login ID sirf letters aur numbers ka ho sakta hai (3-24 characters), koi special character nahi.");
   }
   return v;
 }
 
 function validatePassword(pw: string) {
   const v = String(pw || "");
-  if (v.length < 4) throw new Error("Password must be at least 4 characters.");
+  if (!/^[a-zA-Z0-9]{4,20}$/.test(v)) {
+    throw new Error("Password sirf letters aur numbers ka ho sakta hai (4-20 characters), koi special character nahi.");
+  }
+  return v;
+}
+
+function validateRole(role: unknown): "staff" | "manager" {
+  const v = String(role || "staff");
+  if (v !== "staff" && v !== "manager") {
+    throw new Error("Role must be 'staff' or 'manager'.");
+  }
   return v;
 }
 
@@ -72,6 +87,7 @@ Deno.serve(async (req) => {
     if (action === "create") {
       const loginId = validateLoginId(body.loginId);
       const password = validatePassword(body.password);
+      const role = validateRole(body.role);
       const staffName = String(body.staffName || "").trim() || loginId;
 
       const { data: existing } = await admin.from("profiles").select("id").ilike("staff_login_id", loginId).maybeSingle();
@@ -82,16 +98,22 @@ Deno.serve(async (req) => {
         email,
         password,
         email_confirm: true,
-        user_metadata: { staff_login_id: loginId, staff_name: staffName, store_id: storeId },
+        user_metadata: { staff_login_id: loginId, staff_name: staffName, store_id: storeId, role },
       });
-      if (createErr || !created?.user) return json({ error: createErr?.message || "Could not create staff account." }, 400);
+      if (createErr || !created?.user) return json({ error: createErr?.message || "Could not create account." }, 400);
 
+      // "manager" credentials are full owner-level access (same RLS as
+      // "owner" everywhere in this app) generated via Login ID/Password
+      // instead of a real email — so the owner never has to type their
+      // Gmail-tied cloud email/password on a shared/staff device. They
+      // don't use the access_enabled/time-window gate at all — that's a
+      // staff-only concept — so those columns are left at safe defaults.
       const { error: profileErr } = await admin.from("profiles").upsert({
         id: created.user.id,
         email,
         full_name: staffName,
         store_id: storeId,
-        role: "staff",
+        role,
         staff_login_id: loginId,
         staff_name: staffName,
         access_enabled: true,
@@ -102,20 +124,20 @@ Deno.serve(async (req) => {
       });
       if (profileErr) {
         // Roll back the orphaned auth user so a failed profile write doesn't
-        // leave an unusable, un-listable staff login behind.
+        // leave an unusable, un-listable login behind.
         await admin.auth.admin.deleteUser(created.user.id).catch(() => {});
         return json({ error: profileErr.message }, 400);
       }
 
-      return json({ ok: true, staffId: created.user.id, loginId, staffName });
+      return json({ ok: true, staffId: created.user.id, loginId, staffName, role });
     }
 
     if (action === "reset_password") {
       const staffId = String(body.staffId || "");
       const password = validatePassword(body.password);
       const { data: target } = await admin.from("profiles").select("id,store_id,role").eq("id", staffId).maybeSingle();
-      if (!target || target.store_id !== storeId || target.role !== "staff") {
-        return json({ error: "Staff member not found in your shop." }, 404);
+      if (!target || target.store_id !== storeId || !["staff", "manager"].includes(target.role)) {
+        return json({ error: "Account not found in your shop." }, 404);
       }
       const { error } = await admin.auth.admin.updateUserById(staffId, { password });
       if (error) return json({ error: error.message }, 400);
@@ -125,8 +147,8 @@ Deno.serve(async (req) => {
     if (action === "delete") {
       const staffId = String(body.staffId || "");
       const { data: target } = await admin.from("profiles").select("id,store_id,role").eq("id", staffId).maybeSingle();
-      if (!target || target.store_id !== storeId || target.role !== "staff") {
-        return json({ error: "Staff member not found in your shop." }, 404);
+      if (!target || target.store_id !== storeId || !["staff", "manager"].includes(target.role)) {
+        return json({ error: "Account not found in your shop." }, 404);
       }
       await admin.from("profiles").delete().eq("id", staffId);
       await admin.auth.admin.deleteUser(staffId).catch(() => {});

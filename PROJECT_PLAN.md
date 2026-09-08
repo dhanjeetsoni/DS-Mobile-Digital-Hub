@@ -507,11 +507,27 @@ actual code, per this document's own ground rule — not assumed or guessed._
         - Verified: `tsc --noEmit`, vitest (26/26), static-audit (16/16),
           production build all clean, both before and again after rebasing
           onto Phase 5 work landing in parallel. **Not device-tested.**
-      - Still genuinely NOT done: Dashboard, Sales History, Returns,
-        Purchases, Repairs, etc.
-        one got, not just the existing generic CSS pass. Worth doing
-        incrementally, screen by screen, in future sessions rather than
-        claiming this item complete.
+      - **Dashboard pass done 2026-09-08** (what the owner sees first):
+        - `.grid.cols-4` (used only by the 4 metric cards + the "⚡ 1-Tap
+          Counter Actions" 8-9 tile shortcut grid) was collapsing to a
+          single column under 768px — scrolling past up to 9 full-width
+          rows just to find one shortcut button defeats the point of a
+          quick-actions panel. Kept at 2 columns on phone instead (its
+          other class siblings, `.grid.cols-3`/`.grid.cols-2`, were left
+          untouched — checked their other usages and 1 column is correct
+          there, e.g. Sell/POS's product-list/cart split)
+        - Low Stock Alerts + Recent Invoices: same table-vs-mobile-card
+          toggle as the Product Catalog pass; Recent Invoices rows are now
+          fully tappable (not just the small invoice-number link)
+        - Verified: `tsc --noEmit`, vitest (26/26), static-audit (16/16),
+          production build all clean. Explicitly re-checked the
+          `dashboard`/`sell` case-label boundary via grep before
+          committing, after the prior pass's self-inflicted case-label
+          deletion bug. **Not device-tested.**
+      - Still genuinely NOT done: Sales History, Returns, Purchases,
+        Repairs, etc. — each needs its own screen-specific pass, not just
+        the existing generic CSS pass. Worth doing incrementally, screen by
+        screen, in future sessions rather than claiming this item complete.
 - [x] Light + dark theme — already existed (`theme/useAppearance.ts`'s
       `toggleMode`/`setMode`, surfaced via the Appearance Studio screen), an
       earlier session also switched the fresh-install default to light.

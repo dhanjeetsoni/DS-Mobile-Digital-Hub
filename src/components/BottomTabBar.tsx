@@ -9,6 +9,10 @@ interface BottomTabBarProps {
    * through, with zero duplicated logic. */
   onNavigate: (page: string) => void;
   onOpenMore: () => void;
+  /** Staff must never even see a route to an owner-only page — "Reports"
+   * (Sales Breakdown & P&L) is owner-only, so it's dropped from the bar
+   * entirely for staff rather than relying solely on onNavigate's gate. */
+  isStaffIdentity?: boolean;
 }
 
 // Phase 4.1 — bottom tab bar for Android/narrow-window layouts. Shown only
@@ -18,17 +22,18 @@ interface BottomTabBarProps {
 // 4 map straight onto existing pages; "More" opens the existing Sidebar as
 // an off-canvas drawer (it already has every other page in it) instead of
 // duplicating that whole list into a second menu.
-const TABS: { key: string; page: string; label: string; icon: React.ComponentType<{ size?: number | string }> }[] = [
+const TABS: { key: string; page: string; label: string; icon: React.ComponentType<{ size?: number | string }>; ownerOnly?: boolean }[] = [
   { key: "home", page: "dashboard", label: "Home", icon: LayoutDashboard },
   { key: "sell", page: "sell", label: "Sell", icon: ShoppingCart },
   { key: "inventory", page: "products", label: "Inventory", icon: Package },
-  { key: "reports", page: "saleshistory", label: "Reports", icon: TrendingUp },
+  { key: "reports", page: "saleshistory", label: "Reports", icon: TrendingUp, ownerOnly: true },
 ];
 
-export default function BottomTabBar({ currentPage, onNavigate, onOpenMore }: BottomTabBarProps) {
+export default function BottomTabBar({ currentPage, onNavigate, onOpenMore, isStaffIdentity = false }: BottomTabBarProps) {
+  const visibleTabs = TABS.filter((tab) => !tab.ownerOnly || !isStaffIdentity);
   return (
     <nav className="bottom-tab-bar" aria-label="Primary navigation">
-      {TABS.map((tab) => {
+      {visibleTabs.map((tab) => {
         const Icon = tab.icon;
         const active = currentPage === tab.page;
         return (

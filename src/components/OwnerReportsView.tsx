@@ -7,6 +7,7 @@ import { saleCost, xeroxCost, xeroxProfit, jobCost, jobCharge, jobProfit } from 
 import { MiniShareBars } from "./MiniCharts";
 import { buildWeeklyReport } from "../utils/weeklyReport";
 import { sendWeeklyReportToTelegram } from "../services/telegram";
+import { supabase } from "../services/supabaseClient";
 
 interface OwnerReportsViewProps {
   db: Database;
@@ -37,7 +38,21 @@ export const OwnerReportsView: React.FC<OwnerReportsViewProps> = ({ db, onUpdate
   const handleSendWeeklyReport = async () => {
     setIsSendingReport(true);
     try {
-      const report = buildWeeklyReport(db);
+      // Phase 5: prefer the server-side relational payload (same numbers
+      // the automatic Monday cron sends, computed from sales/sale_items/
+      // products/purchases — not this device's local JSON-blob copy, which
+      // Phase 1 documents can drift, e.g. its cached `products` array).
+      // Falls back to the old client-built report only if there's no cloud
+      // session at all (a genuinely offline-only shop), so "Send Now" never
+      // just breaks for someone without Supabase configured.
+      let report: unknown;
+      try {
+        const { data, error } = await supabase.rpc("get_my_weekly_report_payload");
+        if (error) throw error;
+        report = data;
+      } catch (rpcErr) {
+        report = buildWeeklyReport(db);
+      }
       await sendWeeklyReportToTelegram(report);
       db.settings.lastWeeklyReportSentAt = new Date().toISOString();
       onUpdate?.();

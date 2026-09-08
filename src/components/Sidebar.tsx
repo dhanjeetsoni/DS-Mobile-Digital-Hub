@@ -33,6 +33,7 @@ import {
   Archive,
   Activity,
   Rocket,
+  ClipboardList,
 } from "lucide-react";
 import { Database } from "../types";
 import { inr } from "../utils/indianCurrency";
@@ -95,6 +96,7 @@ export const SECONDARY_NAV_ITEMS = [
   { key: "ownerreports", label: "Owner Financial Reports", icon: Shield, ownerOnly: true },
   { key: "staffAccess", label: "Android Access Area", icon: Users, ownerOnly: true },
   { key: "statusDashboard", label: "System Status Dashboard", icon: Activity, ownerOnly: true },
+  { key: "auditLog", label: "Audit Log", icon: ClipboardList, ownerOnly: true },
   { key: "setupWizard", label: "🚀 Shuruaati Setup Checklist", icon: Rocket, ownerOnly: true },
   { key: "appVersions", label: "🚀 App Versions (Update Push)", icon: Rocket, ownerOnly: true },
   { key: "backup", label: "Backup & Restore", icon: Save, ownerOnly: true },
@@ -161,7 +163,7 @@ export const SECONDARY_NAV_GROUPS: NavGroup[] = [
     id: "system",
     label: "⚙️ System",
     icon: Activity,
-    itemKeys: ["statusDashboard", "setupWizard", "appVersions", "backup", "settings", "appearanceStudio"],
+    itemKeys: ["statusDashboard", "auditLog", "setupWizard", "appVersions", "backup", "settings", "appearanceStudio"],
   },
 ];
 

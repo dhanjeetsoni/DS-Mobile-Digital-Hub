@@ -48,6 +48,7 @@ import { PersonalDrawingsView } from "./components/PersonalDrawingsView";
 import { OwnerReportsView } from "./components/OwnerReportsView";
 import { WindowsAppModal } from "./components/WindowsAppModal";
 import { LowStockAlertsView } from "./components/LowStockAlertsView";
+import { AuditLogView } from "./components/AuditLogView";
 import { LoyaltyRewardsView } from "./components/LoyaltyRewardsView";
 import { DownloadAreaView } from "./components/DownloadAreaView";
 import { ProfitLossDashboardView } from "./components/ProfitLossDashboardView";
@@ -3385,6 +3386,9 @@ export default function App() {
 
       case "lowstock":
         return <LowStockAlertsView db={catalogDb} showToast={showToast} />;
+
+      case "auditLog":
+        return <AuditLogView storeId={cloudProfile?.store_id} cloudProfile={cloudProfile} showToast={showToast} />;
 
       case "downloadArea":
         return <DownloadAreaView db={catalogDb} isStaff={cloudProfile?.role === "staff"} showToast={showToast} />;

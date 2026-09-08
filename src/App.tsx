@@ -3443,7 +3443,7 @@ export default function App() {
             <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginTop: "16px" }}>
               <button
                 className="btn primary"
-                onClick={() => exportStandaloneHtml(db)}
+                onClick={() => exportStandaloneHtml({ ...db, products: catalogProducts.map((p) => ({ ...p, stock: stockOf(p) })) })}
               >
                 <Download size={16} /> ⬇ Export Standalone Production HTML (.html)
               </button>
@@ -3451,16 +3451,35 @@ export default function App() {
               <button
                 className="btn"
                 onClick={() => {
-                  const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
+                  // Phase 5 (manual backup export) fix: db.products carries
+                  // whatever this device's local blob last cached — Phase 1
+                  // made stock/catalog fields live-relational-authoritative
+                  // (stockOf()/catalogOf()) precisely because that cache can
+                  // be stale vs. sales/edits made on OTHER devices since this
+                  // one last fully synced. A "backup" that silently exported
+                  // stale numbers would defeat the point of taking one —
+                  // export the same live-merged view every screen in the app
+                  // already displays, not the raw blob underneath it.
+                  const backupProducts = catalogProducts.map((p) => ({ ...p, stock: stockOf(p) }));
+                  const backupDb = { ...db, products: backupProducts };
+                  const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
+                  const blob = new Blob([JSON.stringify(backupDb, null, 2)], { type: "application/json" });
                   const a = document.createElement("a");
                   a.href = URL.createObjectURL(blob);
-                  a.download = `dsmdh-backup-${todayStr()}.json`;
+                  a.download = `dsmdh-backup-${stamp}.json`;
                   a.click();
+                  showToast("Backup downloaded — latest stock/catalog data included.", "green");
                 }}
               >
                 <Download size={14} /> Download JSON Backup
               </button>
             </div>
+
+            <p className="hint" style={{ marginTop: "10px" }}>
+              Ye backup export hamesha sabse latest stock aur catalog (photo, MRP, warranty, waghera)
+              use karta hai — jaisa is device par abhi dikh raha hai, waisa hi save hoga, chahe wo
+              stock kisi doosre device se update hua ho.
+            </p>
 
             <div style={{ marginTop: "24px" }}>
               <label className="hint">Restore from JSON backup:</label>

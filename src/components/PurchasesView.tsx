@@ -275,7 +275,7 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
           />
         </div>
 
-        <div className="table-wrap">
+        <div className="table-wrap purchases-desktop-table">
           {filteredPurchases.length === 0 ? (
             <div className="empty">No purchase inward records found. Click above to log a new purchase bill.</div>
           ) : (
@@ -315,6 +315,38 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+
+        {/* Mobile card list — same table-stays-in-DOM-but-hidden toggle used
+            across this Phase 4 screen-by-screen pass (Product Catalog,
+            Dashboard, Sales History). 9 columns is unusable on a phone even
+            with .table-wrap's horizontal scroll. */}
+        <div className="purchases-mobile-list">
+          {filteredPurchases.length === 0 ? (
+            <div className="empty">No purchase inward records found. Click above to log a new purchase bill.</div>
+          ) : (
+            filteredPurchases.slice().reverse().map((p) => (
+              <div key={p.id} className="dash-mobile-row" style={{ flexDirection: "column", alignItems: "stretch", gap: "6px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                  <div className="dash-mobile-row-main">
+                    <b>{p.productName}</b>
+                    <span className="hint">{p.invoiceRef || "No bill ref"} • {p.date}</span>
+                    <span className="badge info" style={{ alignSelf: "flex-start", marginTop: "2px" }}>{p.supplier || "Distributor"}</span>
+                  </div>
+                  <div className="dash-mobile-row-side">
+                    <b>{inr(p.total)}</b>
+                    <span className="hint" style={{ color: "var(--green)" }}>+{p.qty} units</span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span className="hint">{inr(p.purchasePrice)} / unit{p.notes ? ` • ${p.notes}` : ""}</span>
+                  <span className={`badge ${p.paymentStatus === "Purchased on Credit (Udhaar)" ? "amber" : "ok"}`}>
+                    {p.paymentStatus === "Purchased on Credit (Udhaar)" ? "Baaki / Due" : "Paid"}
+                  </span>
+                </div>
+              </div>
+            ))
           )}
         </div>
       </div>

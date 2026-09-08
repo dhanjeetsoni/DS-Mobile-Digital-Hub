@@ -15,6 +15,11 @@ export interface Settings {
   upiId: string;
   invoiceTerms: string;
   thermalDefault: boolean;
+  // Phase 4 — 58mm is the far more common cheap counter-printer size in
+  // India; 80mm optional for shops with the wider roll. Drives both the
+  // existing thermal CSS print layout's width and the ESC/POS
+  // Bluetooth/USB receipt's characters-per-line.
+  thermalPaperWidth?: "58mm" | "80mm";
   theme: string;
   jobPrefix: string;
   staffReturnLimit: number;
@@ -29,9 +34,13 @@ export interface Settings {
   // edit/delete it. After this window the sale is permanently locked.
   // Owner-configurable in Settings; defaults to 10 when unset.
   saleCorrectionWindowDays?: number;
-  // ISO timestamp of the last auto-sent weekly Telegram report. Checked on
-  // app load so the report goes out roughly once every 7 days without
-  // needing a separate always-on server — see utils/weeklyReport.ts.
+  // Phase 5 (2026-09-07): DEPRECATED — this used to drive a client-side
+  // "send weekly report if 7+ days have passed" check on app load. That
+  // path is removed; the weekly report is now sent fully automatically by
+  // a server-side pg_cron job (send_due_weekly_reports(), Monday 9AM IST)
+  // that tracks its own dedupe state in the `weekly_report_runs` table,
+  // not this field. Left in the type only so old synced state blobs with
+  // this key don't break; nothing reads or writes it anymore.
   lastWeeklyReportSentAt?: string;
   // Step 7.2 — Delete Policy. ISO timestamp of the last time the app
   // checked for out-of-stock-for-3+-months product photos to clean up.

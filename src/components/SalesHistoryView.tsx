@@ -192,7 +192,7 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
         </div>
 
         {/* Detailed Sales Table */}
-        <div className="table-wrap">
+        <div className="table-wrap sales-desktop-table">
           {filteredSales.length === 0 ? (
             <div className="empty">No sales records matching selected filters.</div>
           ) : (
@@ -256,6 +256,48 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
                 })}
               </tbody>
             </table>
+          )}
+        </div>
+
+        {/* Mobile card list — same table-stays-in-DOM-but-hidden toggle used
+            for Product Catalog / Dashboard (Phase 4 screen-by-screen pass).
+            9 columns is unusable on a ~360-400px phone even with
+            .table-wrap's horizontal scroll; the whole row is tappable
+            straight to "View Bill", like Dashboard's Recent Invoices. */}
+        <div className="sales-mobile-list">
+          {filteredSales.length === 0 ? (
+            <div className="empty">No sales records matching selected filters.</div>
+          ) : (
+            filteredSales.slice().reverse().map((s) => {
+              const saleCost = s.items.reduce(
+                (sum, item) => sum + (item.cost || item.purchasePrice * item.qty || 0),
+                0
+              );
+              const saleProfit = round2(s.total - saleCost);
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="dash-mobile-row dash-mobile-row-tap"
+                  onClick={() => onViewInvoice(s)}
+                >
+                  <div className="dash-mobile-row-main">
+                    <b>{s.invoiceNo}</b>
+                    <span className="hint">{s.customer?.name || "Walk-in"} • {s.date} {s.time}</span>
+                    <span className="hint" style={{ maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {s.items.map((i) => `${i.name} (x${i.qty})`).join(", ")}
+                    </span>
+                  </div>
+                  <div className="dash-mobile-row-side">
+                    <b>{inr(s.total)}</b>
+                    <span className="hint" style={{ color: saleProfit >= 0 ? "var(--green)" : "var(--red)" }}>
+                      {inr(saleProfit)} profit
+                    </span>
+                    <span className="badge info">{s.payment}</span>
+                  </div>
+                </button>
+              );
+            })
           )}
         </div>
       </div>

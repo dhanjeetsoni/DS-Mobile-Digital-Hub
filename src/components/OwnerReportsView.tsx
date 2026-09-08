@@ -5,8 +5,9 @@ import { inr, round2 } from "../utils/indianCurrency";
 import { AiAdviceCard } from "./AiAdviceCard";
 import { saleCost, xeroxCost, xeroxProfit, jobCost, jobCharge, jobProfit } from "../utils/profitEngine";
 import { MiniShareBars } from "./MiniCharts";
-import { buildWeeklyReport } from "../utils/weeklyReport";
+import { supabase } from "../services/supabaseClient";
 import { sendWeeklyReportToTelegram } from "../services/telegram";
+import { buildWeeklyReport } from "../utils/weeklyReport";
 
 interface OwnerReportsViewProps {
   db: Database;
@@ -14,7 +15,7 @@ interface OwnerReportsViewProps {
   toast?: (msg: string, type?: "green" | "red" | "amber") => void;
 }
 
-export const OwnerReportsView: React.FC<OwnerReportsViewProps> = ({ db, onUpdate, toast }) => {
+export const OwnerReportsView: React.FC<OwnerReportsViewProps> = ({ db, toast }) => {
   // NOTE: this page is only ever mounted for owner/manager — App.tsx already
   // redirects any non-owner-mode navigation away before this component
   // renders (see the `ownerOnly` route guard in App.tsx/Sidebar.tsx). An
@@ -37,10 +38,22 @@ export const OwnerReportsView: React.FC<OwnerReportsViewProps> = ({ db, onUpdate
   const handleSendWeeklyReport = async () => {
     setIsSendingReport(true);
     try {
-      const report = buildWeeklyReport(db);
+      // Phase 5: prefer the server-side relational payload (same numbers
+      // the automatic Monday cron sends, computed from sales/sale_items/
+      // products/purchases — not this device's local JSON-blob copy, which
+      // Phase 1 documents can drift, e.g. its cached `products` array).
+      // Falls back to the old client-built report only if there's no cloud
+      // session at all (a genuinely offline-only shop), so "Send Now" never
+      // just breaks for someone without Supabase configured.
+      let report: unknown;
+      try {
+        const { data, error } = await supabase.rpc("get_my_weekly_report_payload");
+        if (error) throw error;
+        report = data;
+      } catch (rpcErr) {
+        report = buildWeeklyReport(db);
+      }
       await sendWeeklyReportToTelegram(report);
-      db.settings.lastWeeklyReportSentAt = new Date().toISOString();
-      onUpdate?.();
       toast?.("Weekly report Telegram par bhej diya gaya", "green");
     } catch (err: any) {
       toast?.(err?.message || "Telegram connect karke dobara try karein", "red");

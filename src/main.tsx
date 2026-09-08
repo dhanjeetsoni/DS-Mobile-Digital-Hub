@@ -1,6 +1,8 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { reportCrash, installGlobalCrashReporting } from './services/crashReporter';
 import './index.css';
 // "DS Nexus" design-system kit (ui/, theme/, styles/ at the project root).
 // Part 1: this is no longer scoped to Appearance Studio only — it now
@@ -24,9 +26,19 @@ try {
   // Must run before the first paint so there's no flash of the old palette.
   startAppearanceSync();
 
+  // Phase 5: automatic crash reporting. Registered here (not in index.html's
+  // inline script) because it needs the Supabase client from the ES module
+  // bundle -- it covers everything from this point of the session onward.
+  // The ErrorBoundary below additionally catches React render-time errors
+  // specifically (with the component stack attached), which don't always
+  // reach these window-level handlers.
+  installGlobalCrashReporting();
+
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </StrictMode>,
   );
 
@@ -34,9 +46,12 @@ try {
   // own render errors (inside components) are caught separately below via
   // window.onerror/unhandledrejection, since render happens async.
   (window as any).__dsBootOk?.();
-} catch (err) {
+} catch (err: any) {
   console.error('DS Mobile: fatal startup error', err);
-  // window.onerror in index.html already caught this (thrown errors bubble
-  // there too), so no extra reporting needed here — just don't let it stay
-  // a silent blank screen by rethrowing into the void.
+  // window.onerror in index.html already caught this for local *display*
+  // (thrown errors bubble there too), but that inline script can't reach
+  // Supabase (it runs before the module bundle loads) -- report it here too
+  // now that we're back in module code, so a fatal boot crash actually
+  // reaches the owner/developer, not just the device screen.
+  void reportCrash(err?.message || String(err), err?.stack, 'boot');
 }

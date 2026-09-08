@@ -210,6 +210,14 @@ jobs:
         # release build is always unsigned regardless of secrets.
         run: node scripts/ci-wire-android-signing.mjs src-tauri/gen/android/app/build.gradle.kts
 
+      - name: Wire Bluetooth permissions into AndroidManifest.xml (Phase 4 thermal printer, idempotent, always run)
+        # `tauri android init`'s template has no Bluetooth permissions at
+        # all, so without this step the Bluetooth Print feature
+        # (src/services/thermalPrinter.ts) has no chance of working on a
+        # release APK regardless of whether the WebView itself supports
+        # Web Bluetooth.
+        run: node scripts/ci-wire-android-bluetooth-permissions.mjs src-tauri/gen/android/app/src/main/AndroidManifest.xml
+
       - name: Write keystore.properties (if the release keystore secret is set)
         shell: bash
         run: |

@@ -1,6 +1,6 @@
 # DS Mobile & Digital Hub — Master Fix & Rebuild Plan
 
-_Last updated: 2026-09-06_
+_Last updated: 2026-09-07_
 
 This document is the single source of truth for the ongoing stabilization and
 rebuild effort. Each phase is worked on **only after the owner explicitly
@@ -454,21 +454,137 @@ actual code, per this document's own ground rule — not assumed or guessed._
       moment internet returns (turn on airplane mode, sell, turn it back
       off, watch it appear elsewhere)
 
-### ⬜ Phase 4: Android UI redesign
-- [ ] New navigation: bottom tab bar (Home / Sell / Inventory / Reports /
-      More)
-- [ ] Redesign each screen for touch/mobile ergonomics, section by section
-- [ ] Light + dark theme
-- [ ] Camera-based barcode scanning
-- [ ] Bluetooth/USB thermal printer support for receipts
+### 🟡 Phase 4: Android UI redesign
+- [x] New navigation: bottom tab bar (Home / Sell / Inventory / Reports /
+      More) — done in an earlier session (Phase 4.1), confirmed still wired
+      up after this session's merges.
+- [ ] Redesign each screen for touch/mobile ergonomics, section by section —
+      still open overall (this is inherently unbounded — dozens of screens);
+      **Sell/POS pass done 2026-09-06** (the single busiest screen, and the
+      first one tackled since it's what staff touch most):
+      - `.qtybtn` (cart qty +/- steppers) was 28px — below the ~44px
+        touch-target guidance the 2026-09-05 app-wide pass already cited
+        for `.btn`, but never reached these because they're a separate
+        class. Bumped to 38px on phone.
+      - `.cart-line` (used for both the product-search results and the
+        cart itself) didn't wrap — product name + a 100px price box + 2
+        qty buttons + a delete button squeezed into one non-wrapping row
+        left almost no room for the name on a ~360-400px screen. Now
+        wraps: name gets its own full-width line, price/qty/delete flow
+        onto a second line below it.
+      - New: a mobile-only sticky "🛒 N items · ₹total · View Cart ↓" bar
+        pinned above the bottom tab bar while the cart has items — on
+        phone the product list and cart stack vertically (existing
+        `.grid.cols-2` breakpoint), so without this, cart total/checkout
+        was easy to lose track of while scrolling a long product list.
+        Tapping smooth-scrolls straight to the cart section.
+      - Verified: `tsc --noEmit`, vitest (26/26), static audit (16/16),
+        production build all clean. **Not device-tested** — same caveat
+        as everywhere else in this plan needing a real phone; layout
+        reasoning here is sound but only a real device confirms feel.
+      - Genuinely NOT done yet: Dashboard, Sales History, Returns,
+        Purchases, Repairs, etc. — each would need its own screen-specific
+        look the same way this one did
+      - **Product Catalog pass done 2026-09-08** (the app's default landing
+        screen per the owner's decision — second-highest-traffic screen
+        after POS):
+        - The table has up to 13 columns (Photo/Name/Category/Brand/SKU/
+          Barcode/Cost/Confidential/Selling Price/MRP/Discount/Stock/
+          Warranty/Actions) — even with horizontal scroll this was
+          genuinely unusable on a ~360-400px phone, one of the most-
+          reported "kuch dikhta hi nahi" complaints
+        - Added a mobile card layout (photo, name, price with MRP struck
+          through + discount badge, stock/warranty/SKU, Edit/Delete for
+          owner) shown only under 900px — same toggle-by-CSS technique as
+          the POS pass's `.mobile-cart-bar`, both table and cards render in
+          the DOM, only one is ever visible, no JS viewport-width state
+        - Self-caught-and-fixed bug from this same edit: a `str_replace`
+          accidentally deleted the `case "invoices":` label right after the
+          products case, leaving its render block as dead/unreachable code
+          — caught by re-grepping immediately after the edit (this
+          document's own ground rule about verifying, applied to my own
+          work this time, not just prior sessions')
+        - Verified: `tsc --noEmit`, vitest (26/26), static-audit (16/16),
+          production build all clean, both before and again after rebasing
+          onto Phase 5 work landing in parallel. **Not device-tested.**
+      - **Dashboard pass done 2026-09-08** (what the owner sees first):
+        - `.grid.cols-4` (used only by the 4 metric cards + the "⚡ 1-Tap
+          Counter Actions" 8-9 tile shortcut grid) was collapsing to a
+          single column under 768px — scrolling past up to 9 full-width
+          rows just to find one shortcut button defeats the point of a
+          quick-actions panel. Kept at 2 columns on phone instead (its
+          other class siblings, `.grid.cols-3`/`.grid.cols-2`, were left
+          untouched — checked their other usages and 1 column is correct
+          there, e.g. Sell/POS's product-list/cart split)
+        - Low Stock Alerts + Recent Invoices: same table-vs-mobile-card
+          toggle as the Product Catalog pass; Recent Invoices rows are now
+          fully tappable (not just the small invoice-number link)
+        - Verified: `tsc --noEmit`, vitest (26/26), static-audit (16/16),
+          production build all clean. Explicitly re-checked the
+          `dashboard`/`sell` case-label boundary via grep before
+          committing, after the prior pass's self-inflicted case-label
+          deletion bug. **Not device-tested.**
+      - Still genuinely NOT done: Sales History, Returns, Purchases,
+        Repairs, etc. — each needs its own screen-specific pass, not just
+        the existing generic CSS pass. Worth doing incrementally, screen by
+        screen, in future sessions rather than claiming this item complete.
+- [x] Light + dark theme — already existed (`theme/useAppearance.ts`'s
+      `toggleMode`/`setMode`, surfaced via the Appearance Studio screen), an
+      earlier session also switched the fresh-install default to light.
+      Re-verified present, not re-touched.
+- [x] Camera-based barcode scanning — already existed and already wired up
+      (`CameraScannerModal.tsx`, real `@zxing/browser` + native
+      `BarcodeDetector` decoding, not just AI photo-OCR), reachable from the
+      Sell page, F4 shortcut, and the sidebar's Quick Scan button. Re-verified
+      present, not re-touched.
+- [x] **Bluetooth/USB thermal printer support for receipts — built this
+      session.** The existing "thermal" print format only ever went through
+      `window.print()`, which needs an OS-registered printer driver — fine
+      on Windows, but the cheap Bluetooth 58mm counter printers actually
+      used at these shops essentially never have an Android print driver, so
+      that path was never going to work for the Android app specifically
+      (the actual point of this phase). Added a real ESC/POS path instead
+      that bypasses the OS print pipeline entirely:
+      - `src/services/thermalPrinter.ts` — dependency-free ESC/POS byte
+        builder (shop header, items, totals, cut) mirroring the existing
+        thermal CSS layout's content, plus two transports: Web Bluetooth
+        (BLE, the realistic Android path — auto-detects a writable GATT
+        characteristic rather than hardcoding one vendor's UUID, since
+        counter-printer models vary widely) and Web Serial (USB,
+        desktop/Windows-only, `navigator.serial`).
+      - `InvoiceViewerModal.tsx`: "Bluetooth Print" / "USB Print" buttons,
+        each only rendered when the browser actually exposes that API
+        (`isBluetoothPrintSupported()`/`isSerialPrintSupported()`), plus a
+        58mm/80mm width selector.
+      - `scripts/ci-wire-android-bluetooth-permissions.mjs` (new, same
+        pattern as the existing `ci-wire-android-signing.mjs`): patches the
+        CI-regenerated `AndroidManifest.xml` with
+        BLUETOOTH/BLUETOOTH_ADMIN (≤ API 30), ACCESS_FINE_LOCATION (≤ API
+        30, required for BLE scanning pre-Android-12), and
+        BLUETOOTH_SCAN/BLUETOOTH_CONNECT (API 31+) — wired into
+        `build-and-release.yml` right after `tauri android init`. Verified
+        against a realistic sample manifest, including idempotency.
+      - **Honest caveat, not glossed over**: manifest + runtime permissions
+        are necessary but not sufficient — whether `navigator.bluetooth` is
+        actually exposed inside Tauri's Android WebView at all depends on
+        the installed Android System WebView version/build (Web Bluetooth
+        support in WebView, vs. full Chrome for Android, has historically
+        been inconsistent across OEMs/OS versions). This cannot be verified
+        from this sandboxed build environment — no Android SDK/emulator or
+        real device available here. Worst case on an unsupported device:
+        the Bluetooth Print button simply doesn't render (feature-detected),
+        not a crash — but **please test this on the actual Android APK with
+        a real Bluetooth thermal printer** before relying on it at the
+        counter.
+      - Verified in this environment: `tsc --noEmit`, full test suite (26
+        tests), static audit, production build all clean.
 
-### 🟡 Phase 5: Operational features — daily/weekly digest fixed, rest not started
+### 🟡 Phase 5: Operational features — reports + low-stock alerts + backup done
 - [x] **Daily + weekly sales/profit summary → Telegram, automatic — was
-      silently completely broken, now fixed and deep-verified live.**
-      Both already existed (built in an earlier phase) but stopped working
-      the moment Phase 1's catalog migration emptied out the JSON blob they
-      read from — since then they'd been sending "0 sales" or nothing at
-      all, silently, for days, with no error visible anywhere:
+      silently completely broken, now fixed and independently
+      deep-verified twice** (once in this session, once again by a
+      separate session that re-verified this session's own fix — both
+      accounts kept below since both did real, distinct verification work):
   - `weekly_report_payload()` SQL function: confirmed already fixed and
     live (hybrid — sales/sale_items/products/purchases from the relational
     tables, expenses still from the JSON blob since `expenses` was never
@@ -498,17 +614,69 @@ actual code, per this document's own ground rule — not assumed or guessed._
     existed live with nothing in the app ever calling them — the owner
     had no way to turn the digest on. Added a "Daily AI Digest: ON/OFF"
     toggle next to the Telegram controls in the owner settings area.
-  - Verified: typecheck clean, full test suite (26 tests) pass, static
-    audit passes, production build clean.
-  - **Still to actually watch happen**: tonight's 9pm IST run, for real,
-    with real sales in it (today's manual test correctly found 0 sales to
-    report, which proves the plumbing works but isn't the same as seeing
-    an actual populated digest land in Telegram).
-- [ ] Instant low-stock alerts → Telegram + in-app
+  - **A separate session's independent re-verification (also real, kept
+    for the record)**: confirmed weekly cron (`weekly-report-dispatch`,
+    Mon 9 AM IST) and daily cron (`ai-daily-digest-sweep`, 9 PM IST) both
+    firing for real — Monday's run delivered an actual PDF to Telegram.
+    Also live-tested `get_my_weekly_report_payload()` (the in-app "Send
+    Now" button) and the Digest ON/OFF toggle against both a real owner
+    and a real staff account (owner: real numbers + can toggle; staff:
+    correctly rejected). Found and closed one more drift instance:
+    `weekly_report_payload()`'s originally-committed migration file still
+    had the old JSON-blob-reading version, while the live function had
+    already moved on — closed in
+    `20260907070000_phase5_weekly_daily_reports_relational_and_digest_toggle.sql`
+    (applied live as a verified no-op, since the live function was
+    already correct).
+  - Verified (this session): typecheck clean, full test suite (26 tests)
+    pass, static audit passes, production build clean.
+- [x] **Instant low-stock alerts → Telegram + in-app.** In-app was already
+      effectively instant from Phase 1 (`stockOf()`/`subscribeToLiveStock`'s
+      realtime feed updates the header's "LOW STOCK: N SKUs" badge within
+      ~1s of any sale/adjustment/purchase, from any device). Telegram half
+      was missing — added a Postgres trigger (`notify_low_stock()` on
+      `products`, fires `after update of stock_qty`) rather than
+      client-side code, so it catches every path that can change stock
+      (sale, adjustment, purchase return, manual edit) without every one
+      of those call sites needing to remember to check. Only fires on the
+      transition INTO low stock (was above `min_stock`, now at/below it),
+      not on every subsequent sale while already low, so it doesn't spam.
+- [x] **Manual backup file export — was silently broken since Phase 1**,
+      same root cause as the digest bug: "Download JSON Backup" used to
+      just `JSON.stringify(db)` (the local blob), whose products/sales
+      arrays are now always empty. Fixed by pulling every relational
+      table the store owns (products, sales, sale_items, invoices,
+      purchases, purchase_items, expenses, personal_drawings, returns,
+      exchanges, exchange_items, warranty_claims, suppliers,
+      supplier_transactions, customers, customer_payments,
+      stock_movements, stock_batches) alongside the blob, when
+      cloud-connected; falls back to blob-only (with a clear toast saying
+      so) if offline, so a backup is never blocked entirely. Did **not**
+      touch the "Restore from JSON backup" flow (separate, higher-risk
+      scope — restoring relational data back in isn't the same operation
+      as restoring blob settings, and wasn't asked for).
 - [ ] Audit log (who added/edited/deleted what, and when)
-- [ ] Manual backup file export (daily/weekly)
 - [ ] In-app auto-update check (APK self-update prompt)
-- [ ] Automatic crash reporting
+- [x] Automatic crash reporting — new `crash_reports` table (migration
+      `phase5_crash_reports`, RLS: any store member can insert their own
+      store's crash, only owner/manager can browse them) + `crashReporter.ts`
+      (per-session cap of 10 + de-dupe so a crash loop can't flood the DB —
+      same lesson as this project's earlier sync_queue retry-storm) +
+      `ErrorBoundary.tsx` (catches React render errors specifically, with
+      component stack, shows a recoverable screen instead of blank white) +
+      `main.tsx` wiring for `window.onerror`/`unhandledrejection` (runtime)
+      and the existing fatal-startup catch block (boot). Verified with a
+      fresh clone + `npm ci` + `tsc --noEmit` + `npm run build`, all clean,
+      before committing — not just trusted from local testing. **Known
+      limitation, stated plainly rather than glossed over**: a crash that
+      happens before the JS module bundle even loads (e.g. a genuine
+      network/asset failure) still can't reach Supabase from here — that
+      case is still only visible via index.html's local boot-fallback
+      overlay, which the owner still has to screenshot manually. No in-app
+      viewer for crash reports was built yet (data is queryable directly in
+      Supabase for now); a Settings-page list is a natural near-term
+      follow-up, not done here to keep this item scoped to the actual
+      capture-and-report mechanism.
 
 ### ⬜ Phase 6: AI & advanced feature enhancements
 - [ ] AI Photo Scan: improve accuracy, support 1 or 2 photos (front/back) with
@@ -691,3 +859,31 @@ I think it's necessary:_
 - [ ] Clean up dead code / old migrations
 - [ ] Update this document — everything checked off, or explicitly listed as
       known/accepted limitation
+
+**Note added 2026-09-06 (separate session, before switching to Phase 5 per
+owner's instruction) — flagging a fork, not fixing it right now:** while
+independently working on this same PIN item in parallel, a
+`public.profile_pins` table + `get_own_pin_status`/`set_own_pin`/
+`verify_own_pin`/`reset_staff_pin` RPCs were built and tested (11/11 test
+cases passed against the live DB) — this predates seeing that the
+`profiles.pin_hash`/`pin_salt` + `set_my_pin`/`admin_reset_pin`/
+`admin_clear_pin` approach above already existed from a different session.
+The frontend uses only the `profiles.pin_hash` approach — the
+`profile_pins` table/RPCs are live on Supabase but genuinely unused
+dead code right now, not a second active system to reconcile. Left in
+place rather than dropped, since deleting live DB objects without the
+owner's go-ahead didn't seem like the right call to make solo; whoever
+picks this up next should either wire the frontend to the isolated-table
+version instead (its advantage: `profiles`' existing owner/manager
+full-row SELECT policy structurally cannot expose `pin_hash`/`pin_salt`
+to a client at all, vs. today's approach where those two columns living
+directly on `profiles` means a future query change to the very common
+"list my staff" call is one mistake away from handing every staff
+member's PIN hash+salt to the owner's client, crackable near-instantly
+given a 4-digit PIN's 10,000-value keyspace — not exploitable by
+*today's* actual queries, which were checked and don't select those two
+columns, but structurally fragile going forward) — or simply drop the
+unused table+RPCs (`profile_pins`, `get_own_pin_status`, `set_own_pin`,
+`verify_own_pin`, `reset_staff_pin`) if the owner decides the offline-first
+design is worth keeping the fragility. Not deciding this alone; flagging
+it for whoever picks Phase 2 back up.

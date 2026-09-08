@@ -83,6 +83,35 @@ export async function loadCloudState() {
  * the stale blob-only stock the whole time. The mirror carries no
  * confidential column, so it's safe for every role, staff included.
  */
+export interface AuditLogRow {
+  id: string;
+  userId: string | null;
+  action: string;
+  details: any;
+  createdAt: string;
+}
+
+// Phase 5: Audit Log viewer. audit_logs.user_id has no FK-based join
+// available (kept deliberately loose so a deleted-later account doesn't
+// break old log rows), so the caller resolves user_id -> a display name
+// itself (e.g. via listStaffAccounts()) rather than this doing a second,
+// wider profiles query it doesn't otherwise need.
+export async function fetchAuditLogs(storeId: string, limit = 200): Promise<AuditLogRow[]> {
+  const { data, error } = await supabase
+    .from("audit_logs")
+    .select("id,user_id,action,details,created_at")
+    .eq("store_id", storeId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    userId: row.user_id,
+    action: row.action,
+    details: row.details,
+    createdAt: row.created_at,
+  }));
+}
 export async function fetchLiveStock(storeId: string): Promise<Record<string, number>> {
   const { data, error } = await supabase
     .from("products_staff_view")

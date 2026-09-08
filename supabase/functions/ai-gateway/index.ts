@@ -2,82 +2,22 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { GoogleGenAI, Type } from "npm:@google/genai@2";
 
-// ---------------------------------------------------------------------------
-// ai-gateway — Supabase Edge Function
-//
-// WHY THIS EXISTS (root cause, see DEEP-RECHECK-REPORT / handoff notes):
-// /api/ocr-phone, /api/ocr-accessory, /api/business-insights, /api/staff-advice,
-// /api/product-photo-search and /api/screen-size-lookup were only ever
-// implemented in server.ts (a Node/Express server). That server is started by
-// `npm start` on a developer machine — it has never been deployed anywhere
-// reachable. The frontend called these as relative fetch("/api/...") paths,
-// assuming whatever served the frontend was also running that Express server.
-//
-// The Windows .exe (Tauri) only bundles the static frontend build
-// (src-tauri/tauri.conf.json -> frontendDist: "../dist") with no backend
-// sidecar, so in the desktop app "/api/..." resolves to Tauri's own local
-// asset server, which has no such route and falls back to index.html. The
-// client then tries to JSON.parse the returned HTML -> "Unexpected token '<'"
-// (OCR) or a generic "AI insights unavailable" (business insights, same
-// underlying cause with a friendlier message).
-//
-// This function moves that logic to Supabase Edge Functions, matching the
-// architecture the rest of the app already uses (r2-storage, staff-manage,
-// telegram-connect are all Edge Functions; the Gemini key pool already lives
-// in Supabase's `gemini_api_keys` table via service-role access). Once this
-// is deployed, the frontend calls a real, always-on HTTPS endpoint regardless
-// of whether it's running in a browser tab or the packaged Tauri app — no
-// bundled Node server or sidecar process needed.
-//
-// Route shape (after Supabase's own "/ai-gateway" prefix is stripped):
-//   POST /ocr-phone
-//   POST /ocr-accessory
-//   POST /screen-size-lookup
-//   POST /screen-size-range    — batch/accurate per-model display-size range
-//   POST /business-insights
-//   POST /staff-advice
-//   POST /product-photo-search
-//   GET  /health
-//
-// AI feature batch (v36) — same auth/rate-limit/failover pattern as above:
-//   POST /resale-price-advisor  — second-hand phone resale price range
-//   POST /customer-reply-draft  — WhatsApp/Telegram reply draft assistant
-//   POST /demand-forecast       — reorder suggestions from sales velocity
-//   POST /ocr-expense           — expense receipt/bill photo -> category+amount
-//   POST /churn-risk            — loyalty churn risk + win-back message drafts
-//   POST /cron-daily-digest     — cron-only (x-cron-secret), queues an AI
-//                                 daily digest into telegram_outbox per store
-//
-// 2026-09-04 speed pass: every text-only (non-vision) route below now uses
-// GEMINI_MODEL_TEXT (gemini-3.5-flash-lite — Google's fastest/cheapest Flash
-// tier, ~2s typical vs ~4.5s+ for the 3.7/3.6 workhorse models) instead of
-// the heavier vision model. OCR/photo routes stay on GEMINI_MODEL_VISION
-// (gemini-3.7-flash) since IMEI/MRP/brand accuracy matters more than shaving
-// a couple seconds off a scan a staff member does once per product. Every
-// Gemini call is also now wrapped in a hard per-attempt timeout (see
-// GEMINI_TIMEOUT_MS / callWithTimeout below) so a single slow/hung key can no
-// longer make the whole request "hang forever" — it now fails fast and
-// rotates to the next key in the pool instead, which is what most of the
-// "kitna time lag ja raha hai" reports actually were (one bad/throttled key
-// silently eating the entire request timeout with no failover).
-// ---------------------------------------------------------------------------
-
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SECRET_KEY") || "";
-// Vision (image-input) routes: accuracy-first, still fast for a Flash-tier model.
 const GEMINI_MODEL_VISION = Deno.env.get("GEMINI_MODEL_VISION") || Deno.env.get("GEMINI_MODEL") || "gemini-3.7-flash";
-// Text-only routes: speed/cost-first — Google's fastest Flash-Lite tier.
 const GEMINI_MODEL_TEXT = Deno.env.get("GEMINI_MODEL_TEXT") || "gemini-3.5-flash-lite";
-// Hard per-attempt timeout so one slow/throttled key can't stall the whole
-// request — on timeout we treat it exactly like a "quota" failure and
-// rotate to the next key in the pool immediately.
 const GEMINI_TIMEOUT_MS = Number(Deno.env.get("GEMINI_TIMEOUT_MS")) || 20_000;
-// Speed: also disable Gemini's extended "thinking" step for every call in
-// this gateway (on top of the fast text-tier model above). None of these
-// prompts need multi-step reasoning (OCR fields, short Hinglish summaries,
-// JSON-schema extraction), so this shaves additional latency off both the
-// vision and text models.
+// 2026-09-08 root-cause fix (live-verified against Google's API directly,
+// not just reasoned about): gemini-3.5-flash-lite now hard-rejects a
+// thinkingConfig param with 400 INVALID_ARGUMENT — every text-based AI
+// feature (business insights, staff advice, screen-size lookup, customer
+// reply draft, demand forecast, churn risk, the daily digest) was silently
+// failing on every single call because of this. FAST_MODE_CONFIG (which
+// sets thinkingConfig) stays ONLY on the 4 vision/OCR routes below, which
+// use gemini-3.7-flash and were never affected. Every text route now uses
+// TEXT_MODE_CONFIG (empty) instead.
 const FAST_MODE_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
+const TEXT_MODE_CONFIG = {};
 
 const supabaseAdmin = SUPABASE_URL && SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } })
@@ -93,8 +33,6 @@ function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: CORS_HEADERS });
 }
 
-// A per-attempt timeout wrapper — races the real Gemini call against a timer
-// so a hung/slow key can never block failover to the next key in the pool.
 class GeminiTimeoutError extends Error {
   constructor() { super("Gemini call timed out"); this.name = "GeminiTimeoutError"; }
 }
@@ -108,11 +46,6 @@ function callWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Small in-memory limiter for expensive OCR/AI calls (best-effort — Edge
-// Function instances are ephemeral, so this resets on cold start; production
-// deployments should also enforce edge/WAF limits, same caveat as before).
-// ---------------------------------------------------------------------------
 const rateMap = new Map<string, { count: number; resetAt: number }>();
 let lastRateMapSweep = 0;
 function checkRateLimit(key: string, windowMs = 60_000, max = 12): boolean {
@@ -136,12 +69,6 @@ function clientIp(req: Request): string {
     || "unknown";
 }
 
-// ---------------------------------------------------------------------------
-// Multi-key Gemini failover pool — ported as-is from server.ts (Step 2.1 /
-// 2.2). A store's keys live in `gemini_api_keys`, set by the Owner via the
-// save_gemini_api_key() RPC. Only this service-role client may read the raw
-// key values.
-// ---------------------------------------------------------------------------
 const ENV_POOL_ID = "__env__";
 
 const ENV_GEMINI_KEYS: string[] = (() => {
@@ -260,7 +187,7 @@ function clientForKey(key: string): GoogleGenAI {
 const activeKeyIndexByPool = new Map<string, number>();
 
 function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | null {
-  if (err instanceof GeminiTimeoutError) return "quota"; // timeout: rotate, don't invalidate the key
+  if (err instanceof GeminiTimeoutError) return "quota";
 
   const msg = String(err?.message || err || "").toLowerCase();
   const status = err?.status || err?.code;
@@ -289,11 +216,6 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | 
     return "invalid";
   }
 
-  // Google's own model-overload error ("This model is currently
-  // experiencing high demand... usually temporary"). Nothing wrong with
-  // the key or the request — a short retry on the SAME key almost always
-  // succeeds, so this must not be treated like "quota"/"invalid" (which
-  // cool the key down / remove it from rotation).
   if (
     status === 503 ||
     msg.includes("503") ||
@@ -315,30 +237,6 @@ function hasAI(): boolean {
   return ENV_GEMINI_KEYS.length > 0 || Boolean(supabaseAdmin);
 }
 
-// ---------------------------------------------------------------------------
-// 2026-09-04 fix — see PROJECT-STATUS-NOTES / DS_Mobile_Master_Plan_Completed_Points
-// entry of the same date for the full writeup. Root cause found via Supabase
-// function_logs: EVERY route (business-insights, staff-advice, ocr-accessory,
-// etc.) was intermittently hitting Gemini's own 503 "This model is currently
-// experiencing high demand" — a real, model-wide capacity error on Google's
-// side, not a problem with any specific key (all 10 configured keys were
-// verified active with zero cooldowns). The OLD retry strategy made this
-// worse in two ways:
-//   1. It retried the SAME (possibly-overloaded) key up to 3 times with
-//      growing sleeps (600ms/1200ms/1800ms) before rotating — burning time
-//      on a key that had already just failed instead of trying a fresh one.
-//   2. With 10 keys x up to 3 tries x up to 1.8s of sleep, a fully-unlucky
-//      request could take 50+ seconds — long enough to hit the Edge
-//      Function's own request timeout (504, seen once in production logs)
-//      before ever getting a real answer back to the user.
-// New strategy: cycle through ALL keys fast with NO inter-attempt sleep
-// first (a different key is a fresh shot at Google's load balancer, so this
-// alone resolves most "high demand" blips almost immediately). Only if that
-// full pass fails does it wait once (1.5s, matching Google's own "usually
-// temporary" guidance) and do a second full pass. A hard wall-clock budget
-// (22s, safely under Supabase's Edge Function timeout) guarantees this
-// function always returns an answer instead of timing out silently.
-// ---------------------------------------------------------------------------
 const FAILOVER_TIME_BUDGET_MS = 22_000;
 
 async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
@@ -353,9 +251,7 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
 
   for (let pass = 0; pass < 2; pass++) {
     if (pass === 1) {
-      // Every key failed on the fast pass — give Google's "usually
-      // temporary" overload a real chance to clear before trying again.
-      if (!anyUnavailable) break; // nothing but quota/invalid failures — a second pass won't help.
+      if (!anyUnavailable) break;
       await sleep(1500);
     }
 
@@ -373,12 +269,9 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
       } catch (err) {
         lastError = err;
         const failure = classifyGeminiFailure(err);
-        if (!failure) throw err; // Not a key/capacity problem (bad input, etc) — fail fast, don't burn other keys retrying it.
+        if (!failure) throw err;
         if (failure === "unavailable") {
           anyUnavailable = true;
-          // Model-overload: this key itself is fine, just don't rotate it
-          // to the front next time — move straight to the next key with no
-          // sleep (a fresh key is a fresh shot at Google's load balancer).
           continue;
         }
         console.warn(
@@ -392,9 +285,6 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
   throw lastError || new Error("All Gemini API keys exhausted");
 }
 
-// ---------------------------------------------------------------------------
-// Auth: same boundary as requireSupabaseUserAndStore() in server.ts.
-// ---------------------------------------------------------------------------
 const storeIdByUserCache = new Map<string, { storeId: string | null; at: number }>();
 const STORE_ID_CACHE_MS = 60_000;
 
@@ -415,9 +305,6 @@ async function requireUserAndStore(req: Request): Promise<{ userId: string; stor
   return { userId: data.user.id, storeId };
 }
 
-// ---------------------------------------------------------------------------
-// Phone OCR (box / about-screen)
-// ---------------------------------------------------------------------------
 const emptyOcrResult = (imageType: string) => ({
   brand: "", modelName: "", imei1: "", imei2: "", serialNo: "", color: "",
   ramStorage: "", mrp: 0, sellingPriceSuggested: 0, androidVersion: "",
@@ -478,9 +365,6 @@ Image type: ${imageType}.`;
   return normalizeOcr(JSON.parse(response.text || "{}"), imageType);
 }
 
-// ---------------------------------------------------------------------------
-// Accessory packaging OCR
-// ---------------------------------------------------------------------------
 function normalizeAccessory(input: any) {
   const base = input || {};
   const rawModels: unknown = base.compatibleModels;
@@ -562,10 +446,6 @@ Never invent a model that is not printed on the pack.`;
   return normalizeAccessory(JSON.parse(response.text || "{}"));
 }
 
-// ---------------------------------------------------------------------------
-// Screen-size lookup (with the same two-layer cache: in-memory + Supabase
-// `phone_screen_size_cache`, durable/shared across every store and restart).
-// ---------------------------------------------------------------------------
 const screenSizeCache = new Map<string, { size: number; at: number }>();
 const SCREEN_SIZE_CACHE_MS = 24 * 60 * 60 * 1000;
 
@@ -593,7 +473,6 @@ async function saveScreenSizeToSupabase(key: string, modelName: string, size: nu
       p_screen_size_inches: size,
     });
   } catch {
-    // Best-effort only.
   }
 }
 
@@ -616,7 +495,7 @@ Reply with ONLY the number rounded to 1 decimal place (e.g. "6.7"). If you are n
     ai.models.generateContent({
       model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
-      config: FAST_MODE_CONFIG,
+      config: TEXT_MODE_CONFIG,
     })
   );
   const size = parseFloat(String(response.text || "0").trim().match(/[\d.]+/)?.[0] || "0") || 0;
@@ -625,15 +504,6 @@ Reply with ONLY the number rounded to 1 decimal place (e.g. "6.7"). If you are n
   return size;
 }
 
-// Step 2026-09-05: batch/accurate variant used by the Add Product form.
-// Instead of trusting a packaging photo's own printed "for 6.5-6.7 inch"
-// text (which is often vague/rounded across a long model list and produced
-// a noisy, wrong-looking range), this looks up each named model's REAL
-// screen size individually — via the same cache as runScreenSizeLookup, so
-// a model looked up once (from any store/product) stays instant — and
-// returns the true min/max across the whole compatible-models list, in a
-// single extra Gemini call (text-tier model) for whichever models aren't
-// already cached.
 async function runScreenSizeRangeLookup(
   storeId: string | null,
   modelNames: string[]
@@ -675,7 +545,6 @@ ${JSON.stringify(uncached)}`;
           model: GEMINI_MODEL_TEXT,
           contents: { parts: [{ text: prompt }] },
           config: {
-            ...FAST_MODE_CONFIG,
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -716,9 +585,6 @@ ${JSON.stringify(uncached)}`;
   return { sizes: results, minSize, maxSize };
 }
 
-// ---------------------------------------------------------------------------
-// Product photo search ("Photo Stock Finder")
-// ---------------------------------------------------------------------------
 function normalizeProductPhoto(input: any) {
   const base = input || {};
   const keywords = Array.isArray(base.searchKeywords)
@@ -773,9 +639,6 @@ Never invent details not visible in the photo.`;
   return normalizeProductPhoto(JSON.parse(response.text || "{}"));
 }
 
-// ---------------------------------------------------------------------------
-// Business insights (Owner) / Staff advice — Hinglish summaries
-// ---------------------------------------------------------------------------
 async function runBusinessInsights(storeId: string | null, summary: Record<string, unknown>): Promise<string> {
   if (!hasAI()) throw new Error("AI unavailable");
   const prompt = `You are a business advisor for a small Indian mobile phone & digital services shop.
@@ -794,7 +657,7 @@ ${JSON.stringify(summary)}`;
     ai.models.generateContent({
       model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
-      config: FAST_MODE_CONFIG,
+      config: TEXT_MODE_CONFIG,
     })
   );
   return (response.text || "").trim();
@@ -819,15 +682,12 @@ ${JSON.stringify(summary)}`;
     ai.models.generateContent({
       model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
-      config: FAST_MODE_CONFIG,
+      config: TEXT_MODE_CONFIG,
     })
   );
   return (response.text || "").trim();
 }
 
-// ---------------------------------------------------------------------------
-// AI Feature: Resale Price Advisor (second-hand phones)
-// ---------------------------------------------------------------------------
 async function runResalePriceAdvisor(storeId: string | null, input: Record<string, unknown>) {
   if (!hasAI()) throw new Error("AI unavailable");
   const prompt = `You are a pricing advisor for a small Indian second-hand mobile phone shop.
@@ -845,7 +705,6 @@ ${JSON.stringify(input)}`;
       model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
       config: {
-        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -868,9 +727,6 @@ ${JSON.stringify(input)}`;
   };
 }
 
-// ---------------------------------------------------------------------------
-// AI Feature: Customer Reply Draft (WhatsApp/Telegram inquiry assistant)
-// ---------------------------------------------------------------------------
 async function runCustomerReplyDraft(storeId: string | null, input: Record<string, unknown>) {
   if (!hasAI()) throw new Error("AI unavailable");
   const prompt = `You are a friendly counter staff member at a small Indian mobile phone &
@@ -889,14 +745,11 @@ ${JSON.stringify(input.matchedProducts || [])}
 
 SHOP NAME: ${String(input.shopName || "our shop")}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
-    ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
+    ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] }, config: TEXT_MODE_CONFIG })
   );
   return (response.text || "").trim();
 }
 
-// ---------------------------------------------------------------------------
-// AI Feature: Demand Forecast & Reorder Suggestions
-// ---------------------------------------------------------------------------
 async function runDemandForecast(storeId: string | null, products: unknown[]) {
   if (!hasAI()) throw new Error("AI unavailable");
   const prompt = `You are an inventory planner for a small Indian mobile phone & digital
@@ -915,7 +768,6 @@ ${JSON.stringify(products)}`;
       model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
       config: {
-        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -951,9 +803,6 @@ ${JSON.stringify(products)}`;
   };
 }
 
-// ---------------------------------------------------------------------------
-// AI Feature: Expense Receipt OCR
-// ---------------------------------------------------------------------------
 function normalizeExpenseOcr(input: any) {
   const base = input || {};
   const allowedCategories = ["Rent", "Electricity", "Internet/Phone", "Salary", "Transport", "Supplier Payment", "Maintenance", "Stationery", "Food", "Other"];
@@ -1003,9 +852,6 @@ Never invent an amount or date not visibly supported by the image.`;
   return normalizeExpenseOcr(JSON.parse(response.text || "{}"));
 }
 
-// ---------------------------------------------------------------------------
-// AI Feature: Loyalty Churn Risk Predictor
-// ---------------------------------------------------------------------------
 async function runChurnRisk(storeId: string | null, customers: unknown[]) {
   if (!hasAI()) throw new Error("AI unavailable");
   const prompt = `You are a customer-retention advisor for a small Indian mobile phone &
@@ -1025,7 +871,6 @@ ${JSON.stringify(customers)}`;
       model: GEMINI_MODEL_TEXT,
       contents: { parts: [{ text: prompt }] },
       config: {
-        ...FAST_MODE_CONFIG,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -1061,15 +906,6 @@ ${JSON.stringify(customers)}`;
   };
 }
 
-// ---------------------------------------------------------------------------
-// AI Feature: Scheduled Daily AI Digest (Telegram) — cron-only, no user
-// session. Reads each opted-in store's mirrored app state from `store_state`
-// (same JSON shape the client itself displays, already used this way by the
-// Confidential Price flow above in telegram-connect), builds a one-day
-// summary, asks Gemini for a short Hinglish digest, and queues it into
-// `telegram_outbox` for the existing telegram-outbox-worker to actually send
-// — reusing that delivery pipeline instead of duplicating Telegram API calls.
-// ---------------------------------------------------------------------------
 async function runDailyDigestSweep(): Promise<{ queued: number; skipped: number; errors: number }> {
   if (!supabaseAdmin) return { queued: 0, skipped: 0, errors: 0 };
   let queued = 0, skipped = 0, errors = 0;
@@ -1140,16 +976,11 @@ Do not invent numbers not present below.
 DATA:
 ${JSON.stringify(summary)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
-    ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
+    ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] }, config: TEXT_MODE_CONFIG })
   );
   return `📊 ${summary.shopName} — Daily AI Digest (${summary.date})\n\n${(response.text || "").trim()}`;
 }
 
-// Turns a raw Gemini/failover error into a short, honest Hinglish message
-// for the shopkeeper. Distinguishes "Google's AI is momentarily overloaded,
-// try again in a bit" (true almost all the time in practice — see the
-// runWithGeminiFailover comment above) from every other failure, instead of
-// showing the same generic "AI scan failed" for both.
 function friendlyAiError(err: any, fallback: string): string {
   const failure = classifyGeminiFailure(err);
   if (failure === "unavailable") {
@@ -1172,9 +1003,6 @@ function decodeImage(image: unknown): { mimeType: string; base64Data: string } |
   return { mimeType, base64Data };
 }
 
-// ---------------------------------------------------------------------------
-// Router
-// ---------------------------------------------------------------------------
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
 
@@ -1442,8 +1270,6 @@ Deno.serve(async (req: Request) => {
       }
 
       case "cron-daily-digest": {
-        // No user session in cron context — same shared-secret pattern as
-        // telegram-outbox-worker-sweep / telegram-connect's weekly report.
         const cronSecret = Deno.env.get("CRON_SECRET") || "";
         const provided = req.headers.get("x-cron-secret") || "";
         const isCronSweep = cronSecret.length > 0 && provided.length > 0 && provided === cronSecret;

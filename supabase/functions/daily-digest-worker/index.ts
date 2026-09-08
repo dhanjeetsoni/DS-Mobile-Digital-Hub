@@ -170,7 +170,7 @@ Do not invent numbers not present below.
 DATA:
 ${JSON.stringify(summary)}`;
   const response = await runWithGeminiFailover(storeId, (ai) =>
-    ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] }, config: FAST_MODE_CONFIG })
+    ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] }, config: TEXT_MODE_CONFIG })
   );
   return `📊 ${summary.shopName} — Daily AI Digest (${summary.date})\n\n${(response.text || "").trim()}`;
 }

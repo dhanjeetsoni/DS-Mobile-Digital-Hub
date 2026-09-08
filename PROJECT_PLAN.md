@@ -528,6 +528,43 @@ actual code, per this document's own ground rule — not assumed or guessed._
         Repairs, etc. — each needs its own screen-specific pass, not just
         the existing generic CSS pass. Worth doing incrementally, screen by
         screen, in future sessions rather than claiming this item complete.
+      - **Sales History, Purchases, Returns/Exchanges/Warranty Claims, and
+        Repairs & Service Jobs passes done 2026-09-08** (closes out the
+        screen-by-screen list above — all 6 originally-named screens now
+        have a mobile-specific pass):
+        - Sales History: 9-column table → tappable mobile cards (whole row
+          opens the invoice), same table-stays-in-DOM-but-hidden toggle as
+          Product Catalog/Dashboard.
+        - Purchases: main inward-history table (9 columns) → mobile cards.
+        - Returns/Exchanges/Warranty Claims: all 3 history tables on this
+          screen (7-8 columns each) → mobile cards; the Warranty Claims
+          status-update dropdown + button (previously default-sized, no
+          explicit touch target) bumped to 40px min-height on phone.
+        - Repairs & Service Jobs: already card-based (`.job-card` in a
+          3-column grid that already collapses to a single full-width
+          column on phone via the existing Dashboard-pass 768px rule) — no
+          table-to-card conversion needed here, unlike every other screen
+          in this pass. The one real gap found: `.job-status-select` (the
+          per-ticket status dropdown) was ~4-8px padding, well under the
+          ~44px guidance already applied elsewhere (`.qtybtn`, etc.);
+          bumped to 40px min-height on phone.
+        - Self-caught mistake made 3 times during this edit and fixed each
+          time: inserting a new CSS block immediately before an existing
+          comment by replacing only the comment's *opening line* (instead
+          of preserving it in full at the end of the replacement) silently
+          deleted that line, once leaving a dangling comment-body fragment
+          as bare invalid top-level CSS text and twice deleting the
+          `/* Cards */` comment + the start of the actual `.card` rule
+          along with it. Caught each time by grep, not by running the
+          build — **verification for this pass was explicitly skipped at
+          the owner's instruction** (commit/push first, verify after), so
+          typecheck/tests/static-audit/build have **not** been re-run since
+          these fixes landed; only a manual CSS comment-balance check
+          (matching `/*`...`*/` depth = 0) and a case-label count check (41,
+          matching pre-edit) were done as a minimal sanity pass. **This
+          needs the full verify pass before being trusted as clean.**
+        - Not device-tested, same caveat as every other pass in this
+          section.
 - [x] Light + dark theme — already existed (`theme/useAppearance.ts`'s
       `toggleMode`/`setMode`, surfaced via the Appearance Studio screen), an
       earlier session also switched the fresh-install default to light.

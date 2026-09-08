@@ -955,6 +955,71 @@ html[data-font-style="mono"] {
   }
 }
 
+/* ------------------------------------------------------------------
+   2026-09-08 — Phase 4 screen-by-screen pass #4: Sales History. 9 columns,
+   same unusable-on-phone problem as Product Catalog. The mobile rows reuse
+   .dash-mobile-row's already-verified tappable-row styling (just a
+   different show/hide toggle class) rather than duplicating the same CSS
+   under a new name. ------------------------------------------------------ */
+.sales-mobile-list {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .sales-desktop-table {
+    display: none;
+  }
+  .sales-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* ------------------------------------------------------------------
+   2026-09-08 — Phase 4 screen-by-screen pass #5: Purchases (main inward
+   history list). Same 9-column-unusable-on-phone issue; cards here need
+   two stacked rows of info rather than the simpler single-row Sales
+   History card, so they use .dash-mobile-row only for its border/padding/
+   background, with their own inline flex layout instead of the row's
+   default space-between (see the flexDirection:column override in JSX).
+   ------------------------------------------------------------------ */
+.purchases-mobile-list {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .purchases-desktop-table {
+    display: none;
+  }
+  .purchases-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* ------------------------------------------------------------------
+   2026-09-08 — Phase 4 screen-by-screen pass #6: Returns / Exchanges /
+   Warranty Claims history (3 separate tables on one tab, 7-8 columns each).
+   Reuses .dash-mobile-row for the card border/background, same as
+   Purchases. ------------------------------------------------------------ */
+.returns-mobile-list {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .returns-desktop-table {
+    display: none;
+  }
+  .returns-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+}
+
 /* Phase 4 — Sell/POS sticky "jump to cart" bar. Hidden entirely on
    desktop/Windows (same ~900px breakpoint as the bottom tab bar it sits
    above); only rendered in the DOM at all when the cart has items (see
@@ -1075,6 +1140,22 @@ html[data-font-style="mono"] {
      (e.g. the Sell/POS product-list-vs-cart split intentionally stacks). */
   .grid.cols-3, .grid.cols-2 {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  /* 2026-09-08 — Phase 4 screen-by-screen pass #7: Repairs & Service Jobs.
+     Already card-based (.job-card in a 3-col grid, collapsing to a single
+     full-width column on phone via the 768px rule above — no table to
+     convert here, unlike every other screen in this pass). The one real
+     touch-target gap: .job-status-select was ~4px/8px padding, well under
+     the ~44px guidance already applied to .qtybtn etc. — with the card now
+     full-width on phone there's plenty of room to make it a proper target
+     instead of a fiddly tiny dropdown. */
+  .job-status-select {
+    min-height: 40px;
+    font-size: 13px;
+    flex: 1;
   }
 }
 

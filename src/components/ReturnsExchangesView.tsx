@@ -972,7 +972,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
           <h3 style={{ margin: "0 0 10px", fontSize: "14px", fontWeight: 800, color: "var(--ink)" }}>
             Returns History ({db.returns.length})
           </h3>
-          <div className="table-wrap" style={{ marginBottom: "20px" }}>
+          <div className="table-wrap returns-desktop-table" style={{ marginBottom: "20px" }}>
             {db.returns.length === 0 ? (
               <div className="empty">No returns logged yet.</div>
             ) : (
@@ -1009,10 +1009,35 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
             )}
           </div>
 
+          {/* Mobile card list — same toggle pattern as the rest of this
+              Phase 4 screen-by-screen pass. */}
+          <div className="returns-mobile-list" style={{ marginBottom: "20px" }}>
+            {db.returns.length === 0 ? (
+              <div className="empty">No returns logged yet.</div>
+            ) : (
+              db.returns.slice().reverse().map((r) => (
+                <div key={r.id} className="dash-mobile-row" style={{ flexDirection: "column", alignItems: "stretch", gap: "4px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <div className="dash-mobile-row-main">
+                      <b style={{ color: "var(--red)" }}>{r.returnNo}</b>
+                      <span className="hint">{r.invoiceNo} • {r.customer?.name || "Walk-in"} • {r.date}</span>
+                    </div>
+                    <b style={{ color: "var(--red)" }}>{inr(r.settlementAmount)}</b>
+                  </div>
+                  <span className="hint">{r.items.map((i) => `${i.name} (x${i.qty})`).join(", ")}</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span className="hint">{r.reason}</span>
+                    <span className="badge info">{r.refundMethod}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
           <h3 style={{ margin: "0 0 10px", fontSize: "14px", fontWeight: 800, color: "var(--ink)" }}>
             Exchanges History ({db.exchanges.length})
           </h3>
-          <div className="table-wrap">
+          <div className="table-wrap returns-desktop-table">
             {db.exchanges.length === 0 ? (
               <div className="empty">No exchanges logged yet.</div>
             ) : (
@@ -1049,10 +1074,33 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
             )}
           </div>
 
+          <div className="returns-mobile-list">
+            {db.exchanges.length === 0 ? (
+              <div className="empty">No exchanges logged yet.</div>
+            ) : (
+              db.exchanges.slice().reverse().map((exc) => (
+                <div key={exc.id} className="dash-mobile-row" style={{ flexDirection: "column", alignItems: "stretch", gap: "4px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <div className="dash-mobile-row-main">
+                      <b style={{ color: "var(--purple)" }}>{exc.exchangeNo}</b>
+                      <span className="hint">{exc.invoiceNo} • {exc.date}</span>
+                    </div>
+                    <b style={{ color: exc.differenceAmount >= 0 ? "var(--green)" : "var(--red)" }}>
+                      {exc.differenceAmount >= 0 ? `+${inr(exc.differenceAmount)}` : inr(exc.differenceAmount)}
+                    </b>
+                  </div>
+                  <span className="hint">Given: {exc.returnedItems.map((i) => `${i.name} (x${i.qty})`).join(", ")}</span>
+                  <span className="hint">Taken: {exc.replacementItems.map((i) => `${i.name} (x${i.qty})`).join(", ")}</span>
+                  <span className="badge ok" style={{ alignSelf: "flex-start" }}>{exc.settlementMethod}</span>
+                </div>
+              ))
+            )}
+          </div>
+
         <h3 style={{ margin: "20px 0 10px", fontSize: "14px", fontWeight: 800, color: "var(--ink)" }}>
             Warranty Claims ({(db.warrantyClaims || []).length})
           </h3>
-          <div className="table-wrap">
+          <div className="table-wrap returns-desktop-table">
             {(db.warrantyClaims || []).length === 0 ? (
               <div className="empty">No warranty claims raised yet.</div>
             ) : (
@@ -1103,6 +1151,45 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
                   })}
                 </tbody>
               </table>
+            )}
+          </div>
+
+          <div className="returns-mobile-list">
+            {(db.warrantyClaims || []).length === 0 ? (
+              <div className="empty">No warranty claims raised yet.</div>
+            ) : (
+              (db.warrantyClaims || []).slice().reverse().map((c) => {
+                const statusColor =
+                  c.status === "Resolved" ? "var(--green)" : c.status === "Rejected" ? "var(--red)" : "var(--amber)";
+                return (
+                  <div key={c.id} className="dash-mobile-row" style={{ flexDirection: "column", alignItems: "stretch", gap: "6px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <div className="dash-mobile-row-main">
+                        <b style={{ color: "var(--blue)" }}>{c.claimNo}</b>
+                        <span className="hint">{c.productName} • {c.invoiceNo} • {c.date}</span>
+                        <span className="hint">{c.customer?.name || "Walk-in"}</span>
+                      </div>
+                      <span className="badge" style={{ background: statusColor, color: "#fff", height: "fit-content" }}>{c.status}</span>
+                    </div>
+                    <span className="hint">{c.issueDescription}</span>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <select
+                        style={{ flex: 1, minHeight: "40px" }}
+                        value={claimStatusDraft[c.id] || c.status}
+                        onChange={(e) => setClaimStatusDraft({ ...claimStatusDraft, [c.id]: e.target.value })}
+                      >
+                        <option value="Open">Open</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Resolved">Resolved</option>
+                        <option value="Rejected">Rejected</option>
+                      </select>
+                      <button className="btn sm" style={{ minHeight: "40px" }} onClick={() => handleUpdateClaimStatus(c)}>
+                        Update
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
       </div>

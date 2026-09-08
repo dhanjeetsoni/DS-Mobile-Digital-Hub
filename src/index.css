@@ -757,6 +757,102 @@ html[data-font-style="mono"] {
     font-size: 15px;
     max-width: 100%;
   }
+
+  /* ------------------------------------------------------------------
+     2026-09-06 — Phase 4 screen-by-screen pass #1: Sell/POS, the single
+     busiest screen in the whole app. The app-wide button/input pass
+     above (2026-09-05) didn't reach .cart-line/.qtybtn because those are
+     their own distinct classes, not .btn/.input — this closes that gap
+     specifically, plus fixes a genuine layout problem the generic pass
+     couldn't: on a ~360-400px phone, .cart-line's product name + a
+     100px price box + two qty buttons + a delete button in one
+     non-wrapping flex row left almost no room for the name at all.
+     ------------------------------------------------------------------ */
+
+  /* Google/Apple's own ~44px minimum touch-target guidance (already
+     cited in the .btn fix above) applied to the qty +/- steppers too —
+     28px was genuinely too small to tap reliably with a thumb. */
+  .qtybtn {
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
+  }
+  .qtyval {
+    min-width: 28px;
+    font-size: 15px;
+  }
+
+  /* Let the product name take its own full-width first line, with
+     price/qty/delete flowing onto a second line below it — instead of
+     squeezing all of it into one row and truncating the name to a few
+     characters. */
+  .cart-line {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .cart-line .nm {
+    flex-basis: 100%;
+  }
+
+  /* The price-per-unit box in the cart was a fixed 100px inline width —
+     on phone, now that it's sharing a wrapped second line instead of a
+     full row, let it shrink a bit so it doesn't crowd the qty
+     stepper/delete button next to it. */
+  .cart-price-box {
+    width: 88px !important;
+  }
+}
+
+/* Phase 4 — Sell/POS sticky "jump to cart" bar. Hidden entirely on
+   desktop/Windows (same ~900px breakpoint as the bottom tab bar it sits
+   above); only rendered in the DOM at all when the cart has items (see
+   App.tsx), so no extra empty-state handling needed here. */
+.mobile-cart-bar {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .mobile-cart-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    z-index: 85; /* above page content, below the off-canvas sidebar/backdrop */
+    padding: 12px 16px;
+    border: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #ffffff;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+    touch-action: manipulation;
+  }
+
+  .mobile-cart-bar-count {
+    font-size: 13px;
+  }
+
+  .mobile-cart-bar-total {
+    font-size: 15px;
+    margin-left: auto;
+  }
+
+  .mobile-cart-bar-cta {
+    font-size: 12px;
+    opacity: 0.9;
+    white-space: nowrap;
+  }
+
+  /* The floating cart bar above sits at the same height range as this
+     button once the cart section is scrolled all the way down — extra
+     bottom margin so "Complete Checkout" never ends up hidden under it. */
+  .pos-checkout-btn {
+    margin-bottom: 68px !important;
+  }
 }
 
 /* Any element carrying data-android-safe-bottom (bottom-fixed bars, e.g.

@@ -2449,6 +2449,7 @@ export default function App() {
         });
 
         return (
+          <>
           <div className="grid cols-2" style={{ alignItems: "flex-start", gap: "16px" }}>
             {/* Catalog Selection */}
             <div className="section">
@@ -2526,7 +2527,7 @@ export default function App() {
             </div>
 
             {/* Current Cart */}
-            <div className="section">
+            <div className="section" id="pos-cart-section">
               <div className="section-head">
                 <h2>Current Bill Cart ({cart.reduce((a, i) => a + i.qty, 0)} Items)</h2>
                 <div style={{ display: "flex", gap: "8px" }}>
@@ -2568,7 +2569,7 @@ export default function App() {
                             )}
                           </div>
                           {item.isGift ? (
-                            <div style={{ width: "100px" }}>
+                            <div className="cart-price-box" style={{ width: "100px" }}>
                               <div
                                 style={{
                                   padding: "6px 8px",
@@ -2586,7 +2587,7 @@ export default function App() {
                               <div className="hint" style={{ fontSize: "10px", marginTop: "2px" }}>gift — ₹0</div>
                             </div>
                           ) : (
-                            <div style={{ width: "100px" }}>
+                            <div className="cart-price-box" style={{ width: "100px" }}>
                               <input
                                 type="number"
                                 min="0"
@@ -2705,7 +2706,7 @@ export default function App() {
                     )}
 
                     <button
-                      className="btn primary"
+                      className="btn primary pos-checkout-btn"
                       style={{ width: "100%", marginTop: "14px", padding: "12px", fontSize: "14.5px" }}
                       onClick={handleStartCheckout}
                     >
@@ -2716,6 +2717,32 @@ export default function App() {
               )}
             </div>
           </div>
+
+          {/* Phase 4 screen-by-screen pass — Sell/POS is the busiest
+              screen, and on phone the product list + cart stack
+              vertically (existing .grid.cols-2 -> 1fr breakpoint), so
+              cart total/checkout sits below however long the product
+              list is — easy to lose track of "what's in the bill" while
+              scrolling to find something to add. This bar (mobile-only,
+              see .mobile-cart-bar's own media query) stays pinned above
+              the bottom tab bar showing a live count + total, and jumps
+              straight to the cart on tap instead of making staff hunt
+              for it. Doesn't render at all when the cart is empty —
+              nothing to jump to yet. */}
+          {cart.length > 0 && (
+            <button
+              type="button"
+              className="mobile-cart-bar"
+              onClick={() => document.getElementById("pos-cart-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              <span className="mobile-cart-bar-count">
+                🛒 {cart.reduce((a, i) => a + i.qty, 0)} item{cart.reduce((a, i) => a + i.qty, 0) === 1 ? "" : "s"}
+              </span>
+              <span className="mobile-cart-bar-total">{inr(total)}</span>
+              <span className="mobile-cart-bar-cta">View Cart ↓</span>
+            </button>
+          )}
+        </>
         );
       }
 

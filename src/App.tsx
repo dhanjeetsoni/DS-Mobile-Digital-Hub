@@ -73,9 +73,8 @@ import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOf
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
 import { sqliteList } from "./services/localSqlite";
-import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert, sendWeeklyReportToTelegram } from "./services/telegram";
+import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert } from "./services/telegram";
 import { getRepairDiagnosis } from "./services/aiOps";
-import { buildWeeklyReport, isWeeklyReportDue } from "./utils/weeklyReport";
 import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./services/whatsapp";
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
 import { celebrate } from "./utils/celebrate";
@@ -276,6 +275,15 @@ export default function App() {
   const [cloudStatus, setCloudStatus] = useState("offline");
   const [showCloudAuth, setShowCloudAuth] = useState(false);
   const [telegramStatus, setTelegramStatus] = useState<any>(null);
+  // Phase 5: owner-facing ON/OFF for the automatic daily AI sales digest
+  // (server-side pg_cron -> daily-digest-worker -> Telegram). Backed by
+  // stores.ai_digest_enabled (default OFF) via get_ai_digest_enabled() /
+  // set_ai_digest_enabled() RPCs — those already existed in the DB with no
+  // UI ever wired to them, so the feature was invisible/unreachable for
+  // any real shop despite being fully built server-side.
+  const [aiDigestEnabled, setAiDigestEnabledState] = useState(false);
+  const [aiDigestLoading, setAiDigestLoading] = useState(false);
+  const [aiDigestBusy, setAiDigestBusy] = useState(false);
 
   // Modals
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
@@ -908,6 +916,36 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [cloudUser, ownerMode, telegramStatus?.connected]);
 
+  // Phase 5: load the current daily-digest ON/OFF state whenever the owner
+  // opens Settings — cheap, single RPC, only for owner/manager (get_ai_digest_enabled
+  // returns false for anyone else / no store, so this is harmless either way).
+  useEffect(() => {
+    if (currentPage !== "settings" || !cloudUser || !ownerMode) return;
+    let active = true;
+    setAiDigestLoading(true);
+    supabase.rpc("get_ai_digest_enabled").then(({ data, error }: { data: unknown; error: unknown }) => {
+      if (!active) return;
+      if (!error) setAiDigestEnabledState(Boolean(data));
+      setAiDigestLoading(false);
+    });
+    return () => { active = false; };
+  }, [currentPage, cloudUser, ownerMode]);
+
+  const handleToggleAiDigest = async (next: boolean) => {
+    setAiDigestBusy(true);
+    try {
+      const { error } = await supabase.rpc("set_ai_digest_enabled", { p_enabled: next });
+      if (error) throw new Error((error as Error).message || "Setting save nahi ho payi.");
+      setAiDigestEnabledState(next);
+      showToast(next ? "Daily Sales Digest ON kar diya — roz raat ~9 baje Telegram par aayega." : "Daily Sales Digest OFF kar diya.", "green");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Setting save nahi ho payi.", "red");
+    } finally {
+      setAiDigestBusy(false);
+    }
+  };
+
+
   useEffect(() => {
     if (cloudProfile?.role === "staff") setOwnerMode(false);
     if (cloudProfile?.role === "owner" || cloudProfile?.role === "manager") setOwnerMode(true);
@@ -1099,30 +1137,20 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db.products.length]);
 
-  // Automatic weekly report → Telegram. There is no always-on server here,
-  // so this runs the check whenever an owner/manager opens the app (at most
-  // once per app load) — if 7+ days have passed since the last send (or it
-  // has never been sent) and Telegram is connected, it sends silently. If
-  // Telegram isn't connected yet, it fails quietly — the owner can always
-  // send it manually from Owner Reports.
-  const weeklyReportCheckedRef = useRef(false);
-  useEffect(() => {
-    if (!cloudUser || !ownerMode || weeklyReportCheckedRef.current) return;
-    if (!isWeeklyReportDue(db)) return;
-    weeklyReportCheckedRef.current = true;
-    (async () => {
-      try {
-        const report = buildWeeklyReport(db);
-        await sendWeeklyReportToTelegram(report);
-        db.settings.lastWeeklyReportSentAt = new Date().toISOString();
-        saveState({ ...db });
-        showToast("Is hafte ki report Telegram par bhej di gayi", "green");
-      } catch {
-        // Telegram not connected yet, or offline right now — silently skip.
-        // Owner can always send it manually from Owner Reports.
-      }
-    })();
-  }, [cloudUser, ownerMode, db]);
+  // Phase 5 (2026-09-07): the weekly owner report is now sent fully
+  // automatically, server-side, by a pg_cron job (`send_due_weekly_reports`,
+  // Monday 9:00 AM IST) that computes the numbers straight from the
+  // relational sales/sale_items/purchases/products tables — see
+  // supabase/migrations/*_phase5_weekly_report_security_hardening.sql and
+  // weekly_report_payload() in the DB. The client-side version that used
+  // to live here (buildWeeklyReport() reading the app's in-memory JSON
+  // state blob, firing once per app-open if 7+ days had passed) has been
+  // removed: it was never truly automatic (an owner who didn't open the
+  // app for a week simply never got a report), it read numbers that could
+  // drift from the Phase 1 relational source of truth, and running
+  // alongside the new server-side cron risked sending the SAME week's
+  // report twice. The manual "Send Now" button on Owner Reports still
+  // exists, now backed by the same relational RPC (get_my_weekly_report_payload).
 
   // Step 7.2 — Delete Policy: "3 mahine out-of-stock ho jaaye to photo
   // auto-cleanup" (storage bharne se bachega). Runs at most once per app

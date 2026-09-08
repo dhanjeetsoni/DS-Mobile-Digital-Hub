@@ -482,9 +482,33 @@ actual code, per this document's own ground rule — not assumed or guessed._
         production build all clean. **Not device-tested** — same caveat
         as everywhere else in this plan needing a real phone; layout
         reasoning here is sound but only a real device confirms feel.
-      - Genuinely NOT done yet: every other screen (Dashboard, Product
-        Catalog, Sales History, Returns, Purchases, Repairs, etc.) —
-        each would need its own screen-specific look the same way this
+      - Genuinely NOT done yet: Dashboard, Sales History, Returns,
+        Purchases, Repairs, etc. — each would need its own screen-specific
+        look the same way this one did
+      - **Product Catalog pass done 2026-09-08** (the app's default landing
+        screen per the owner's decision — second-highest-traffic screen
+        after POS):
+        - The table has up to 13 columns (Photo/Name/Category/Brand/SKU/
+          Barcode/Cost/Confidential/Selling Price/MRP/Discount/Stock/
+          Warranty/Actions) — even with horizontal scroll this was
+          genuinely unusable on a ~360-400px phone, one of the most-
+          reported "kuch dikhta hi nahi" complaints
+        - Added a mobile card layout (photo, name, price with MRP struck
+          through + discount badge, stock/warranty/SKU, Edit/Delete for
+          owner) shown only under 900px — same toggle-by-CSS technique as
+          the POS pass's `.mobile-cart-bar`, both table and cards render in
+          the DOM, only one is ever visible, no JS viewport-width state
+        - Self-caught-and-fixed bug from this same edit: a `str_replace`
+          accidentally deleted the `case "invoices":` label right after the
+          products case, leaving its render block as dead/unreachable code
+          — caught by re-grepping immediately after the edit (this
+          document's own ground rule about verifying, applied to my own
+          work this time, not just prior sessions')
+        - Verified: `tsc --noEmit`, vitest (26/26), static-audit (16/16),
+          production build all clean, both before and again after rebasing
+          onto Phase 5 work landing in parallel. **Not device-tested.**
+      - Still genuinely NOT done: Dashboard, Sales History, Returns,
+        Purchases, Repairs, etc.
         one got, not just the existing generic CSS pass. Worth doing
         incrementally, screen by screen, in future sessions rather than
         claiming this item complete.

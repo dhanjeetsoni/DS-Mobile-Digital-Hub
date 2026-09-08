@@ -605,7 +605,26 @@ actual code, per this document's own ground rule — not assumed or guessed._
 - [ ] Audit log (who added/edited/deleted what, and when)
 - [ ] Manual backup file export (daily/weekly)
 - [ ] In-app auto-update check (APK self-update prompt)
-- [ ] Automatic crash reporting
+- [x] Automatic crash reporting — new `crash_reports` table (migration
+      `phase5_crash_reports`, RLS: any store member can insert their own
+      store's crash, only owner/manager can browse them) + `crashReporter.ts`
+      (per-session cap of 10 + de-dupe so a crash loop can't flood the DB —
+      same lesson as this project's earlier sync_queue retry-storm) +
+      `ErrorBoundary.tsx` (catches React render errors specifically, with
+      component stack, shows a recoverable screen instead of blank white) +
+      `main.tsx` wiring for `window.onerror`/`unhandledrejection` (runtime)
+      and the existing fatal-startup catch block (boot). Verified with a
+      fresh clone + `npm ci` + `tsc --noEmit` + `npm run build`, all clean,
+      before committing — not just trusted from local testing. **Known
+      limitation, stated plainly rather than glossed over**: a crash that
+      happens before the JS module bundle even loads (e.g. a genuine
+      network/asset failure) still can't reach Supabase from here — that
+      case is still only visible via index.html's local boot-fallback
+      overlay, which the owner still has to screenshot manually. No in-app
+      viewer for crash reports was built yet (data is queryable directly in
+      Supabase for now); a Settings-page list is a natural near-term
+      follow-up, not done here to keep this item scoped to the actual
+      capture-and-report mechanism.
 
 ### ⬜ Phase 6: AI & advanced feature enhancements
 - [ ] AI Photo Scan: improve accuracy, support 1 or 2 photos (front/back) with

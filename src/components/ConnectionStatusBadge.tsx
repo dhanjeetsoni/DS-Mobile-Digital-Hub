@@ -24,9 +24,14 @@ interface ConnectionStatusBadgeProps {
   cloudStatus: CloudConnectionStatus;
   pendingSyncCount: number;
   onRetry: () => Promise<{ processed: number; failed: number }>;
+  /** 2026-09-08: staff area wants just the dot — no "Syncing (n)" text, no
+   * manual Retry Sync button. Automatic background retry (startConnectivitySync
+   * in repository.ts, unchanged) keeps handling reconnection either way; this
+   * only removes the manual escape hatch + text from what staff sees. */
+  simplified?: boolean;
 }
 
-export function ConnectionStatusBadge({ cloudStatus, pendingSyncCount, onRetry }: ConnectionStatusBadgeProps) {
+export function ConnectionStatusBadge({ cloudStatus, pendingSyncCount, onRetry, simplified = false }: ConnectionStatusBadgeProps) {
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [retrying, setRetrying] = useState(false);
 
@@ -63,7 +68,7 @@ export function ConnectionStatusBadge({ cloudStatus, pendingSyncCount, onRetry }
       : "Cloud se connect ho raha hai...";
   }
 
-  const showRetry = !isOnline || hasSyncIssue || pendingSyncCount > 0;
+  const showRetry = !simplified && (!isOnline || hasSyncIssue || pendingSyncCount > 0);
 
   const handleRetry = async () => {
     if (retrying) return;
@@ -74,6 +79,14 @@ export function ConnectionStatusBadge({ cloudStatus, pendingSyncCount, onRetry }
       setRetrying(false);
     }
   };
+
+  if (simplified) {
+    // Staff area: just the dot. Green = online/synced, yellow/pulsing =
+    // syncing or connecting, red = offline or a sync error. No label, no
+    // manual retry — nothing for staff to fiddle with; it just works
+    // (or quietly keeps retrying) in the background.
+    return <span className={`status-dot ${dotClass}`} title={hint}></span>;
+  }
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>

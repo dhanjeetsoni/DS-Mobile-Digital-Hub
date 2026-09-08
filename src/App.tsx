@@ -4267,6 +4267,7 @@ export default function App() {
             <ConnectionStatusBadge
               cloudStatus={cloudStatus as any}
               pendingSyncCount={pendingSyncCount}
+              simplified={cloudProfile?.role === "staff"}
               onRetry={async () => {
                 try {
                   const r = await flushOfflineQueue();

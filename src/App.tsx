@@ -1297,6 +1297,16 @@ export default function App() {
   // owner passcode first and does NOT run the action (the owner can retry
   // the same button after logging in).
   const requireOwner = (action: () => void) => {
+    // Staff must never even be offered the owner-passcode prompt — not just
+    // be blocked after trying it. If the currently logged-in identity is
+    // staff, refuse silently (a neutral toast, no passcode screen) instead
+    // of the normal owner-prompt path below. This is what actually makes
+    // every owner-only action safe regardless of which button, keyboard
+    // shortcut (see F7), or dashboard shortcut card tried to call it.
+    if (cloudProfile?.role === "staff") {
+      showToast("Ye sirf owner kar sakte hain", "amber");
+      return;
+    }
     if (!ownerMode) {
       setIsOwnerLoginOpen(true);
       showToast("Sirf owner ye kaam kar sakte hain — pehle owner passcode dalein", "amber");
@@ -2283,15 +2293,17 @@ export default function App() {
                   <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>Search tempered glass / cover rack</div>
                 </button>
 
-                <button
-                  className="card"
-                  onClick={() => requireOwner(() => setIsKycModalOpen(true))}
-                  style={{ padding: "14px", cursor: "pointer", textAlign: "left" }}
-                >
-                  <div style={{ fontSize: "20px", marginBottom: "6px" }}>📱</div>
-                  <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--ink)" }}>2nd-Hand Buyback KYC</div>
-                  <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>Purchase old phone with legal proof</div>
-                </button>
+                {!isStaffIdentity && (
+                  <button
+                    className="card"
+                    onClick={() => requireOwner(() => setIsKycModalOpen(true))}
+                    style={{ padding: "14px", cursor: "pointer", textAlign: "left" }}
+                  >
+                    <div style={{ fontSize: "20px", marginBottom: "6px" }}>📱</div>
+                    <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--ink)" }}>2nd-Hand Buyback KYC</div>
+                    <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>Purchase old phone with legal proof</div>
+                  </button>
+                )}
 
                 <button
                   className="card"
@@ -4114,6 +4126,13 @@ export default function App() {
     );
   }
 
+  // Single source of truth for "is the currently logged-in identity staff"
+  // — distinct from ownerMode (a per-device unlock toggle that can be
+  // false for an owner too). Staff must never be offered the owner-mode
+  // option at all, not just be blocked after attempting it; every place
+  // that hides or refuses an owner-only control checks this same value.
+  const isStaffIdentity = cloudProfile?.role === "staff";
+
   return (
     <div id="app">
       <MoneyAnimation />
@@ -4125,32 +4144,39 @@ export default function App() {
           // must re-prompt for the owner passcode even if reached via a direct route change,
           // not just when clicked from the (already-filtered) sidebar list.
           const isOwnerOnlyPage = SECONDARY_NAV_ITEMS.some((item) => item.key === page && item.ownerOnly);
-          if (isOwnerOnlyPage && !ownerMode) {
-            setIsOwnerLoginOpen(true);
-            return;
+          if (isOwnerOnlyPage) {
+            // Staff must never see the passcode prompt at all -- refuse
+            // silently instead. (Reaching here as staff shouldn't normally
+            // happen since the sidebar list itself is already filtered, but
+            // this stays safe even if something else calls onNavigate directly.)
+            if (isStaffIdentity) { showToast("Ye sirf owner kar sakte hain", "amber"); return; }
+            if (!ownerMode) { setIsOwnerLoginOpen(true); return; }
           }
           setCurrentPage(page);
           setIsMobileNavOpen(false);
         }}
         ownerMode={ownerMode}
         onToggleOwnerMode={() => {
+          if (isStaffIdentity) return; // button is hidden for staff anyway; stay safe if ever called
           if (!ownerMode) setIsOwnerLoginOpen(true);
           else setOwnerMode(false);
         }}
         onOpenQuickScan={() => setIsCameraScannerOpen(true)}
         isMobileOpen={isMobileNavOpen}
         onCloseMobile={() => setIsMobileNavOpen(false)}
+        isStaffIdentity={isStaffIdentity}
       />
       <BottomTabBar
         currentPage={currentPage}
+        isStaffIdentity={isStaffIdentity}
         onNavigate={(page) => {
           // Same owner-passcode gate as <Sidebar>'s onNavigate above (kept
           // duplicated rather than refactored into a shared function, to
           // avoid touching that existing, already-working handler).
           const isOwnerOnlyPage = SECONDARY_NAV_ITEMS.some((item) => item.key === page && item.ownerOnly);
-          if (isOwnerOnlyPage && !ownerMode) {
-            setIsOwnerLoginOpen(true);
-            return;
+          if (isOwnerOnlyPage) {
+            if (isStaffIdentity) { showToast("Ye sirf owner kar sakte hain", "amber"); return; }
+            if (!ownerMode) { setIsOwnerLoginOpen(true); return; }
           }
           setCurrentPage(page);
           setIsMobileNavOpen(false);

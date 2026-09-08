@@ -757,6 +757,319 @@ html[data-font-style="mono"] {
     font-size: 15px;
     max-width: 100%;
   }
+
+  /* ------------------------------------------------------------------
+     2026-09-06 — Phase 4 screen-by-screen pass #1: Sell/POS, the single
+     busiest screen in the whole app. The app-wide button/input pass
+     above (2026-09-05) didn't reach .cart-line/.qtybtn because those are
+     their own distinct classes, not .btn/.input — this closes that gap
+     specifically, plus fixes a genuine layout problem the generic pass
+     couldn't: on a ~360-400px phone, .cart-line's product name + a
+     100px price box + two qty buttons + a delete button in one
+     non-wrapping flex row left almost no room for the name at all.
+     ------------------------------------------------------------------ */
+
+  /* Google/Apple's own ~44px minimum touch-target guidance (already
+     cited in the .btn fix above) applied to the qty +/- steppers too —
+     28px was genuinely too small to tap reliably with a thumb. */
+  .qtybtn {
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
+  }
+  .qtyval {
+    min-width: 28px;
+    font-size: 15px;
+  }
+
+  /* Let the product name take its own full-width first line, with
+     price/qty/delete flowing onto a second line below it — instead of
+     squeezing all of it into one row and truncating the name to a few
+     characters. */
+  .cart-line {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .cart-line .nm {
+    flex-basis: 100%;
+  }
+
+  /* The price-per-unit box in the cart was a fixed 100px inline width —
+     on phone, now that it's sharing a wrapped second line instead of a
+     full row, let it shrink a bit so it doesn't crowd the qty
+     stepper/delete button next to it. */
+  .cart-price-box {
+    width: 88px !important;
+  }
+}
+
+/* ------------------------------------------------------------------
+   2026-09-08 — Phase 4 screen-by-screen pass #2: Product Catalog. The
+   table has up to 13 columns (Photo/Name/Category/Brand/SKU/Barcode/
+   Cost/Confidential/Selling Price/MRP/Discount/Stock/Warranty/Actions) —
+   even with .table-wrap's horizontal scroll this was genuinely unusable
+   on a ~360-400px phone, one of the most-reported "kuch dikhta hi nahi"
+   complaints. Both the table and this card list are rendered in the DOM
+   always; only one is ever visible, toggled purely by viewport width —
+   same technique as .mobile-cart-bar above, so there's no JS
+   viewport-width state to keep in sync. ------------------------------ */
+.product-mobile-list {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .product-desktop-table {
+    display: none;
+  }
+  .product-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .product-mobile-card {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--line-light);
+    border-radius: 12px;
+    background: var(--card);
+  }
+  .product-mobile-photo {
+    flex: 0 0 auto;
+    width: 64px;
+    height: 64px;
+  }
+  .product-mobile-photo img, .product-mobile-photo > * {
+    width: 64px;
+    height: 64px;
+    border-radius: 10px;
+    object-fit: cover;
+  }
+  .product-mobile-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .product-mobile-name {
+    font-weight: 700;
+    font-size: 14.5px;
+    line-height: 1.3;
+  }
+  .product-mobile-sub {
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .product-mobile-price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+  .product-mobile-price {
+    font-size: 17px;
+    font-weight: 800;
+    color: var(--accent);
+  }
+  .product-mobile-mrp {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    text-decoration: line-through;
+  }
+  .product-mobile-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 4px;
+  }
+  .product-mobile-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .product-mobile-actions .btn {
+    min-height: 38px;
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* ------------------------------------------------------------------
+   2026-09-08 — Phase 4 screen-by-screen pass #3: Dashboard's Low Stock
+   Alerts and Recent Invoices lists. Only 4 columns each (much less
+   cramped than the Product Catalog's 13), but still converted to tappable
+   rows on phone for touch-friendliness and consistency with the rest of
+   this pass — same table-stays-in-DOM-but-hidden toggle technique.
+   ------------------------------------------------------------------ */
+.dash-mobile-list {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .dash-desktop-table {
+    display: none;
+  }
+  .dash-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .dash-mobile-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--line-light);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  button.dash-mobile-row {
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+  .dash-mobile-row-tap:active {
+    background: var(--paper);
+  }
+  .dash-mobile-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .dash-mobile-row-main b {
+    font-size: 14px;
+  }
+  .dash-mobile-row-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+}
+
+/* ------------------------------------------------------------------
+   2026-09-08 — Phase 4 screen-by-screen pass #4: Sales History. 9 columns,
+   same unusable-on-phone problem as Product Catalog. The mobile rows reuse
+   .dash-mobile-row's already-verified tappable-row styling (just a
+   different show/hide toggle class) rather than duplicating the same CSS
+   under a new name. ------------------------------------------------------ */
+.sales-mobile-list {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .sales-desktop-table {
+    display: none;
+  }
+  .sales-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* ------------------------------------------------------------------
+   2026-09-08 — Phase 4 screen-by-screen pass #5: Purchases (main inward
+   history list). Same 9-column-unusable-on-phone issue; cards here need
+   two stacked rows of info rather than the simpler single-row Sales
+   History card, so they use .dash-mobile-row only for its border/padding/
+   background, with their own inline flex layout instead of the row's
+   default space-between (see the flexDirection:column override in JSX).
+   ------------------------------------------------------------------ */
+.purchases-mobile-list {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .purchases-desktop-table {
+    display: none;
+  }
+  .purchases-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* ------------------------------------------------------------------
+   2026-09-08 — Phase 4 screen-by-screen pass #6: Returns / Exchanges /
+   Warranty Claims history (3 separate tables on one tab, 7-8 columns each).
+   Reuses .dash-mobile-row for the card border/background, same as
+   Purchases. ------------------------------------------------------------ */
+.returns-mobile-list {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .returns-desktop-table {
+    display: none;
+  }
+  .returns-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+}
+
+/* Phase 4 — Sell/POS sticky "jump to cart" bar. Hidden entirely on
+   desktop/Windows (same ~900px breakpoint as the bottom tab bar it sits
+   above); only rendered in the DOM at all when the cart has items (see
+   App.tsx), so no extra empty-state handling needed here. */
+.mobile-cart-bar {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .mobile-cart-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    z-index: 85; /* above page content, below the off-canvas sidebar/backdrop */
+    padding: 12px 16px;
+    border: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #ffffff;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+    touch-action: manipulation;
+  }
+
+  .mobile-cart-bar-count {
+    font-size: 13px;
+  }
+
+  .mobile-cart-bar-total {
+    font-size: 15px;
+    margin-left: auto;
+  }
+
+  .mobile-cart-bar-cta {
+    font-size: 12px;
+    opacity: 0.9;
+    white-space: nowrap;
+  }
+
+  /* The floating cart bar above sits at the same height range as this
+     button once the cart section is scrolled all the way down — extra
+     bottom margin so "Complete Checkout" never ends up hidden under it. */
+  .pos-checkout-btn {
+    margin-bottom: 68px !important;
+  }
 }
 
 /* Any element carrying data-android-safe-bottom (bottom-fixed bars, e.g.
@@ -815,8 +1128,34 @@ html[data-font-style="mono"] {
 }
 
 @media (max-width: 768px) {
-  .grid.cols-4, .grid.cols-3, .grid.cols-2 {
+  /* 2026-09-08 — Phase 4 screen-by-screen pass #3: Dashboard.
+     .grid.cols-4 is used in exactly two places, both on the Dashboard: the
+     4 core metric cards, and the "⚡ 1-Tap Counter Actions" shortcut grid
+     (8-9 tiles). Collapsing that to a single column meant scrolling past
+     up to 9 full-width rows just to find one shortcut button — the entire
+     point of a "quick actions" panel is fast access, not a scroll. Keeping
+     it at 2 columns (already set by the 1100px rule above) all the way
+     down to phone width fixes that; cols-3/cols-2 are left untouched here
+     since their usages elsewhere were checked and are correct at 1 column
+     (e.g. the Sell/POS product-list-vs-cart split intentionally stacks). */
+  .grid.cols-3, .grid.cols-2 {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  /* 2026-09-08 — Phase 4 screen-by-screen pass #7: Repairs & Service Jobs.
+     Already card-based (.job-card in a 3-col grid, collapsing to a single
+     full-width column on phone via the 768px rule above — no table to
+     convert here, unlike every other screen in this pass). The one real
+     touch-target gap: .job-status-select was ~4px/8px padding, well under
+     the ~44px guidance already applied to .qtybtn etc. — with the card now
+     full-width on phone there's plenty of room to make it a proper target
+     instead of a fiddly tiny dropdown. */
+  .job-status-select {
+    min-height: 40px;
+    font-size: 13px;
+    flex: 1;
   }
 }
 

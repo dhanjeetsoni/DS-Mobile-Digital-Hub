@@ -7,6 +7,7 @@ import { saleCost, xeroxCost, xeroxProfit, jobCost, jobCharge, jobProfit } from 
 import { MiniShareBars } from "./MiniCharts";
 import { supabase } from "../services/supabaseClient";
 import { sendWeeklyReportToTelegram } from "../services/telegram";
+import { buildWeeklyReport } from "../utils/weeklyReport";
 
 interface OwnerReportsViewProps {
   db: Database;
@@ -37,13 +38,21 @@ export const OwnerReportsView: React.FC<OwnerReportsViewProps> = ({ db, toast })
   const handleSendWeeklyReport = async () => {
     setIsSendingReport(true);
     try {
-      // Phase 5: report numbers now come from the relational
-      // sales/sale_items/purchases/products tables (get_my_weekly_report_payload
-      // RPC), not the app's in-memory JSON state blob — same source the
-      // automatic Monday cron job uses, so a manual "Send Now" here can
-      // never show different numbers than the automatic one did.
-      const { data: report, error } = await supabase.rpc("get_my_weekly_report_payload");
-      if (error) throw new Error(error.message || "Report data load nahi ho payi.");
+      // Phase 5: prefer the server-side relational payload (same numbers
+      // the automatic Monday cron sends, computed from sales/sale_items/
+      // products/purchases — not this device's local JSON-blob copy, which
+      // Phase 1 documents can drift, e.g. its cached `products` array).
+      // Falls back to the old client-built report only if there's no cloud
+      // session at all (a genuinely offline-only shop), so "Send Now" never
+      // just breaks for someone without Supabase configured.
+      let report: unknown;
+      try {
+        const { data, error } = await supabase.rpc("get_my_weekly_report_payload");
+        if (error) throw error;
+        report = data;
+      } catch (rpcErr) {
+        report = buildWeeklyReport(db);
+      }
       await sendWeeklyReportToTelegram(report);
       toast?.("Weekly report Telegram par bhej diya gaya", "green");
     } catch (err: any) {

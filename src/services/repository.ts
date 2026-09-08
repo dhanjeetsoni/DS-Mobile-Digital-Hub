@@ -83,6 +83,35 @@ export async function loadCloudState() {
  * the stale blob-only stock the whole time. The mirror carries no
  * confidential column, so it's safe for every role, staff included.
  */
+export interface AuditLogRow {
+  id: string;
+  userId: string | null;
+  action: string;
+  details: any;
+  createdAt: string;
+}
+
+// Phase 5: Audit Log viewer. audit_logs.user_id has no FK-based join
+// available (kept deliberately loose so a deleted-later account doesn't
+// break old log rows), so the caller resolves user_id -> a display name
+// itself (e.g. via listStaffAccounts()) rather than this doing a second,
+// wider profiles query it doesn't otherwise need.
+export async function fetchAuditLogs(storeId: string, limit = 200): Promise<AuditLogRow[]> {
+  const { data, error } = await supabase
+    .from("audit_logs")
+    .select("id,user_id,action,details,created_at")
+    .eq("store_id", storeId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    userId: row.user_id,
+    action: row.action,
+    details: row.details,
+    createdAt: row.created_at,
+  }));
+}
 export async function fetchLiveStock(storeId: string): Promise<Record<string, number>> {
   const { data, error } = await supabase
     .from("products_staff_view")
@@ -273,7 +302,46 @@ export async function upsertProductCatalog(storeId: string, product: any): Promi
   return data as string;
 }
 
-export async function saveCloudState(state: Database, expectedVersion: number) {  const profile = await getCurrentProfile();
+/**
+ * Phase 5 — BUG FIX: "Download JSON Backup" used to just JSON.stringify the
+ * local `db` blob. Since Phase 1 migrated stock/sales/catalog (and other
+ * modules migrated purchases/customers/suppliers/etc. along the way) to
+ * relational tables, that blob's corresponding arrays are now empty — the
+ * backup button had been silently producing a backup with NO products and
+ * NO sales in it. This pulls every relational table the store owns
+ * alongside the blob (which still holds settings/whatever hasn't been
+ * migrated) so a downloaded backup is actually complete.
+ */
+export async function fetchFullBackup(storeId: string, blobState: Database): Promise<Record<string, unknown>> {
+  const tables = [
+    "products", "sales", "sale_items", "invoices", "purchases", "purchase_items",
+    "expenses", "personal_drawings", "returns", "exchanges", "exchange_items",
+    "warranty_claims", "suppliers", "supplier_transactions", "customers",
+    "customer_payments", "stock_movements", "stock_batches",
+  ] as const;
+  const relational: Record<string, unknown> = {};
+  await Promise.all(
+    tables.map(async (table) => {
+      try {
+        const { data, error } = await supabase.from(table).select("*").eq("store_id", storeId);
+        relational[table] = error ? { error: error.message } : data || [];
+      } catch (e) {
+        relational[table] = { error: e instanceof Error ? e.message : String(e) };
+      }
+    })
+  );
+  return {
+    exportedAt: new Date().toISOString(),
+    // Kept for transparency about the hybrid architecture — anything NOT
+    // yet migrated relationally (settings, and any field still blob-only)
+    // lives here; everything transactional lives in `relational` below.
+    blobState,
+    relational,
+  };
+}
+
+export async function saveCloudState(state: Database, expectedVersion: number) {
+  const profile = await getCurrentProfile();
   if (profile?.role === "staff") {
     const { data, error } = await supabase.rpc("save_store_state_for_user", {
       p_state: state,

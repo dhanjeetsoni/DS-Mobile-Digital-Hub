@@ -48,6 +48,7 @@ import { PersonalDrawingsView } from "./components/PersonalDrawingsView";
 import { OwnerReportsView } from "./components/OwnerReportsView";
 import { WindowsAppModal } from "./components/WindowsAppModal";
 import { LowStockAlertsView } from "./components/LowStockAlertsView";
+import { AuditLogView } from "./components/AuditLogView";
 import { LoyaltyRewardsView } from "./components/LoyaltyRewardsView";
 import { DownloadAreaView } from "./components/DownloadAreaView";
 import { ProfitLossDashboardView } from "./components/ProfitLossDashboardView";
@@ -68,7 +69,7 @@ import { staffSignIn, isAccessWindowExpired, cacheStaffSession, readCachedStaffS
 import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured } from "./services/pinAuth";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
-import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, type LiveCatalogEntry } from "./services/repository";
+import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
@@ -275,15 +276,6 @@ export default function App() {
   const [cloudStatus, setCloudStatus] = useState("offline");
   const [showCloudAuth, setShowCloudAuth] = useState(false);
   const [telegramStatus, setTelegramStatus] = useState<any>(null);
-  // Phase 5: owner-facing ON/OFF for the automatic daily AI sales digest
-  // (server-side pg_cron -> daily-digest-worker -> Telegram). Backed by
-  // stores.ai_digest_enabled (default OFF) via get_ai_digest_enabled() /
-  // set_ai_digest_enabled() RPCs — those already existed in the DB with no
-  // UI ever wired to them, so the feature was invisible/unreachable for
-  // any real shop despite being fully built server-side.
-  const [aiDigestEnabled, setAiDigestEnabledState] = useState(false);
-  const [aiDigestLoading, setAiDigestLoading] = useState(false);
-  const [aiDigestBusy, setAiDigestBusy] = useState(false);
 
   // Modals
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
@@ -309,6 +301,13 @@ export default function App() {
   // Phase 2: self-service "My PIN" form state (used by owner/manager in
   // Settings, and by anyone via the account menu — see myPinForm usage).
   const [myPinForm, setMyPinForm] = useState({ current: "", next: "", confirm: "", busy: false, msg: "" });
+  // Phase 5 — Daily Sales Digest (Telegram) on/off. null = not loaded yet
+  // (fetched lazily the first time the Settings page is opened by an
+  // owner/manager, since it's an extra round trip nobody needs on every
+  // app load — see the loader effect right after the settings render).
+  const [aiDigestEnabled, setAiDigestEnabled] = useState<boolean | null>(null);
+  const [aiDigestBusy, setAiDigestBusy] = useState(false);
+  const aiDigestLoadedRef = useRef(false);
   const [isWindowsModalOpen, setIsWindowsModalOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -916,35 +915,6 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [cloudUser, ownerMode, telegramStatus?.connected]);
 
-  // Phase 5: load the current daily-digest ON/OFF state whenever the owner
-  // opens Settings — cheap, single RPC, only for owner/manager (get_ai_digest_enabled
-  // returns false for anyone else / no store, so this is harmless either way).
-  useEffect(() => {
-    if (currentPage !== "settings" || !cloudUser || !ownerMode) return;
-    let active = true;
-    setAiDigestLoading(true);
-    supabase.rpc("get_ai_digest_enabled").then(({ data, error }: { data: unknown; error: unknown }) => {
-      if (!active) return;
-      if (!error) setAiDigestEnabledState(Boolean(data));
-      setAiDigestLoading(false);
-    });
-    return () => { active = false; };
-  }, [currentPage, cloudUser, ownerMode]);
-
-  const handleToggleAiDigest = async (next: boolean) => {
-    setAiDigestBusy(true);
-    try {
-      const { error } = await supabase.rpc("set_ai_digest_enabled", { p_enabled: next });
-      if (error) throw new Error((error as Error).message || "Setting save nahi ho payi.");
-      setAiDigestEnabledState(next);
-      showToast(next ? "Daily Sales Digest ON kar diya — roz raat ~9 baje Telegram par aayega." : "Daily Sales Digest OFF kar diya.", "green");
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "Setting save nahi ho payi.", "red");
-    } finally {
-      setAiDigestBusy(false);
-    }
-  };
-
 
   useEffect(() => {
     if (cloudProfile?.role === "staff") setOwnerMode(false);
@@ -1137,20 +1107,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db.products.length]);
 
-  // Phase 5 (2026-09-07): the weekly owner report is now sent fully
-  // automatically, server-side, by a pg_cron job (`send_due_weekly_reports`,
-  // Monday 9:00 AM IST) that computes the numbers straight from the
-  // relational sales/sale_items/purchases/products tables — see
-  // supabase/migrations/*_phase5_weekly_report_security_hardening.sql and
-  // weekly_report_payload() in the DB. The client-side version that used
-  // to live here (buildWeeklyReport() reading the app's in-memory JSON
-  // state blob, firing once per app-open if 7+ days had passed) has been
-  // removed: it was never truly automatic (an owner who didn't open the
-  // app for a week simply never got a report), it read numbers that could
-  // drift from the Phase 1 relational source of truth, and running
-  // alongside the new server-side cron risked sending the SAME week's
-  // report twice. The manual "Send Now" button on Owner Reports still
-  // exists, now backed by the same relational RPC (get_my_weekly_report_payload).
+  // Phase 5: automatic weekly report → Telegram now runs entirely
+  // server-side (pg_cron "weekly-report-dispatch", Monday 03:30 UTC ≈ 9 AM
+  // IST → send_due_weekly_reports() → weekly_report_payload(), idempotent
+  // via the weekly_report_runs table — verified firing successfully live).
+  // The client-side version that used to live here (built from this
+  // device's local JSON-blob `db`, gated by isWeeklyReportDue/a
+  // once-per-app-load ref) was removed: it read Phase-1-documented-stale
+  // blob data and could send a second, differently-numbered report for the
+  // same week purely because some owner happened to open the app that day.
+  // Manual "Send Now" (Owner Reports) now also reads the same accurate
+  // server-side numbers — see OwnerReportsView.tsx.
 
   // Step 7.2 — Delete Policy: "3 mahine out-of-stock ho jaaye to photo
   // auto-cleanup" (storage bharne se bachega). Runs at most once per app
@@ -1186,6 +1153,23 @@ export default function App() {
       }
     })();
   }, [cloudUser, ownerMode, cloudProfile?.store_id, db]);
+
+  // Phase 5 — load the Daily Sales Digest on/off status the first time the
+  // owner/manager actually opens Settings (not on every app load — this is
+  // a value nobody needs until they look at this one screen).
+  useEffect(() => {
+    if (currentPage !== "settings" || !cloudUser || !ownerMode || aiDigestLoadedRef.current) return;
+    aiDigestLoadedRef.current = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc("get_ai_digest_enabled");
+        if (error) throw error;
+        setAiDigestEnabled(Boolean(data));
+      } catch {
+        setAiDigestEnabled(false); // fail-safe default; owner can still toggle it on manually
+      }
+    })();
+  }, [currentPage, cloudUser, ownerMode]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -2368,23 +2352,42 @@ export default function App() {
                 {lowStock.length === 0 ? (
                   <div className="empty">All inventory levels are healthy! 👍</div>
                 ) : (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr><th>Product</th><th>Category</th><th>Stock</th><th>Alert</th></tr>
-                      </thead>
-                      <tbody>
-                        {lowStock.map((p) => (
-                          <tr key={p.id}>
-                            <td><b>{p.name}</b></td>
-                            <td>{p.category}</td>
-                            <td style={{ color: "var(--red)", fontWeight: 800 }}>{stockOf(p)}</td>
-                            <td><span className="badge low">Min: {p.minStock}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    <div className="table-wrap dash-desktop-table">
+                      <table>
+                        <thead>
+                          <tr><th>Product</th><th>Category</th><th>Stock</th><th>Alert</th></tr>
+                        </thead>
+                        <tbody>
+                          {lowStock.map((p) => (
+                            <tr key={p.id}>
+                              <td><b>{p.name}</b></td>
+                              <td>{p.category}</td>
+                              <td style={{ color: "var(--red)", fontWeight: 800 }}>{stockOf(p)}</td>
+                              <td><span className="badge low">Min: {p.minStock}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {/* Phase 4 — Dashboard mobile pass: same list, as
+                        touch-friendly rows instead of a cramped 4-column
+                        table on a ~360-400px screen. */}
+                    <div className="dash-mobile-list">
+                      {lowStock.map((p) => (
+                        <div key={p.id} className="dash-mobile-row">
+                          <div className="dash-mobile-row-main">
+                            <b>{p.name}</b>
+                            <span className="hint">{p.category}</span>
+                          </div>
+                          <div className="dash-mobile-row-side">
+                            <span style={{ color: "var(--red)", fontWeight: 800 }}>{stockOf(p)}</span>
+                            <span className="badge low">Min: {p.minStock}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -2396,34 +2399,57 @@ export default function App() {
                 {visibleSales.length === 0 ? (
                   <div className="empty">No sales recorded yet.</div>
                 ) : (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr><th>Invoice</th><th>Customer</th><th>Total</th><th>Status</th></tr>
-                      </thead>
-                      <tbody>
-                        {visibleSales.slice(-6).reverse().map((s) => (
-                          <tr key={s.id}>
-                            <td>
-                              <button
-                                className="btn sm ghost"
-                                style={{ fontWeight: 800, padding: "2px 6px" }}
-                                onClick={() => {
-                                  setViewingSale(s);
-                                  setIsInvoiceViewerOpen(true);
-                                }}
-                              >
-                                {s.invoiceNo}
-                              </button>
-                            </td>
-                            <td>{s.customer?.name || "Walk-in"}</td>
-                            <td><b>{inr(s.total)}</b></td>
-                            <td><span className={`badge ${s.dueAmount > 0.005 ? "due" : "paid"}`}>{s.status}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    <div className="table-wrap dash-desktop-table">
+                      <table>
+                        <thead>
+                          <tr><th>Invoice</th><th>Customer</th><th>Total</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                          {visibleSales.slice(-6).reverse().map((s) => (
+                            <tr key={s.id}>
+                              <td>
+                                <button
+                                  className="btn sm ghost"
+                                  style={{ fontWeight: 800, padding: "2px 6px" }}
+                                  onClick={() => {
+                                    setViewingSale(s);
+                                    setIsInvoiceViewerOpen(true);
+                                  }}
+                                >
+                                  {s.invoiceNo}
+                                </button>
+                              </td>
+                              <td>{s.customer?.name || "Walk-in"}</td>
+                              <td><b>{inr(s.total)}</b></td>
+                              <td><span className={`badge ${s.dueAmount > 0.005 ? "due" : "paid"}`}>{s.status}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="dash-mobile-list">
+                      {visibleSales.slice(-6).reverse().map((s) => (
+                        <button
+                          key={s.id}
+                          className="dash-mobile-row dash-mobile-row-tap"
+                          onClick={() => {
+                            setViewingSale(s);
+                            setIsInvoiceViewerOpen(true);
+                          }}
+                        >
+                          <div className="dash-mobile-row-main">
+                            <b>{s.invoiceNo}</b>
+                            <span className="hint">{s.customer?.name || "Walk-in"}</span>
+                          </div>
+                          <div className="dash-mobile-row-side">
+                            <b>{inr(s.total)}</b>
+                            <span className={`badge ${s.dueAmount > 0.005 ? "due" : "paid"}`}>{s.status}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             </div>
@@ -2477,6 +2503,7 @@ export default function App() {
         });
 
         return (
+          <>
           <div className="grid cols-2" style={{ alignItems: "flex-start", gap: "16px" }}>
             {/* Catalog Selection */}
             <div className="section">
@@ -2554,7 +2581,7 @@ export default function App() {
             </div>
 
             {/* Current Cart */}
-            <div className="section">
+            <div className="section" id="pos-cart-section">
               <div className="section-head">
                 <h2>Current Bill Cart ({cart.reduce((a, i) => a + i.qty, 0)} Items)</h2>
                 <div style={{ display: "flex", gap: "8px" }}>
@@ -2596,7 +2623,7 @@ export default function App() {
                             )}
                           </div>
                           {item.isGift ? (
-                            <div style={{ width: "100px" }}>
+                            <div className="cart-price-box" style={{ width: "100px" }}>
                               <div
                                 style={{
                                   padding: "6px 8px",
@@ -2614,7 +2641,7 @@ export default function App() {
                               <div className="hint" style={{ fontSize: "10px", marginTop: "2px" }}>gift — ₹0</div>
                             </div>
                           ) : (
-                            <div style={{ width: "100px" }}>
+                            <div className="cart-price-box" style={{ width: "100px" }}>
                               <input
                                 type="number"
                                 min="0"
@@ -2733,7 +2760,7 @@ export default function App() {
                     )}
 
                     <button
-                      className="btn primary"
+                      className="btn primary pos-checkout-btn"
                       style={{ width: "100%", marginTop: "14px", padding: "12px", fontSize: "14.5px" }}
                       onClick={handleStartCheckout}
                     >
@@ -2744,6 +2771,32 @@ export default function App() {
               )}
             </div>
           </div>
+
+          {/* Phase 4 screen-by-screen pass — Sell/POS is the busiest
+              screen, and on phone the product list + cart stack
+              vertically (existing .grid.cols-2 -> 1fr breakpoint), so
+              cart total/checkout sits below however long the product
+              list is — easy to lose track of "what's in the bill" while
+              scrolling to find something to add. This bar (mobile-only,
+              see .mobile-cart-bar's own media query) stays pinned above
+              the bottom tab bar showing a live count + total, and jumps
+              straight to the cart on tap instead of making staff hunt
+              for it. Doesn't render at all when the cart is empty —
+              nothing to jump to yet. */}
+          {cart.length > 0 && (
+            <button
+              type="button"
+              className="mobile-cart-bar"
+              onClick={() => document.getElementById("pos-cart-section")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              <span className="mobile-cart-bar-count">
+                🛒 {cart.reduce((a, i) => a + i.qty, 0)} item{cart.reduce((a, i) => a + i.qty, 0) === 1 ? "" : "s"}
+              </span>
+              <span className="mobile-cart-bar-total">{inr(total)}</span>
+              <span className="mobile-cart-bar-cta">View Cart ↓</span>
+            </button>
+          )}
+        </>
         );
       }
 
@@ -2867,7 +2920,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="table-wrap">
+              <div className="table-wrap product-desktop-table">
                 <table>
                   <thead>
                     <tr>
@@ -2937,6 +2990,50 @@ export default function App() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Phase 4 — Product Catalog mobile pass. The table above has
+                  up to 13 columns; even with horizontal scroll that's
+                  genuinely unusable on a ~360-400px phone (this was one of
+                  the most-reported "kuch dikhta hi nahi" complaints).
+                  Same photo/price/stock data, rendered as touch-friendly
+                  stacked cards instead — shown only under 900px via CSS
+                  (.product-mobile-list), same toggle technique as
+                  .mobile-cart-bar elsewhere in this file. */}
+              <div className="product-mobile-list">
+                {catalogProducts.map((p) => {
+                  const pct = p.category !== "Cyber Cafe" ? computeDiscountPercent(p.mrp, p.sellingPrice) : null;
+                  const low = stockOf(p) <= p.minStock;
+                  return (
+                    <div key={p.id} className="product-mobile-card">
+                      <div className="product-mobile-photo"><ProductThumb photo={p.photo} name={p.name} /></div>
+                      <div className="product-mobile-info">
+                        <div className="product-mobile-name">{p.name}</div>
+                        <div className="product-mobile-sub">{[p.brand, p.category].filter(Boolean).join(" · ")}</div>
+                        <div className="product-mobile-price-row">
+                          <span className="product-mobile-price">{inr(p.sellingPrice)}</span>
+                          {p.mrp ? <span className="product-mobile-mrp">{inr(p.mrp)}</span> : null}
+                          {pct !== null && <span className="badge ok">{pct}% off</span>}
+                        </div>
+                        <div className="product-mobile-meta">
+                          <span className={`badge ${low ? "danger" : "ok"}`}>Stock: {stockOf(p)}</span>
+                          <span className="hint">{p.warrantyEnabled ? `${p.warrantyMonths}m warranty` : "No warranty"}</span>
+                          <span className="hint">SKU: {p.sku}</span>
+                        </div>
+                        {ownerMode && (
+                          <div className="product-mobile-actions">
+                            <button className="btn sm" onClick={() => { setEditingProduct(p); setIsEditProductOpen(true); }}>
+                              <Pencil size={12} /> Edit Price
+                            </button>
+                            <button className="btn sm danger" onClick={() => void handleDeleteProduct(p)} title="Product permanently delete karo (photo bhi cloud se hat jayegi)">
+                              <Trash2 size={12} /> Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -3404,6 +3501,9 @@ export default function App() {
       case "lowstock":
         return <LowStockAlertsView db={catalogDb} showToast={showToast} />;
 
+      case "auditLog":
+        return <AuditLogView storeId={cloudProfile?.store_id} cloudProfile={cloudProfile} showToast={showToast} />;
+
       case "downloadArea":
         return <DownloadAreaView db={catalogDb} isStaff={cloudProfile?.role === "staff"} showToast={showToast} />;
 
@@ -3430,24 +3530,55 @@ export default function App() {
             <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginTop: "16px" }}>
               <button
                 className="btn primary"
-                onClick={() => exportStandaloneHtml(db)}
+                onClick={() => exportStandaloneHtml({ ...db, products: catalogProducts.map((p) => ({ ...p, stock: stockOf(p) })) })}
               >
                 <Download size={16} /> ⬇ Export Standalone Production HTML (.html)
               </button>
 
               <button
                 className="btn"
-                onClick={() => {
-                  const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
-                  const a = document.createElement("a");
-                  a.href = URL.createObjectURL(blob);
-                  a.download = `dsmdh-backup-${todayStr()}.json`;
-                  a.click();
+                onClick={async () => {
+                  // BUG FIX (Phase 5): this used to just JSON.stringify(db)
+                  // — the local blob — whose products/sales arrays are now
+                  // always empty since Phase 1 moved that data relationally.
+                  // A backup taken since then would have silently had no
+                  // inventory or sales in it at all. Pull every relational
+                  // table too, when cloud-connected; falls back to the old
+                  // blob-only export if offline, so this never blocks a
+                  // backup entirely.
+                  try {
+                    const payload =
+                      isCloudConfigured && cloudProfile?.store_id
+                        ? await fetchFullBackup(cloudProfile.store_id, db)
+                        : db;
+                    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `dsmdh-backup-${todayStr()}.json`;
+                    a.click();
+                    if (!(isCloudConfigured && cloudProfile?.store_id)) {
+                      showToast("Offline hone ki wajah se sirf local settings backup hui — products/sales shamil nahi.", "amber");
+                    } else {
+                      showToast("Backup downloaded — products/sales/purchases/etc. sab cloud tables se shamil hain.", "green");
+                    }
+                  } catch (e) {
+                    showToast(e instanceof Error ? e.message : "Backup fail ho gaya", "red");
+                  }
                 }}
               >
                 <Download size={14} /> Download JSON Backup
               </button>
             </div>
+            <p className="hint" style={{ marginTop: "8px" }}>
+              Backup mein settings/expenses/notes (blob) aur products/sales/purchases/etc. (cloud tables) dono shamil hain.
+              Neeche "Restore" sirf blob wale hisse ko wapas laata hai — products/sales cloud mein hi surakshit hain, unhe restore karne ki zaroorat nahi padti.
+            </p>
+
+            <p className="hint" style={{ marginTop: "10px" }}>
+              Ye backup export hamesha sabse latest stock aur catalog (photo, MRP, warranty, waghera)
+              use karta hai — jaisa is device par abhi dikh raha hai, waisa hi save hoga, chahe wo
+              stock kisi doosre device se update hua ho.
+            </p>
 
             <div style={{ marginTop: "24px" }}>
               <label className="hint">Restore from JSON backup:</label>
@@ -3656,6 +3787,39 @@ export default function App() {
                     wo sale permanently lock ho jaati hai. Default 10 din.
                   </span>
                 </div>
+                {cloudUser && ownerMode && (
+                  <div className="field full">
+                    <label>Daily Sales Digest (Telegram)</label>
+                    <div className="card" style={{ padding: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                      <span className="hint" style={{ margin: 0 }}>
+                        Har din raat 9 baje (agar us din koi sale/expense hui ho) AI ek chhota Hinglish summary
+                        banakar aapke connected Telegram par bhej deta hai — kitni sale hui, kaunsa item sabse zyada
+                        bika, aur kitne item low-stock mein hain.
+                      </span>
+                      <button
+                        type="button"
+                        className={`btn sm ${aiDigestEnabled ? "primary" : ""}`}
+                        disabled={aiDigestBusy || aiDigestEnabled === null}
+                        onClick={async () => {
+                          const next = !aiDigestEnabled;
+                          setAiDigestBusy(true);
+                          try {
+                            const { error } = await supabase.rpc("set_ai_digest_enabled", { p_enabled: next });
+                            if (error) throw error;
+                            setAiDigestEnabled(next);
+                            showToast(next ? "Daily digest ON kar diya gaya." : "Daily digest OFF kar diya gaya.", "green");
+                          } catch (e: any) {
+                            showToast(e?.message || "Digest setting save nahi ho paayi.", "red");
+                          } finally {
+                            setAiDigestBusy(false);
+                          }
+                        }}
+                      >
+                        {aiDigestEnabled === null ? "…" : aiDigestEnabled ? "ON" : "OFF"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="modal-actions" style={{ marginTop: "16px", justifyContent: "flex-start" }}>
                 <button type="submit" className="btn primary">Save Settings</button>

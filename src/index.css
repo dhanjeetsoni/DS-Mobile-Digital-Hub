@@ -897,6 +897,64 @@ html[data-font-style="mono"] {
   }
 }
 
+/* ------------------------------------------------------------------
+   2026-09-08 — Phase 4 screen-by-screen pass #3: Dashboard's Low Stock
+   Alerts and Recent Invoices lists. Only 4 columns each (much less
+   cramped than the Product Catalog's 13), but still converted to tappable
+   rows on phone for touch-friendliness and consistency with the rest of
+   this pass — same table-stays-in-DOM-but-hidden toggle technique.
+   ------------------------------------------------------------------ */
+.dash-mobile-list {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .dash-desktop-table {
+    display: none;
+  }
+  .dash-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .dash-mobile-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--line-light);
+    border-radius: 10px;
+    background: var(--card);
+  }
+  button.dash-mobile-row {
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+  .dash-mobile-row-tap:active {
+    background: var(--paper);
+  }
+  .dash-mobile-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .dash-mobile-row-main b {
+    font-size: 14px;
+  }
+  .dash-mobile-row-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+}
+
 /* Phase 4 — Sell/POS sticky "jump to cart" bar. Hidden entirely on
    desktop/Windows (same ~900px breakpoint as the bottom tab bar it sits
    above); only rendered in the DOM at all when the cart has items (see
@@ -1005,7 +1063,17 @@ html[data-font-style="mono"] {
 }
 
 @media (max-width: 768px) {
-  .grid.cols-4, .grid.cols-3, .grid.cols-2 {
+  /* 2026-09-08 — Phase 4 screen-by-screen pass #3: Dashboard.
+     .grid.cols-4 is used in exactly two places, both on the Dashboard: the
+     4 core metric cards, and the "⚡ 1-Tap Counter Actions" shortcut grid
+     (8-9 tiles). Collapsing that to a single column meant scrolling past
+     up to 9 full-width rows just to find one shortcut button — the entire
+     point of a "quick actions" panel is fast access, not a scroll. Keeping
+     it at 2 columns (already set by the 1100px rule above) all the way
+     down to phone width fixes that; cols-3/cols-2 are left untouched here
+     since their usages elsewhere were checked and are correct at 1 column
+     (e.g. the Sell/POS product-list-vs-cart split intentionally stacks). */
+  .grid.cols-3, .grid.cols-2 {
     grid-template-columns: 1fr;
   }
 }

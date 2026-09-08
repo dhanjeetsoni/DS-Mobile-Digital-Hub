@@ -2351,23 +2351,42 @@ export default function App() {
                 {lowStock.length === 0 ? (
                   <div className="empty">All inventory levels are healthy! 👍</div>
                 ) : (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr><th>Product</th><th>Category</th><th>Stock</th><th>Alert</th></tr>
-                      </thead>
-                      <tbody>
-                        {lowStock.map((p) => (
-                          <tr key={p.id}>
-                            <td><b>{p.name}</b></td>
-                            <td>{p.category}</td>
-                            <td style={{ color: "var(--red)", fontWeight: 800 }}>{stockOf(p)}</td>
-                            <td><span className="badge low">Min: {p.minStock}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    <div className="table-wrap dash-desktop-table">
+                      <table>
+                        <thead>
+                          <tr><th>Product</th><th>Category</th><th>Stock</th><th>Alert</th></tr>
+                        </thead>
+                        <tbody>
+                          {lowStock.map((p) => (
+                            <tr key={p.id}>
+                              <td><b>{p.name}</b></td>
+                              <td>{p.category}</td>
+                              <td style={{ color: "var(--red)", fontWeight: 800 }}>{stockOf(p)}</td>
+                              <td><span className="badge low">Min: {p.minStock}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {/* Phase 4 — Dashboard mobile pass: same list, as
+                        touch-friendly rows instead of a cramped 4-column
+                        table on a ~360-400px screen. */}
+                    <div className="dash-mobile-list">
+                      {lowStock.map((p) => (
+                        <div key={p.id} className="dash-mobile-row">
+                          <div className="dash-mobile-row-main">
+                            <b>{p.name}</b>
+                            <span className="hint">{p.category}</span>
+                          </div>
+                          <div className="dash-mobile-row-side">
+                            <span style={{ color: "var(--red)", fontWeight: 800 }}>{stockOf(p)}</span>
+                            <span className="badge low">Min: {p.minStock}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -2379,34 +2398,57 @@ export default function App() {
                 {visibleSales.length === 0 ? (
                   <div className="empty">No sales recorded yet.</div>
                 ) : (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr><th>Invoice</th><th>Customer</th><th>Total</th><th>Status</th></tr>
-                      </thead>
-                      <tbody>
-                        {visibleSales.slice(-6).reverse().map((s) => (
-                          <tr key={s.id}>
-                            <td>
-                              <button
-                                className="btn sm ghost"
-                                style={{ fontWeight: 800, padding: "2px 6px" }}
-                                onClick={() => {
-                                  setViewingSale(s);
-                                  setIsInvoiceViewerOpen(true);
-                                }}
-                              >
-                                {s.invoiceNo}
-                              </button>
-                            </td>
-                            <td>{s.customer?.name || "Walk-in"}</td>
-                            <td><b>{inr(s.total)}</b></td>
-                            <td><span className={`badge ${s.dueAmount > 0.005 ? "due" : "paid"}`}>{s.status}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    <div className="table-wrap dash-desktop-table">
+                      <table>
+                        <thead>
+                          <tr><th>Invoice</th><th>Customer</th><th>Total</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                          {visibleSales.slice(-6).reverse().map((s) => (
+                            <tr key={s.id}>
+                              <td>
+                                <button
+                                  className="btn sm ghost"
+                                  style={{ fontWeight: 800, padding: "2px 6px" }}
+                                  onClick={() => {
+                                    setViewingSale(s);
+                                    setIsInvoiceViewerOpen(true);
+                                  }}
+                                >
+                                  {s.invoiceNo}
+                                </button>
+                              </td>
+                              <td>{s.customer?.name || "Walk-in"}</td>
+                              <td><b>{inr(s.total)}</b></td>
+                              <td><span className={`badge ${s.dueAmount > 0.005 ? "due" : "paid"}`}>{s.status}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="dash-mobile-list">
+                      {visibleSales.slice(-6).reverse().map((s) => (
+                        <button
+                          key={s.id}
+                          className="dash-mobile-row dash-mobile-row-tap"
+                          onClick={() => {
+                            setViewingSale(s);
+                            setIsInvoiceViewerOpen(true);
+                          }}
+                        >
+                          <div className="dash-mobile-row-main">
+                            <b>{s.invoiceNo}</b>
+                            <span className="hint">{s.customer?.name || "Walk-in"}</span>
+                          </div>
+                          <div className="dash-mobile-row-side">
+                            <b>{inr(s.total)}</b>
+                            <span className={`badge ${s.dueAmount > 0.005 ? "due" : "paid"}`}>{s.status}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             </div>

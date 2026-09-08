@@ -218,8 +218,19 @@ export async function setStaffAccessConfig(profileId: string, input: {
   });
 }
 
+// NOTE (merged 2026-09-07): @tauri-apps/plugin-biometric is not an
+// installed dependency yet (checked: not in package.json, and it's a
+// native Tauri plugin — adding it for real needs a Cargo.toml/Rust-side
+// change under src-tauri, not just `npm install`, plus nothing in the UI
+// calls these two functions yet). @ts-expect-error only silences the
+// TypeScript module-resolution error so the rest of this file's
+// (functional, wired-nowhere-yet-but-working) exports aren't blocked by
+// it — it does NOT make biometric unlock actually work. biometricCheck()
+// degrades safely (its own try/catch), but authenticateBiometric() will
+// throw at runtime until the plugin is genuinely installed.
 export async function biometricCheck() {
   try {
+    // @ts-expect-error — see NOTE above; plugin not installed yet.
     const mod = await import("@tauri-apps/plugin-biometric");
     return await mod.checkStatus();
   } catch {
@@ -228,6 +239,7 @@ export async function biometricCheck() {
 }
 
 export async function authenticateBiometric(reason = "Unlock DS Mobile & Digital Hub") {
+  // @ts-expect-error — see NOTE above; plugin not installed yet.
   const mod = await import("@tauri-apps/plugin-biometric");
   await mod.authenticate(reason, { allowDeviceCredential: true });
 }

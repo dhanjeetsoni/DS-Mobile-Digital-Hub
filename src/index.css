@@ -2040,3 +2040,19 @@ tr:last-child td {
   .ibody thead th{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
   .savings-strip{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
 }
+
+/* ------------------------------------------------------------------
+   2026-09-08 — camera permission + UI fix batch. Several toolbars
+   (the "⚡ Counter:" quick-switch strip, the Product Catalog's category
+   filter chips) scroll horizontally on purpose — there are more items
+   than fit any screen width, even on Windows — but with nothing marking
+   them as scrollable, the last item just gets sliced off right at the
+   screen edge, which reads as broken/cut-off rather than "swipe for
+   more" (reported via screenshot: the printer shortcut and "Curved
+   Glass" tab both abruptly truncated). A soft fade on the trailing edge
+   is the standard fix for this exact pattern. ------------------------ */
+.hscroll-fade {
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, black calc(100% - 28px), transparent 100%);
+}
+

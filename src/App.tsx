@@ -2515,7 +2515,7 @@ export default function App() {
               </div>
 
               {/* 1-Tap Category Filter Chips */}
-              <div style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "8px", marginBottom: "8px" }}>
+              <div className="hscroll-fade" style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "8px", marginBottom: "8px" }}>
                 {CATEGORY_TABS.map((cat) => (
                   <button
                     key={cat.id}
@@ -4328,6 +4328,7 @@ export default function App() {
 
         {/* Quick Counter Strip for 1-Tap Counter Task Switching */}
         <div
+          className="hscroll-fade"
           style={{
             background: "var(--card)",
             borderBottom: "1px solid var(--line)",

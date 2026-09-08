@@ -2877,7 +2877,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="table-wrap">
+              <div className="table-wrap product-desktop-table">
                 <table>
                   <thead>
                     <tr>
@@ -2947,6 +2947,50 @@ export default function App() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Phase 4 — Product Catalog mobile pass. The table above has
+                  up to 13 columns; even with horizontal scroll that's
+                  genuinely unusable on a ~360-400px phone (this was one of
+                  the most-reported "kuch dikhta hi nahi" complaints).
+                  Same photo/price/stock data, rendered as touch-friendly
+                  stacked cards instead — shown only under 900px via CSS
+                  (.product-mobile-list), same toggle technique as
+                  .mobile-cart-bar elsewhere in this file. */}
+              <div className="product-mobile-list">
+                {catalogProducts.map((p) => {
+                  const pct = p.category !== "Cyber Cafe" ? computeDiscountPercent(p.mrp, p.sellingPrice) : null;
+                  const low = stockOf(p) <= p.minStock;
+                  return (
+                    <div key={p.id} className="product-mobile-card">
+                      <div className="product-mobile-photo"><ProductThumb photo={p.photo} name={p.name} /></div>
+                      <div className="product-mobile-info">
+                        <div className="product-mobile-name">{p.name}</div>
+                        <div className="product-mobile-sub">{[p.brand, p.category].filter(Boolean).join(" · ")}</div>
+                        <div className="product-mobile-price-row">
+                          <span className="product-mobile-price">{inr(p.sellingPrice)}</span>
+                          {p.mrp ? <span className="product-mobile-mrp">{inr(p.mrp)}</span> : null}
+                          {pct !== null && <span className="badge ok">{pct}% off</span>}
+                        </div>
+                        <div className="product-mobile-meta">
+                          <span className={`badge ${low ? "danger" : "ok"}`}>Stock: {stockOf(p)}</span>
+                          <span className="hint">{p.warrantyEnabled ? `${p.warrantyMonths}m warranty` : "No warranty"}</span>
+                          <span className="hint">SKU: {p.sku}</span>
+                        </div>
+                        {ownerMode && (
+                          <div className="product-mobile-actions">
+                            <button className="btn sm" onClick={() => { setEditingProduct(p); setIsEditProductOpen(true); }}>
+                              <Pencil size={12} /> Edit Price
+                            </button>
+                            <button className="btn sm danger" onClick={() => void handleDeleteProduct(p)} title="Product permanently delete karo (photo bhi cloud se hat jayegi)">
+                              <Trash2 size={12} /> Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

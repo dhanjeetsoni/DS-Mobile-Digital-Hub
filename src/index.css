@@ -803,6 +803,100 @@ html[data-font-style="mono"] {
   }
 }
 
+/* ------------------------------------------------------------------
+   2026-09-08 — Phase 4 screen-by-screen pass #2: Product Catalog. The
+   table has up to 13 columns (Photo/Name/Category/Brand/SKU/Barcode/
+   Cost/Confidential/Selling Price/MRP/Discount/Stock/Warranty/Actions) —
+   even with .table-wrap's horizontal scroll this was genuinely unusable
+   on a ~360-400px phone, one of the most-reported "kuch dikhta hi nahi"
+   complaints. Both the table and this card list are rendered in the DOM
+   always; only one is ever visible, toggled purely by viewport width —
+   same technique as .mobile-cart-bar above, so there's no JS
+   viewport-width state to keep in sync. ------------------------------ */
+.product-mobile-list {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .product-desktop-table {
+    display: none;
+  }
+  .product-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .product-mobile-card {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--line-light);
+    border-radius: 12px;
+    background: var(--card);
+  }
+  .product-mobile-photo {
+    flex: 0 0 auto;
+    width: 64px;
+    height: 64px;
+  }
+  .product-mobile-photo img, .product-mobile-photo > * {
+    width: 64px;
+    height: 64px;
+    border-radius: 10px;
+    object-fit: cover;
+  }
+  .product-mobile-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .product-mobile-name {
+    font-weight: 700;
+    font-size: 14.5px;
+    line-height: 1.3;
+  }
+  .product-mobile-sub {
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .product-mobile-price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+  .product-mobile-price {
+    font-size: 17px;
+    font-weight: 800;
+    color: var(--accent);
+  }
+  .product-mobile-mrp {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    text-decoration: line-through;
+  }
+  .product-mobile-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 4px;
+  }
+  .product-mobile-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .product-mobile-actions .btn {
+    min-height: 38px;
+    flex: 1;
+    justify-content: center;
+  }
+}
+
 /* Phase 4 — Sell/POS sticky "jump to cart" bar. Hidden entirely on
    desktop/Windows (same ~900px breakpoint as the bottom tab bar it sits
    above); only rendered in the DOM at all when the cart has items (see

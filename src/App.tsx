@@ -73,9 +73,8 @@ import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOf
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
 import { sqliteList } from "./services/localSqlite";
-import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert, sendWeeklyReportToTelegram } from "./services/telegram";
+import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert } from "./services/telegram";
 import { getRepairDiagnosis } from "./services/aiOps";
-import { buildWeeklyReport, isWeeklyReportDue } from "./utils/weeklyReport";
 import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./services/whatsapp";
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
 import { celebrate } from "./utils/celebrate";
@@ -301,6 +300,13 @@ export default function App() {
   // Phase 2: self-service "My PIN" form state (used by owner/manager in
   // Settings, and by anyone via the account menu — see myPinForm usage).
   const [myPinForm, setMyPinForm] = useState({ current: "", next: "", confirm: "", busy: false, msg: "" });
+  // Phase 5 — Daily Sales Digest (Telegram) on/off. null = not loaded yet
+  // (fetched lazily the first time the Settings page is opened by an
+  // owner/manager, since it's an extra round trip nobody needs on every
+  // app load — see the loader effect right after the settings render).
+  const [aiDigestEnabled, setAiDigestEnabled] = useState<boolean | null>(null);
+  const [aiDigestBusy, setAiDigestBusy] = useState(false);
+  const aiDigestLoadedRef = useRef(false);
   const [isWindowsModalOpen, setIsWindowsModalOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -1099,30 +1105,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db.products.length]);
 
-  // Automatic weekly report → Telegram. There is no always-on server here,
-  // so this runs the check whenever an owner/manager opens the app (at most
-  // once per app load) — if 7+ days have passed since the last send (or it
-  // has never been sent) and Telegram is connected, it sends silently. If
-  // Telegram isn't connected yet, it fails quietly — the owner can always
-  // send it manually from Owner Reports.
-  const weeklyReportCheckedRef = useRef(false);
-  useEffect(() => {
-    if (!cloudUser || !ownerMode || weeklyReportCheckedRef.current) return;
-    if (!isWeeklyReportDue(db)) return;
-    weeklyReportCheckedRef.current = true;
-    (async () => {
-      try {
-        const report = buildWeeklyReport(db);
-        await sendWeeklyReportToTelegram(report);
-        db.settings.lastWeeklyReportSentAt = new Date().toISOString();
-        saveState({ ...db });
-        showToast("Is hafte ki report Telegram par bhej di gayi", "green");
-      } catch {
-        // Telegram not connected yet, or offline right now — silently skip.
-        // Owner can always send it manually from Owner Reports.
-      }
-    })();
-  }, [cloudUser, ownerMode, db]);
+  // Phase 5: automatic weekly report → Telegram now runs entirely
+  // server-side (pg_cron "weekly-report-dispatch", Monday 03:30 UTC ≈ 9 AM
+  // IST → send_due_weekly_reports() → weekly_report_payload(), idempotent
+  // via the weekly_report_runs table — verified firing successfully live).
+  // The client-side version that used to live here (built from this
+  // device's local JSON-blob `db`, gated by isWeeklyReportDue/a
+  // once-per-app-load ref) was removed: it read Phase-1-documented-stale
+  // blob data and could send a second, differently-numbered report for the
+  // same week purely because some owner happened to open the app that day.
+  // Manual "Send Now" (Owner Reports) now also reads the same accurate
+  // server-side numbers — see OwnerReportsView.tsx.
 
   // Step 7.2 — Delete Policy: "3 mahine out-of-stock ho jaaye to photo
   // auto-cleanup" (storage bharne se bachega). Runs at most once per app
@@ -1158,6 +1151,23 @@ export default function App() {
       }
     })();
   }, [cloudUser, ownerMode, cloudProfile?.store_id, db]);
+
+  // Phase 5 — load the Daily Sales Digest on/off status the first time the
+  // owner/manager actually opens Settings (not on every app load — this is
+  // a value nobody needs until they look at this one screen).
+  useEffect(() => {
+    if (currentPage !== "settings" || !cloudUser || !ownerMode || aiDigestLoadedRef.current) return;
+    aiDigestLoadedRef.current = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc("get_ai_digest_enabled");
+        if (error) throw error;
+        setAiDigestEnabled(Boolean(data));
+      } catch {
+        setAiDigestEnabled(false); // fail-safe default; owner can still toggle it on manually
+      }
+    })();
+  }, [currentPage, cloudUser, ownerMode]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -3655,6 +3665,39 @@ export default function App() {
                     wo sale permanently lock ho jaati hai. Default 10 din.
                   </span>
                 </div>
+                {cloudUser && ownerMode && (
+                  <div className="field full">
+                    <label>Daily Sales Digest (Telegram)</label>
+                    <div className="card" style={{ padding: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                      <span className="hint" style={{ margin: 0 }}>
+                        Har din raat 9 baje (agar us din koi sale/expense hui ho) AI ek chhota Hinglish summary
+                        banakar aapke connected Telegram par bhej deta hai — kitni sale hui, kaunsa item sabse zyada
+                        bika, aur kitne item low-stock mein hain.
+                      </span>
+                      <button
+                        type="button"
+                        className={`btn sm ${aiDigestEnabled ? "primary" : ""}`}
+                        disabled={aiDigestBusy || aiDigestEnabled === null}
+                        onClick={async () => {
+                          const next = !aiDigestEnabled;
+                          setAiDigestBusy(true);
+                          try {
+                            const { error } = await supabase.rpc("set_ai_digest_enabled", { p_enabled: next });
+                            if (error) throw error;
+                            setAiDigestEnabled(next);
+                            showToast(next ? "Daily digest ON kar diya gaya." : "Daily digest OFF kar diya gaya.", "green");
+                          } catch (e: any) {
+                            showToast(e?.message || "Digest setting save nahi ho paayi.", "red");
+                          } finally {
+                            setAiDigestBusy(false);
+                          }
+                        }}
+                      >
+                        {aiDigestEnabled === null ? "…" : aiDigestEnabled ? "ON" : "OFF"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="modal-actions" style={{ marginTop: "16px", justifyContent: "flex-start" }}>
                 <button type="submit" className="btn primary">Save Settings</button>

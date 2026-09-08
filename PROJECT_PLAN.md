@@ -1,6 +1,6 @@
 # DS Mobile & Digital Hub — Master Fix & Rebuild Plan
 
-_Last updated: 2026-09-06_
+_Last updated: 2026-09-07_
 
 This document is the single source of truth for the ongoing stabilization and
 rebuild effort. Each phase is worked on **only after the owner explicitly
@@ -539,8 +539,28 @@ actual code, per this document's own ground rule — not assumed or guessed._
       - Verified in this environment: `tsc --noEmit`, full test suite (26
         tests), static audit, production build all clean.
 
-### ⬜ Phase 5: Operational features
-- [ ] Daily + weekly sales/profit summary → Telegram, automatic
+### 🟡 Phase 5: Operational features — item 1 done (daily/weekly Telegram reports), rest not started
+- [x] Daily + weekly sales/profit summary → Telegram, automatic — **done,
+      independently re-verified twice** (once live-testing what a prior
+      session had built, once again re-verifying that session's own fix):
+      weekly cron (`weekly-report-dispatch`, Monday 9 AM IST) and daily
+      cron (`ai-daily-digest-sweep`, 9 PM IST) both live/active, confirmed
+      firing for real (Monday's run delivered an actual PDF to Telegram);
+      `get_my_weekly_report_payload()` (used by the in-app "Send Now"
+      button) and the new Settings-page Daily Digest ON/OFF toggle both
+      live-tested end-to-end against the real owner + real staff account
+      (owner gets real numbers and can toggle it, staff correctly
+      rejected). Found and fixed a real migration-file/live drift:
+      `weekly_report_payload()`'s committed migration still read the old
+      JSON blob, while the live function (Phase 1's relational tables)
+      had moved on with no migration ever committed for it — closed in
+      `20260907070000_phase5_weekly_daily_reports_relational_and_digest_toggle.sql`,
+      applied live as a verified no-op. `tsc --noEmit` and `vite build`
+      both independently re-run clean, not just trusted from the prior
+      commit message. Expenses intentionally still come from the JSON
+      blob (no relational write path for them yet — see the
+      JSON-vs-relational status table above); that's correct as-is, not
+      a bug.
 - [ ] Instant low-stock alerts → Telegram + in-app
 - [ ] Audit log (who added/edited/deleted what, and when)
 - [ ] Manual backup file export (daily/weekly)
@@ -728,3 +748,31 @@ I think it's necessary:_
 - [ ] Clean up dead code / old migrations
 - [ ] Update this document — everything checked off, or explicitly listed as
       known/accepted limitation
+
+**Note added 2026-09-06 (separate session, before switching to Phase 5 per
+owner's instruction) — flagging a fork, not fixing it right now:** while
+independently working on this same PIN item in parallel, a
+`public.profile_pins` table + `get_own_pin_status`/`set_own_pin`/
+`verify_own_pin`/`reset_staff_pin` RPCs were built and tested (11/11 test
+cases passed against the live DB) — this predates seeing that the
+`profiles.pin_hash`/`pin_salt` + `set_my_pin`/`admin_reset_pin`/
+`admin_clear_pin` approach above already existed from a different session.
+The frontend uses only the `profiles.pin_hash` approach — the
+`profile_pins` table/RPCs are live on Supabase but genuinely unused
+dead code right now, not a second active system to reconcile. Left in
+place rather than dropped, since deleting live DB objects without the
+owner's go-ahead didn't seem like the right call to make solo; whoever
+picks this up next should either wire the frontend to the isolated-table
+version instead (its advantage: `profiles`' existing owner/manager
+full-row SELECT policy structurally cannot expose `pin_hash`/`pin_salt`
+to a client at all, vs. today's approach where those two columns living
+directly on `profiles` means a future query change to the very common
+"list my staff" call is one mistake away from handing every staff
+member's PIN hash+salt to the owner's client, crackable near-instantly
+given a 4-digit PIN's 10,000-value keyspace — not exploitable by
+*today's* actual queries, which were checked and don't select those two
+columns, but structurally fragile going forward) — or simply drop the
+unused table+RPCs (`profile_pins`, `get_own_pin_status`, `set_own_pin`,
+`verify_own_pin`, `reset_staff_pin`) if the owner decides the offline-first
+design is worth keeping the fragility. Not deciding this alone; flagging
+it for whoever picks Phase 2 back up.

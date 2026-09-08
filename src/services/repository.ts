@@ -273,7 +273,46 @@ export async function upsertProductCatalog(storeId: string, product: any): Promi
   return data as string;
 }
 
-export async function saveCloudState(state: Database, expectedVersion: number) {  const profile = await getCurrentProfile();
+/**
+ * Phase 5 — BUG FIX: "Download JSON Backup" used to just JSON.stringify the
+ * local `db` blob. Since Phase 1 migrated stock/sales/catalog (and other
+ * modules migrated purchases/customers/suppliers/etc. along the way) to
+ * relational tables, that blob's corresponding arrays are now empty — the
+ * backup button had been silently producing a backup with NO products and
+ * NO sales in it. This pulls every relational table the store owns
+ * alongside the blob (which still holds settings/whatever hasn't been
+ * migrated) so a downloaded backup is actually complete.
+ */
+export async function fetchFullBackup(storeId: string, blobState: Database): Promise<Record<string, unknown>> {
+  const tables = [
+    "products", "sales", "sale_items", "invoices", "purchases", "purchase_items",
+    "expenses", "personal_drawings", "returns", "exchanges", "exchange_items",
+    "warranty_claims", "suppliers", "supplier_transactions", "customers",
+    "customer_payments", "stock_movements", "stock_batches",
+  ] as const;
+  const relational: Record<string, unknown> = {};
+  await Promise.all(
+    tables.map(async (table) => {
+      try {
+        const { data, error } = await supabase.from(table).select("*").eq("store_id", storeId);
+        relational[table] = error ? { error: error.message } : data || [];
+      } catch (e) {
+        relational[table] = { error: e instanceof Error ? e.message : String(e) };
+      }
+    })
+  );
+  return {
+    exportedAt: new Date().toISOString(),
+    // Kept for transparency about the hybrid architecture — anything NOT
+    // yet migrated relationally (settings, and any field still blob-only)
+    // lives here; everything transactional lives in `relational` below.
+    blobState,
+    relational,
+  };
+}
+
+export async function saveCloudState(state: Database, expectedVersion: number) {
+  const profile = await getCurrentProfile();
   if (profile?.role === "staff") {
     const { data, error } = await supabase.rpc("save_store_state_for_user", {
       p_state: state,

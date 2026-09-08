@@ -68,7 +68,7 @@ import { staffSignIn, isAccessWindowExpired, cacheStaffSession, readCachedStaffS
 import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured } from "./services/pinAuth";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
-import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, type LiveCatalogEntry } from "./services/repository";
+import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
@@ -3427,17 +3427,40 @@ export default function App() {
 
               <button
                 className="btn"
-                onClick={() => {
-                  const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
-                  const a = document.createElement("a");
-                  a.href = URL.createObjectURL(blob);
-                  a.download = `dsmdh-backup-${todayStr()}.json`;
-                  a.click();
+                onClick={async () => {
+                  // BUG FIX (Phase 5): this used to just JSON.stringify(db)
+                  // — the local blob — whose products/sales arrays are now
+                  // always empty since Phase 1 moved that data relationally.
+                  // A backup taken since then would have silently had no
+                  // inventory or sales in it at all. Pull every relational
+                  // table too, when cloud-connected; falls back to the old
+                  // blob-only export if offline, so this never blocks a
+                  // backup entirely.
+                  try {
+                    const payload =
+                      isCloudConfigured && cloudProfile?.store_id
+                        ? await fetchFullBackup(cloudProfile.store_id, db)
+                        : db;
+                    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `dsmdh-backup-${todayStr()}.json`;
+                    a.click();
+                    if (!(isCloudConfigured && cloudProfile?.store_id)) {
+                      showToast("Offline hone ki wajah se sirf local settings backup hui — products/sales shamil nahi.", "amber");
+                    }
+                  } catch (e) {
+                    showToast(e instanceof Error ? e.message : "Backup fail ho gaya", "red");
+                  }
                 }}
               >
                 <Download size={14} /> Download JSON Backup
               </button>
             </div>
+            <p className="hint" style={{ marginTop: "8px" }}>
+              Backup mein settings/expenses/notes (blob) aur products/sales/purchases/etc. (cloud tables) dono shamil hain.
+              Neeche "Restore" sirf blob wale hisse ko wapas laata hai — products/sales cloud mein hi surakshit hain, unhe restore karne ki zaroorat nahi padti.
+            </p>
 
             <div style={{ marginTop: "24px" }}>
               <label className="hint">Restore from JSON backup:</label>

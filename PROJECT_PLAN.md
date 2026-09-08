@@ -563,6 +563,12 @@ actual code, per this document's own ground rule — not assumed or guessed._
           (matching `/*`...`*/` depth = 0) and a case-label count check (41,
           matching pre-edit) were done as a minimal sanity pass. **This
           needs the full verify pass before being trusted as clean.**
+        - **Update, same day**: the owner asked for the full verify pass
+          afterwards — `npm install`, `npx tsc --noEmit`, `npx vitest run`
+          (26/26), `npm run build`, `node scripts/static-audit.mjs`
+          (16/16) all came back clean against what was already pushed, so
+          the 3 caught-and-fixed comment-clobbering mistakes above were
+          the only issues; nothing else surfaced.
         - Not device-tested, same caveat as every other pass in this
           section.
 - [x] Light + dark theme — already existed (`theme/useAppearance.ts`'s

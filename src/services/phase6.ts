@@ -57,10 +57,26 @@ export async function suggestProductPrice(input: {
   currentSellingPrice?: number | null;
   currentMrp?: number | null;
 }): Promise<PriceSuggestion> {
-  const { data, error } = await supabase.functions.invoke("ai-price-advisor", { body: input });
-  if (error) throw error;
-  if (!data?.recommendation) throw new Error("AI price suggestion did not return a valid recommendation.");
-  return data.recommendation as PriceSuggestion;
+  // 2026-09-07 (Phase 6, "better Gemini key pool handling"): a couple of
+  // quick retries on a transient network blip, same reasoning as
+  // fetchWithRetry.ts (used by the other AI call sites, which go through
+  // raw fetch() instead of supabase.functions.invoke() here) — a dropped
+  // connection or Edge Function cold start shouldn't be a hard failure the
+  // first time.
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      const { data, error } = await supabase.functions.invoke("ai-price-advisor", { body: input });
+      if (error) throw error;
+      if (!data?.recommendation) throw new Error("AI price suggestion did not return a valid recommendation.");
+      return data.recommendation as PriceSuggestion;
+    } catch (err) {
+      lastError = err;
+      if (attempt === 2) break;
+      await new Promise((res) => setTimeout(res, 500 * Math.pow(2, attempt)));
+    }
+  }
+  throw lastError;
 }
 
 export async function getStaffPerformance(storeId: string, from: Date, to: Date): Promise<StaffPerformanceRow[]> {
@@ -218,20 +234,26 @@ export async function setStaffAccessConfig(profileId: string, input: {
   });
 }
 
-// NOTE (merged 2026-09-07): @tauri-apps/plugin-biometric is not an
-// installed dependency yet (checked: not in package.json, and it's a
-// native Tauri plugin — adding it for real needs a Cargo.toml/Rust-side
-// change under src-tauri, not just `npm install`, plus nothing in the UI
-// calls these two functions yet). @ts-expect-error only silences the
-// TypeScript module-resolution error so the rest of this file's
-// (functional, wired-nowhere-yet-but-working) exports aren't blocked by
-// it — it does NOT make biometric unlock actually work. biometricCheck()
-// degrades safely (its own try/catch), but authenticateBiometric() will
-// throw at runtime until the plugin is genuinely installed.
+// NOTE (merged 2026-09-07, build-break fixed 2026-09-07): @tauri-apps/
+// plugin-biometric is not an installed dependency yet (checked: not in
+// package.json, and it's a native Tauri plugin — adding it for real needs
+// a Cargo.toml/Rust-side change under src-tauri, not just `npm install`,
+// plus nothing in the UI calls these two functions yet). The original
+// `@ts-expect-error` only silenced TypeScript's module-resolution error —
+// it does NOT stop Vite/Rollup from statically seeing a literal
+// `import("@tauri-apps/plugin-biometric")` string, trying to resolve and
+// bundle it at build time, and failing the production build outright
+// (confirmed: `tsc --noEmit` passed clean while `npm run build` hard-
+// failed on exactly this). Routing the specifier through a variable +
+// `@vite-ignore` stops Rollup from attempting static resolution/bundling,
+// while keeping the exact same runtime behavior as before: still throws
+// (or degrades, for biometricCheck) at runtime until the plugin is
+// genuinely installed with its native half wired up.
+const BIOMETRIC_PLUGIN_SPECIFIER = "@tauri-apps/plugin-biometric";
+
 export async function biometricCheck() {
   try {
-    // @ts-expect-error — see NOTE above; plugin not installed yet.
-    const mod = await import("@tauri-apps/plugin-biometric");
+    const mod = await import(/* @vite-ignore */ BIOMETRIC_PLUGIN_SPECIFIER);
     return await mod.checkStatus();
   } catch {
     return { isAvailable: false, biometryType: 0 };
@@ -239,7 +261,6 @@ export async function biometricCheck() {
 }
 
 export async function authenticateBiometric(reason = "Unlock DS Mobile & Digital Hub") {
-  // @ts-expect-error — see NOTE above; plugin not installed yet.
-  const mod = await import("@tauri-apps/plugin-biometric");
+  const mod = await import(/* @vite-ignore */ BIOMETRIC_PLUGIN_SPECIFIER);
   await mod.authenticate(reason, { allowDeviceCredential: true });
 }

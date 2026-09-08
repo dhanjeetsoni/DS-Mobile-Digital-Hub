@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcode, ShieldCheck, Search } from "lucide-react";
 import { Database, Product, StockBatch } from "../types";
 import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
+import { inr } from "../utils/indianCurrency";
 import { processAccessoryOcr, lookupScreenSizeRange } from "../utils/aiOcr";
 import { compressImageToDataUrl } from "../utils/imageCompress";
 import { uploadProductPhotoOrFallback, isStorageUrl } from "../services/photoStorage";
@@ -9,6 +10,7 @@ import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay"
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
+import { suggestProductPrice } from "../services/phase6";
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -62,6 +64,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 }) => {
   const { closing, requestClose, runClosing } = useAnimatedClose(onClose);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef2 = useRef<HTMLInputElement | null>(null);
   // Stable per-modal-session id used only as the Storage path segment for
   // this photo — independent of the product's own id (generated at Save
   // time) so the upload can start the moment a photo is picked.
@@ -72,6 +75,11 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   // fallback. Purely informational (small hint in the UI); Save works
   // either way.
   const [photoIsUploaded, setPhotoIsUploaded] = useState(false);
+  // Phase 6 — optional second/"back" photo. Same upload/preview pattern as
+  // the primary photo, own path-id ref so the two uploads never collide.
+  const photoPathIdRef2 = useRef<string>(uid("tmp"));
+  const [photo2, setPhoto2] = useState<string>("");
+  const [photo2IsUploaded, setPhoto2IsUploaded] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanError, setScanError] = useState("");
   const [aiApplied, setAiApplied] = useState(false);
@@ -133,6 +141,41 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     setPriceAutoFilledHint(`"${brandValue.trim()}" (${categoryValue}) ke pichhle products se price auto-fill ho gaya — chaho to edit kar sakte ho.`);
     toast(`Price "${brandValue.trim()}" brand se auto-fill ho gaya`, "green");
   };
+
+  // Phase 6 — "AI-based selling price/MRP suggestion when adding a
+  // product": a distinct, opt-in AI call (button, not automatic) since
+  // unlike the brand-price auto-fill above (which copies a real price the
+  // shop already charged), this is a genuine AI *guess* with no cost basis
+  // guarantee — must never silently overwrite anything without the owner
+  // explicitly asking for it.
+  const [priceSuggestState, setPriceSuggestState] = useState<{ loading: boolean; error: string }>({ loading: false, error: "" });
+  const handleAiSuggestPrice = async () => {
+    if (!name.trim() || !category.trim()) {
+      toast("Pehle Product Name aur Category bharein", "amber");
+      return;
+    }
+    setPriceSuggestState({ loading: true, error: "" });
+    try {
+      const rec = await suggestProductPrice({
+        brand,
+        productName: name,
+        category,
+        compatibleModels,
+        purchasePrice: purchasePrice || null,
+        currentSellingPrice: sellingPrice || null,
+        currentMrp: mrp || null,
+      });
+      setSellingPrice(rec.recommendedSellingPrice || sellingPrice);
+      if (rec.mrp) setMrp(rec.mrp);
+      setPriceSuggestState({ loading: false, error: "" });
+      toast(
+        `AI suggestion: ${inr(rec.recommendedSellingPrice)}${rec.mrp ? ` (MRP ${inr(rec.mrp)})` : ""} — ${rec.rationale}`,
+        rec.confidence === "low" ? "amber" : "green"
+      );
+    } catch (e) {
+      setPriceSuggestState({ loading: false, error: e instanceof Error ? e.message : "AI price suggestion fail ho gaya." });
+    }
+  };
   const [stock, setStock] = useState<number>(0);
   const [minStock, setMinStock] = useState<number>(2);
   const [supplier, setSupplier] = useState("");
@@ -154,6 +197,9 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     setPhoto("");
     setPhotoIsUploaded(false);
     photoPathIdRef.current = uid("tmp");
+    setPhoto2("");
+    setPhoto2IsUploaded(false);
+    photoPathIdRef2.current = uid("tmp");
     setScanError("");
     setAiApplied(false);
     setName("");
@@ -233,6 +279,28 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     }
   };
 
+  // Optional second/"back" photo — same compress+upload+scan pattern as the
+  // primary photo, but scans in "merge-gaps" mode: only fills whatever the
+  // front photo's scan left blank, and merges (not replaces) models/notes.
+  const handleImageSelected2 = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageToDataUrl(file);
+      setPhoto2(dataUrl);
+      const uploadPromise = uploadProductPhotoOrFallback(storeId, photoPathIdRef2.current, file)
+        .then(({ url, uploaded }) => {
+          setPhoto2(url);
+          setPhoto2IsUploaded(uploaded);
+        })
+        .catch(() => {});
+      await runScan(dataUrl, "merge-gaps");
+      await uploadPromise;
+    } catch (err: any) {
+      toast(err?.message || "Back photo process nahi ho payi, dobara try karein", "red");
+    }
+  };
+
   // Re-scans the currently selected/uploaded photo. `photo` starts as a
   // data: URL right after picking a file, but the background upload in
   // handleImageSelected can replace it with a plain Storage https:// URL
@@ -261,18 +329,31 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     }
   };
 
-  const runScan = async (imgData: string) => {
+  // Phase 6 — "AI Photo Scan ... support 1 or 2 photos (front/back) with
+  // auto-fill from either". mode "fill" (the primary/first photo) keeps the
+  // original overwrite behaviour. mode "merge-gaps" (the optional second/
+  // back photo) only fills fields the first photo's scan left empty, and
+  // MERGES (not replaces) compatible models / notes — a back-of-pack photo
+  // often lists additional models or details the front didn't show, not a
+  // full replacement of what the front already found.
+  const runScan = async (imgData: string, mode: "fill" | "merge-gaps" = "fill") => {
     setIsScanning(true);
     setScanError("");
     try {
       const result = await processAccessoryOcr(imgData);
-      if (result.brand) setBrand(result.brand);
-      if (result.category) { setCategory(result.category); setCategoryTouched(true); }
-      if (result.brand || result.productName) {
+      if (result.brand && (mode === "fill" || !brand.trim())) setBrand(result.brand);
+      if (result.category && (mode === "fill" || !categoryTouched)) { setCategory(result.category); setCategoryTouched(true); }
+      if ((result.brand || result.productName) && (mode === "fill" || !name.trim())) {
         setName([result.brand, result.productName].filter(Boolean).join(" — "));
       }
-      if (result.compatibleModels?.length) setCompatibleModels(result.compatibleModels);
-      if (result.notes) setNotes(result.notes);
+      if (result.compatibleModels?.length) {
+        setCompatibleModels((prev) =>
+          mode === "fill" ? result.compatibleModels! : Array.from(new Set([...prev, ...result.compatibleModels!]))
+        );
+      }
+      if (result.notes) {
+        setNotes((prev) => (mode === "fill" || !prev.trim() ? result.notes! : `${prev} | ${result.notes}`));
+      }
       setAiApplied(true);
       // Don't trust the packaging photo's own screenSizeInches/MaxInches
       // guess (it reads vague printed pack text like "6.5-6.7 inch" across
@@ -397,6 +478,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       sku: genSku(category === "Tempered Glass" || category === "Curved Glass" ? "GLS" : category === "Back Covers" ? "CVR" : "ACC"),
       barcode: barcode.trim() || undefined,
       photo,
+      photos: [photo, photo2].filter(Boolean),
       purchasePrice: purchasePrice || null,
       pendingCost: !purchasePrice,
       confidentialPrice: confidentialPrice || null,
@@ -541,6 +623,49 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               <div className="alert" style={{ marginTop: "10px", background: "var(--green-light)", color: "var(--green)" }}>
                 <CheckCircle2 size={16} />
                 <span>AI ne form fill kar diya hai — neeche check karke price/stock daalein.</span>
+              </div>
+            )}
+
+            {/* Phase 6 — optional second/"back" photo. Only offered once a
+                front photo exists (nothing to link a lone back photo's scan
+                against for merge-gaps otherwise) and while not already
+                scanning the front. */}
+            {photo && !isScanning && (
+              <div style={{ marginTop: "12px" }}>
+                {photo2 ? (
+                  <div style={{ position: "relative" }}>
+                    <img src={photo2} alt="Product back" style={{ width: "100%", maxHeight: "160px", objectFit: "contain", borderRadius: "8px", border: "1px solid var(--line)" }} />
+                    <button
+                      type="button"
+                      className="btn sm"
+                      style={{ position: "absolute", top: "6px", right: "6px", borderRadius: "50%", width: "26px", height: "26px", padding: 0 }}
+                      onClick={() => { setPhoto2(""); setPhoto2IsUploaded(false); }}
+                      title="Back photo hatayein"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn sm"
+                    style={{ width: "100%" }}
+                    onClick={() => fileInputRef2.current?.click()}
+                  >
+                    <Upload size={13} /> + Back Photo Add Karein (Optional)
+                  </button>
+                )}
+                <input
+                  ref={fileInputRef2}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  style={{ display: "none" }}
+                  onChange={handleImageSelected2}
+                />
+                <div className="hint" style={{ marginTop: "4px" }}>
+                  Agar packaging ke aage-peeche dono taraf details hain (jaise models ki poori list peeche ho), to back photo bhi add kar sakte hain — AI dono se mila kar form fill karega.
+                </div>
               </div>
             )}
           </div>
@@ -796,10 +921,18 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               </div>
 
               <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
-                <div style={{ fontWeight: 700, fontSize: "13px" }}>4-Tier Pricing</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 700, fontSize: "13px" }}>4-Tier Pricing</div>
+                  <button type="button" className="btn sm" onClick={handleAiSuggestPrice} disabled={priceSuggestState.loading}>
+                    <Sparkles size={13} /> {priceSuggestState.loading ? "Soch raha hai..." : "AI Price Suggest"}
+                  </button>
+                </div>
                 <div className="hint" style={{ marginTop: "2px" }}>
                   Original (aapki kharidari) → Confidential (staff sirf Telegram-approval ke baad) → Selling (sab ko dikhta hai) → MRP (sirf display ke liye). Confidential aur MRP optional hain — khali chhod sakte hain.
                 </div>
+                {priceSuggestState.error && (
+                  <div className="hint" style={{ marginTop: "4px", color: "var(--red)" }}>{priceSuggestState.error}</div>
+                )}
                 {priceAutoFilledHint && (
                   <div className="hint" style={{ marginTop: "4px", color: "var(--glow)", fontWeight: 600 }}>
                     ✓ {priceAutoFilledHint}

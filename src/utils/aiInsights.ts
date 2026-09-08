@@ -1,4 +1,5 @@
 import { supabase, SUPABASE_URL } from "../services/supabaseClient";
+import { fetchWithRetry } from "./fetchWithRetry";
 
 // See aiOcr.ts for why this points at the ai-gateway Edge Function instead
 // of a relative "/api/..." path (that path only ever existed on a local
@@ -24,7 +25,7 @@ export async function getBusinessInsights(summary: BusinessInsightsSummary): Pro
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData?.session?.access_token;
 
-  const res = await fetch(`${AI_GATEWAY_URL}/business-insights`, {
+  const res = await fetchWithRetry(`${AI_GATEWAY_URL}/business-insights`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -55,7 +56,7 @@ export async function getStaffAdvice(summary: StaffAdviceSummary): Promise<strin
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData?.session?.access_token;
 
-  const res = await fetch(`${AI_GATEWAY_URL}/staff-advice`, {
+  const res = await fetchWithRetry(`${AI_GATEWAY_URL}/staff-advice`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

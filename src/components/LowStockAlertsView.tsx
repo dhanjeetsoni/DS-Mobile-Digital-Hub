@@ -103,7 +103,7 @@ export const LowStockAlertsView: React.FC<LowStockAlertsViewProps> = ({ db, show
             <tbody>
               {lowStock.map((row) => (
                 <tr key={row.product.id}>
-                  <td><ProductThumb photo={row.product.photo} name={row.product.name} /></td>
+                  <td><ProductThumb photo={row.product.photo} photos={row.product.photos} name={row.product.name} /></td>
                   <td><b className="truncate" title={row.product.name}>{row.product.name}</b></td>
                   <td>{row.product.category || "—"}</td>
                   <td style={{ fontWeight: 800, color: row.product.stock === 0 ? "var(--red)" : "var(--amber)" }}>

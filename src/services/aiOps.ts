@@ -5,6 +5,7 @@
 // unrelated features, not "insights".
 
 import { supabase, SUPABASE_URL } from "./supabaseClient";
+import { fetchWithRetry } from "../utils/fetchWithRetry";
 
 const AI_GATEWAY_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/ai-gateway` : "";
 
@@ -13,7 +14,7 @@ async function callAiGateway(route: string, input: Record<string, unknown>): Pro
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData?.session?.access_token;
 
-  const res = await fetch(`${AI_GATEWAY_URL}/${route}`, {
+  const res = await fetchWithRetry(`${AI_GATEWAY_URL}/${route}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

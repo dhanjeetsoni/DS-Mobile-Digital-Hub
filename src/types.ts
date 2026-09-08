@@ -103,6 +103,13 @@ export interface Product {
   // this exact value auto-fill the product into the POS cart.
   barcode?: string;
   photo: string;
+  // Phase 6 — "AI Photo Scan: support 1 or 2 photos (front/back)". `photo`
+  // above stays the single primary/first image (unchanged — every existing
+  // display call site that only knows about `photo` keeps working exactly
+  // as before). This optional array holds ALL provided photos (1 or 2,
+  // photo === photos[0] when set) for the few surfaces that show a small
+  // gallery instead of just one image.
+  photos?: string[];
   // ---- Step 3.3: 4-Tier Pricing System ----
   // 1. Original (Kharidari) Price — `purchasePrice` below. Owner-only,
   //    everywhere (UI, API, exports, reports) — never shown to staff.

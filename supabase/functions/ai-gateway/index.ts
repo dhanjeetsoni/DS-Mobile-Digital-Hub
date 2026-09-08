@@ -304,6 +304,29 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | 
     return "unavailable";
   }
 
+  // 2026-09-07 (Phase 6, "better Gemini key pool handling"): a genuine
+  // network-transport failure (dropped connection, DNS blip, Deno's fetch
+  // layer itself throwing) has none of the shapes above — no HTTP status,
+  // no Gemini-specific error text — so it fell through to `null` and got
+  // rethrown immediately below without ever trying another key, even
+  // though the failure has nothing to do with which key was used and a
+  // different key (a fresh outbound connection) has a real chance of
+  // succeeding. Treated the same as "unavailable": retryable, key stays in
+  // rotation, no cooldown applied.
+  if (
+    err instanceof TypeError ||
+    msg.includes("failed to fetch") ||
+    msg.includes("fetch failed") ||
+    msg.includes("network") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("etimedout") ||
+    msg.includes("socket hang up") ||
+    msg.includes("dns")
+  ) {
+    return "unavailable";
+  }
+
   return null;
 }
 

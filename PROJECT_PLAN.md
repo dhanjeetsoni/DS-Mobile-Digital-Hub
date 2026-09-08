@@ -721,11 +721,82 @@ actual code, per this document's own ground rule — not assumed or guessed._
       follow-up, not done here to keep this item scoped to the actual
       capture-and-report mechanism.
 
-### ⬜ Phase 6: AI & advanced feature enhancements
-- [ ] AI Photo Scan: improve accuracy, support 1 or 2 photos (front/back) with
-      auto-fill from either, product view shows all photos provided
-- [ ] AI-based selling price/MRP suggestion when adding a product
-- [ ] Better Gemini key pool handling (fallback/retry instead of hard failures)
+### 🟡 Phase 6: AI & advanced feature enhancements
+- [x] **AI Photo Scan: 1 or 2 photos (front/back), auto-fill from either,
+      product view shows all photos provided — done 2026-09-07.**
+      `types.ts`: `Product.photos?: string[]` added alongside the existing
+      single `photo` (unchanged — every pre-existing display call site that
+      only knows `photo` keeps working exactly as before). `AddProductModal`
+      + `EditProductModal`: an optional second/"back" photo slot, scanned in
+      a new `"merge-gaps"` mode — only fills fields the front photo's scan
+      left blank, and *merges* (not replaces) compatible models/notes, since
+      a back-of-pack photo often has details the front doesn't. `Save`
+      writes `photos: [photo, photo2].filter(Boolean)`. `ProductThumb.tsx`
+      (shared by the product table, mobile card, Low Stock view, and both
+      modals) now takes an optional `photos` prop and becomes a small
+      prev/next gallery on click when more than one photo exists — wired at
+      every existing call site. "Improve accuracy" was not separately
+      addressed (no concrete accuracy problem identified to fix; the
+      2-photo/merge capability is the accuracy improvement here — more
+      surface area for the AI to read from).
+- [x] **AI-based selling price/MRP suggestion when adding a product — done
+      2026-09-07.** New standalone Edge Function `ai-price-advisor`
+      (deployed live), matching the contract an earlier session's
+      `src/services/phase6.ts` already expected but never had a backend
+      for. Explicitly does NOT claim a live market-price lookup (no search
+      grounding wired in) — reasons from purchase price + general Indian
+      retail-margin knowledge, confidence is forced to `"low"` server-side
+      whenever no purchase price was given, and `sources` is always empty
+      rather than let the model invent a citation. Wired into
+      `AddProductModal` as an "AI Price Suggest" button next to the 4-Tier
+      Pricing block — fills Selling Price and MRP, never overwrites
+      Purchase/Confidential price.
+- [x] **Better Gemini key pool handling (fallback/retry instead of hard
+      failures) — done 2026-09-07, partially deployed live (see caveat
+      below).** Two real, distinct gaps found and fixed, not just assumed
+      from the item's title:
+      1. Client-side: every AI call (`aiOcr.ts`, `aiInsights.ts`,
+         `aiOps.ts`) was a single `fetch()` attempt with zero retry — a
+         one-off network blip or Edge Function cold start was an immediate
+         hard "AI unavailable" error. New `src/utils/fetchWithRetry.ts`:
+         retries a network-level throw or 5xx response (2 attempts,
+         exponential backoff), returns 4xx responses immediately
+         unretried (retrying a genuine bad request wastes time). Wired into
+         all 3 files' fetch calls, plus a matching small retry loop added to
+         `phase6.ts`'s `suggestProductPrice()` (uses
+         `supabase.functions.invoke`, not raw fetch, so needed its own
+         wrapper). **This half ships with the next app build — no Edge
+         Function redeploy needed, already verified (`tsc`, tests, build all
+         clean).**
+      2. Server-side (`ai-gateway/index.ts`'s `runWithGeminiFailover`,
+         already a solid multi-key/timeout/2-pass retry system from an
+         earlier session before this pass): `classifyGeminiFailure()` had
+         no case for a genuine network-transport failure (dropped
+         connection, DNS blip, a raw `TypeError` from Deno's fetch layer) —
+         those fell through to `null` and were rethrown immediately without
+         ever trying another key, identical in effect to "every key is
+         broken" even though the failure had nothing to do with which key
+         was used. Fixed by classifying these the same as the existing
+         "unavailable" (503/overloaded) case: retryable, key stays in
+         rotation. Applied to `ai-gateway/index.ts`, `daily-digest-worker/
+         index.ts`, and included from the start in the new
+         `ai-price-advisor/index.ts`.
+      **Honest caveat — do not skip this**: fix #2's *source* is committed
+      here, and `ai-price-advisor` (which includes it from the start) is
+      deployed live. But `ai-gateway/index.ts` and `daily-digest-worker/
+      index.ts` themselves were **not redeployed** in this pass — both
+      files have grown very large (1491 and 271 lines) from several
+      sessions' combined work, and manually retyping either one in full to
+      redeploy risked a transcription error breaking the *already-working*
+      OCR/business-insights/staff-advice/telegram-digest routes for every
+      store, for the sake of a genuinely rare edge case (most real
+      failures are quota/invalid/503, which already retried correctly
+      before this fix). The safer call was to leave the live versions of
+      those two functions as they were and document this precisely rather
+      than claim a redeploy that didn't happen. **Next session: redeploy
+      `ai-gateway` and `daily-digest-worker` from the current repo source**
+      (or apply just this specific diff) to actually put fix #2 live for
+      those two functions.
 - [ ] Improve Photo Stock Finder matching
 - [ ] Staff performance tracking (sales leaderboard/summary per staff)
 - [ ] Excel/PDF export for invoices and customers

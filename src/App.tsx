@@ -2942,7 +2942,7 @@ export default function App() {
                   <tbody>
                     {catalogProducts.map((p) => (
                       <tr key={p.id}>
-                        <td><ProductThumb photo={p.photo} name={p.name} /></td>
+                        <td><ProductThumb photo={p.photo} photos={p.photos} name={p.name} /></td>
                         <td><b>{p.name}</b></td>
                         <td>{p.category}</td>
                         <td>{p.brand || "—"}</td>
@@ -3005,7 +3005,7 @@ export default function App() {
                   const low = stockOf(p) <= p.minStock;
                   return (
                     <div key={p.id} className="product-mobile-card">
-                      <div className="product-mobile-photo"><ProductThumb photo={p.photo} name={p.name} /></div>
+                      <div className="product-mobile-photo"><ProductThumb photo={p.photo} photos={p.photos} name={p.name} /></div>
                       <div className="product-mobile-info">
                         <div className="product-mobile-name">{p.name}</div>
                         <div className="product-mobile-sub">{[p.brand, p.category].filter(Boolean).join(" · ")}</div>

@@ -120,6 +120,11 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | 
   if (status === 429 || msg.includes("429") || msg.includes("quota") || msg.includes("resource_exhausted") || msg.includes("rate limit")) return "quota";
   if (status === 401 || status === 403 || msg.includes("permission_denied") || msg.includes("unauthenticated") || msg.includes("api key not valid") || msg.includes("api_key_invalid") || msg.includes("invalid api key") || msg.includes("key not found") || msg.includes("has not been used")) return "invalid";
   if (status === 503 || msg.includes("503") || msg.includes("unavailable") || msg.includes("overloaded") || msg.includes("high demand")) return "unavailable";
+  // 2026-09-07 (Phase 6): genuine network-transport failures (dropped
+  // connection, DNS blip, fetch itself throwing) previously fell through to
+  // null and got rethrown immediately without trying another key — see the
+  // matching fix + full writeup in ai-gateway/index.ts's classifyGeminiFailure.
+  if (err instanceof TypeError || msg.includes("failed to fetch") || msg.includes("fetch failed") || msg.includes("network") || msg.includes("econnreset") || msg.includes("econnrefused") || msg.includes("etimedout") || msg.includes("socket hang up") || msg.includes("dns")) return "unavailable";
   return null;
 }
 function hasAI(): boolean { return ENV_GEMINI_KEYS.length > 0 || Boolean(supabaseAdmin); }

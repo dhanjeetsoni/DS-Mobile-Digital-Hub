@@ -1,4 +1,5 @@
 import { supabase, SUPABASE_URL } from "../services/supabaseClient";
+import { fetchWithRetry } from "./fetchWithRetry";
 
 // These AI/OCR calls used to hit a relative "/api/..." path, which only ever
 // worked when the Express server.ts (npm start, local machine only) was also
@@ -62,7 +63,7 @@ export interface OcrAccessoryResult {
 // without hitting Gemini again.
 export async function lookupScreenSize(modelName: string): Promise<number> {
   if (!AI_GATEWAY_URL) return 0;
-  const res = await fetch(`${AI_GATEWAY_URL}/screen-size-lookup`, {
+  const res = await fetchWithRetry(`${AI_GATEWAY_URL}/screen-size-lookup`, {
     method: "POST",
     headers: await authHeaders(),
     body: JSON.stringify({ modelName }),
@@ -92,7 +93,7 @@ export interface ScreenSizeRangeResult {
 export async function lookupScreenSizeRange(modelNames: string[]): Promise<ScreenSizeRangeResult> {
   const empty: ScreenSizeRangeResult = { minSize: 0, maxSize: 0, sizes: [] };
   if (!AI_GATEWAY_URL || !modelNames.length) return empty;
-  const res = await fetch(`${AI_GATEWAY_URL}/screen-size-range`, {
+  const res = await fetchWithRetry(`${AI_GATEWAY_URL}/screen-size-range`, {
     method: "POST",
     headers: await authHeaders(),
     body: JSON.stringify({ modelNames }),
@@ -117,7 +118,7 @@ export async function lookupScreenSizeRange(modelNames: string[]): Promise<Scree
 // instead of the staff typing every model by hand.
 export async function processAccessoryOcr(imageDataUrl: string): Promise<OcrAccessoryResult> {
   if (!AI_GATEWAY_URL) throw new Error("AI unavailable — cloud not configured.");
-  const res = await fetch(`${AI_GATEWAY_URL}/ocr-accessory`, {
+  const res = await fetchWithRetry(`${AI_GATEWAY_URL}/ocr-accessory`, {
     method: "POST",
     headers: await authHeaders(),
     body: JSON.stringify({ image: imageDataUrl }),
@@ -157,7 +158,7 @@ export interface ProductPhotoResult {
 // jump straight to matching in-stock items to sell, instead of typing.
 export async function identifyProductPhoto(imageDataUrl: string): Promise<ProductPhotoResult> {
   if (!AI_GATEWAY_URL) throw new Error("AI unavailable — cloud not configured.");
-  const res = await fetch(`${AI_GATEWAY_URL}/product-photo-search`, {
+  const res = await fetchWithRetry(`${AI_GATEWAY_URL}/product-photo-search`, {
     method: "POST",
     headers: await authHeaders(),
     body: JSON.stringify({ image: imageDataUrl }),
@@ -186,7 +187,7 @@ export async function processPhoneOcr(
 ): Promise<OcrPhoneResult> {
   try {
     if (!AI_GATEWAY_URL) throw new Error("AI unavailable — cloud not configured.");
-    const res = await fetch(`${AI_GATEWAY_URL}/ocr-phone`, {
+    const res = await fetchWithRetry(`${AI_GATEWAY_URL}/ocr-phone`, {
       method: "POST",
       headers: await authHeaders(),
       body: JSON.stringify({ image: imageDataUrl, imageType }),

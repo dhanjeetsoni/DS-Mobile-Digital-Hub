@@ -52,6 +52,9 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   const [requireCustomerDetails, setRequireCustomerDetails] = useState(false);
 
   const [photo, setPhoto] = useState<string>("");
+  // Phase 6 — optional second/"back" photo, same pattern as AddProductModal.
+  const [photo2, setPhoto2] = useState<string>("");
+  const fileInputRef2 = useRef<HTMLInputElement | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanError, setScanError] = useState("");
@@ -80,6 +83,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       setRequireCustomerDetails(!!product.requireCustomerDetails);
       setPhoto(product.photo || "");
       originalPhotoRef.current = product.photo || "";
+      setPhoto2((product.photos && product.photos[1]) || "");
       setScanError("");
     }
   }, [product]);
@@ -116,10 +120,45 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   // If the photo now lives in Storage (a plain https URL) it's fetched and
   // converted back to a data: URL first, since the OCR endpoint needs the
   // actual image bytes, not a link to them.
-  const handleRescan = async () => {
-    if (!photo) return;
+  // Phase 6 — "AI Photo Scan ... support 1 or 2 photos (front/back) with
+  // auto-fill from either". mode "fill" (re-scanning the primary photo)
+  // keeps the original overwrite behaviour. mode "merge-gaps" (the optional
+  // second/back photo) only fills whatever's currently blank, and merges
+  // (not replaces) notes.
+  const runScan = async (imgData: string, mode: "fill" | "merge-gaps" = "fill") => {
     setIsScanning(true);
     setScanError("");
+    try {
+      const result = await processAccessoryOcr(imgData);
+      if (result.brand && (mode === "fill" || !brand.trim())) setBrand(result.brand);
+      if (result.category && mode === "fill") setCategory(result.category);
+      if ((result.brand || result.productName) && (mode === "fill" || !name.trim())) {
+        setName([result.brand, result.productName].filter(Boolean).join(" — "));
+      }
+      if (result.notes) {
+        setNotes((prev) => (mode === "fill" || !prev.trim() ? result.notes! : `${prev} | ${result.notes}`));
+      }
+      toast(
+        mode === "fill"
+          ? "AI ne saved photo se details refresh kar di — check karke Save karein"
+          : "AI ne back photo se gaps fill kar diye — check karke Save karein",
+        "green"
+      );
+    } catch (err: any) {
+      setScanError(err.message || "AI scan fail ho gaya.");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  // Re-uses the already-saved product photo for a fresh AI read — no new
+  // camera capture needed. Only fills fields that exist on this screen
+  // (brand/category/name/notes); nothing is re-uploaded or duplicated.
+  // If the photo now lives in Storage (a plain https URL) it's fetched and
+  // converted back to a data: URL first, since the OCR endpoint needs the
+  // actual image bytes, not a link to them.
+  const handleRescan = async () => {
+    if (!photo) return;
     try {
       let imgData = photo;
       if (isStorageUrl(photo)) {
@@ -132,18 +171,27 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
           reader.readAsDataURL(blob);
         });
       }
-      const result = await processAccessoryOcr(imgData);
-      if (result.brand) setBrand(result.brand);
-      if (result.category) setCategory(result.category);
-      if (result.brand || result.productName) {
-        setName([result.brand, result.productName].filter(Boolean).join(" — "));
-      }
-      if (result.notes) setNotes(result.notes);
-      toast("AI ne saved photo se details refresh kar di — check karke Save karein", "green");
+      await runScan(imgData, "fill");
     } catch (err: any) {
       setScanError(err.message || "AI scan fail ho gaya.");
+    }
+  };
+
+  // Optional second/"back" photo — compress+upload+scan in merge-gaps mode.
+  const handleImageSelected2 = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !product) return;
+    setIsCompressing(true);
+    try {
+      const dataUrl = await compressImageToDataUrl(file);
+      setPhoto2(dataUrl);
+      const { url } = await uploadProductPhotoOrFallback(storeId, `${product.id}-back`, file);
+      setPhoto2(url);
+      await runScan(dataUrl, "merge-gaps");
+    } catch (err: any) {
+      toast(err?.message || "Back photo process nahi ho payi, dobara try karein", "red");
     } finally {
-      setIsScanning(false);
+      setIsCompressing(false);
     }
   };
 
@@ -217,6 +265,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     product.warrantyMonths = warrantyEnabled ? warrantyMonths : 0;
     product.requireCustomerDetails = warrantyEnabled ? true : requireCustomerDetails;
     product.photo = photo;
+    product.photos = [photo, photo2].filter(Boolean);
 
     // Best-effort cleanup: if the photo was replaced or removed and the OLD
     // value was a real Storage URL, delete that now-unused object. Never
@@ -257,7 +306,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             className="field full"
             style={{ display: "flex", gap: "12px", alignItems: "center", background: "var(--paper)", padding: "10px 12px", borderRadius: "8px", marginBottom: "12px" }}
           >
-            <ProductThumb photo={photo} name={name} size={72} />
+            <ProductThumb photo={photo} photos={[photo, photo2].filter(Boolean)} name={name} size={72} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: "13px", marginBottom: "4px" }}>Product Photo</div>
               <div className="hint" style={{ marginBottom: "8px" }}>
@@ -291,6 +340,35 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 <div className="alert red" style={{ marginTop: "6px", padding: "6px 8px" }}>
                   <AlertCircle size={14} />
                   <span>{scanError}</span>
+                </div>
+              )}
+
+              {/* Phase 6 — optional second/"back" photo. */}
+              {photo && (
+                <div style={{ marginTop: "8px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  {photo2 ? (
+                    <>
+                      <ProductThumb photo={photo2} name={`${name} (back)`} size={40} />
+                      <button type="button" className="btn sm" disabled={isCompressing} onClick={() => fileInputRef2.current?.click()}>
+                        <Upload size={13} /> Back Photo Badlein
+                      </button>
+                      <button type="button" className="btn sm" onClick={() => setPhoto2("")}>
+                        <Trash2 size={13} /> Hatayein
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="btn sm" disabled={isCompressing} onClick={() => fileInputRef2.current?.click()}>
+                      <Upload size={13} /> + Back Photo Add Karein (Optional)
+                    </button>
+                  )}
+                  <input
+                    ref={fileInputRef2}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    style={{ display: "none" }}
+                    onChange={handleImageSelected2}
+                  />
                 </div>
               )}
             </div>

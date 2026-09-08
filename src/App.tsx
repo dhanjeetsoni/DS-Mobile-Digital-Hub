@@ -4668,6 +4668,17 @@ export default function App() {
               setCloudVersion(remote.version);
             }
           }
+          // 2026-09-06 fix: this in-app "Settings → Cloud Sign In" path is a
+          // second, separate route into a real cloud session — distinct
+          // from the main bootstrap effect on app launch, which is the only
+          // place syncPinFromServer() was being called. Signing in here
+          // never cached this profile's PIN, so their PIN unlock silently
+          // had nothing to check against until an unrelated full page
+          // reload happened to re-run the bootstrap effect. Mirror the same
+          // call here so the PIN works immediately after this sign-in too.
+          if (profile?.id) {
+            await syncPinFromServer(profile.id);
+          }
         } finally {
           setCloudReady(true);
         }

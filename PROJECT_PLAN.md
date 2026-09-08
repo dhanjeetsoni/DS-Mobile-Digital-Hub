@@ -459,8 +459,35 @@ actual code, per this document's own ground rule — not assumed or guessed._
       More) — done in an earlier session (Phase 4.1), confirmed still wired
       up after this session's merges.
 - [ ] Redesign each screen for touch/mobile ergonomics, section by section —
-      still open. Large, open-ended, screen-by-screen effort; not attempted
-      in this pass.
+      still open overall (this is inherently unbounded — dozens of screens);
+      **Sell/POS pass done 2026-09-06** (the single busiest screen, and the
+      first one tackled since it's what staff touch most):
+      - `.qtybtn` (cart qty +/- steppers) was 28px — below the ~44px
+        touch-target guidance the 2026-09-05 app-wide pass already cited
+        for `.btn`, but never reached these because they're a separate
+        class. Bumped to 38px on phone.
+      - `.cart-line` (used for both the product-search results and the
+        cart itself) didn't wrap — product name + a 100px price box + 2
+        qty buttons + a delete button squeezed into one non-wrapping row
+        left almost no room for the name on a ~360-400px screen. Now
+        wraps: name gets its own full-width line, price/qty/delete flow
+        onto a second line below it.
+      - New: a mobile-only sticky "🛒 N items · ₹total · View Cart ↓" bar
+        pinned above the bottom tab bar while the cart has items — on
+        phone the product list and cart stack vertically (existing
+        `.grid.cols-2` breakpoint), so without this, cart total/checkout
+        was easy to lose track of while scrolling a long product list.
+        Tapping smooth-scrolls straight to the cart section.
+      - Verified: `tsc --noEmit`, vitest (26/26), static audit (16/16),
+        production build all clean. **Not device-tested** — same caveat
+        as everywhere else in this plan needing a real phone; layout
+        reasoning here is sound but only a real device confirms feel.
+      - Genuinely NOT done yet: every other screen (Dashboard, Product
+        Catalog, Sales History, Returns, Purchases, Repairs, etc.) —
+        each would need its own screen-specific look the same way this
+        one got, not just the existing generic CSS pass. Worth doing
+        incrementally, screen by screen, in future sessions rather than
+        claiming this item complete.
 - [x] Light + dark theme — already existed (`theme/useAppearance.ts`'s
       `toggleMode`/`setMode`, surfaced via the Appearance Studio screen), an
       earlier session also switched the fresh-install default to light.

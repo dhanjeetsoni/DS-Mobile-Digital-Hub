@@ -3525,6 +3525,7 @@ export default function App() {
             db={db}
             catalogProducts={catalogProducts}
             storeId={cloudProfile?.store_id}
+            isStaff={cloudProfile?.role === "staff"}
             onUpdate={() => saveState({ ...db })}
             toast={showToast}
           />

@@ -784,8 +784,23 @@ actual code, per this document's own ground rule — not assumed or guessed._
       month; invoice count / total sales / avg sale value / % share per
       staff) + a new "Staff Performance" sidebar entry. Same fresh-clone
       verification as above before committing.
-- [ ] Excel/PDF export for invoices and customers
-- [ ] Customer profile: full purchase history
+- [x] Excel/PDF export for invoices and customers — invoices already had a
+      working CSV export (`SalesHistoryView`, untouched); added the missing
+      customers side (`CustomerDirectoryView`'s new "Export Excel" button,
+      via a new dependency-free `csvExport.ts` helper — plain CSV with a
+      UTF-8 BOM so Excel renders ₹/Hindi correctly, deliberately not a new
+      xlsx/SheetJS dependency for what a CSV already satisfies). PDF export
+      (browser print) already existed on both screens.
+- [x] Customer profile: full purchase history — `CustomerDirectoryView` rows
+      are now clickable, opening a profile modal (lifetime spend, visit
+      count, avg order value, outstanding due, loyalty points, full sales +
+      returns history). Matched by phone number, not a customer-record FK —
+      sales/returns/exchanges/warranty claims all embed their own
+      `{name, phone}` snapshot rather than a customer id (see `types.ts`),
+      so phone is the only reliable join key here, same assumption the rest
+      of this codebase already makes elsewhere.
+      Verified: `npm install && npx tsc --noEmit && npx vitest run (26/26)
+      && npm run build && node scripts/static-audit.mjs (16/16)` all clean.
 - [ ] Warranty claims: proper tracked workflow with reminders
 - [ ] Biometric (fingerprint) unlock alongside PIN
 - [ ] Remote session kill (owner force-logs-out a device from Windows)

@@ -993,7 +993,64 @@ actual code, per this document's own ground rule — not assumed or guessed._
     within a few seconds. Everything up to that final live click has been
     verified as correctly wired; next session (or the owner) should do that
     one real-world test before fully trusting it under pressure.
-- [ ] Biometric (fingerprint) unlock alongside PIN
+- [x] **Biometric (fingerprint/Face) unlock alongside PIN — 2026-09-09.
+      Another session's local (never pushed to GitHub — confirmed via
+      `git log`, only the old dynamic-import stub was live) claims about
+      this were not trusted; rebuilt and independently re-verified from
+      scratch.** Confirmed via web search + reading the plugin's actual
+      published source (not assumed): `@tauri-apps/plugin-biometric` is
+      the correct official Tauri v2 plugin; its own bundled
+      AndroidManifest.xml (read directly from the docs.rs source mirror)
+      declares a `BiometricActivity` but genuinely no
+      `USE_BIOMETRIC` `<uses-permission>` — and Android's own docs confirm
+      that permission must still be manifest-declared for
+      BiometricPrompt/BiometricManager to report real hardware, even
+      though it needs no runtime dialog, so manual injection is a real
+      requirement, not a guess carried over from the other session.
+  - `npm install @tauri-apps/plugin-biometric` (real dependency now, was
+    never installed before)
+  - `Cargo.toml`: `tauri-plugin-biometric` as an Android/iOS-only
+    `[target...dependencies]` entry; `lib.rs`: registered under
+    `#[cfg(mobile)]` only (same pattern as the existing `#[cfg(desktop)]`
+    updater/process registration); `capabilities/default.json`:
+    `biometric:default`
+  - New `scripts/ci-wire-android-biometric-permission.mjs` (same
+    idempotent marker-comment pattern as the existing camera/Bluetooth
+    permission scripts) wired into the GitHub Actions workflow, injecting
+    `USE_BIOMETRIC` + the legacy `USE_FINGERPRINT` (API 24-27 —
+    minSdkVersion is 24)
+  - `phase6.ts`: replaced the `@vite-ignore` dynamic-import stub with a
+    real static import — this exact stub was the thing that broke
+    `npm run build` before (noted in the file's own prior comment); build
+    is now clean with the real import
+  - `pinAuth.ts`: `isBiometricEnabled`/`setBiometricEnabled` — per-profile
+    AND per-device (plain `localStorage`, deliberately never synced to the
+    server — a fingerprint enrolled on one phone means nothing on
+    another), layered strictly on top of the existing PIN, never a
+    replacement for it
+  - `App.tsx`: "Use Fingerprint / Face" button on the `personalPin` gate
+    screen (shown only when this profile has it enabled for this device
+    AND a live `checkStatus()` call confirms hardware right now — not
+    trusted from whenever it was last toggled on), reusing the exact same
+    "correct PIN" success branch `handleGateOwnerSubmit` already takes. A
+    failed/cancelled biometric attempt is never treated as a wrong-PIN
+    attempt — no lockout counter increment, no Telegram alert — since the
+    OS's own prompt already enforces its own retry policy and the PIN
+    field remains available either way
+  - Settings → "My PIN" card: enable/disable toggle, gated on a PIN
+    already being set and hardware being available; requires one real
+    successful biometric prompt before turning ON (never trusts the
+    hardware-available flag alone as proof the person can actually
+    authenticate — no finger enrolled, faulty sensor, etc.)
+  - Verified: `tsc --noEmit` clean, `npm run build` clean, `vitest run`
+    26/26 clean.
+  - **Honestly flagged, not glossed over**: the actual Rust/Android
+    compile cannot run in this sandbox — real verification (does the CI
+    workflow's new permission-injection step run cleanly, does the APK
+    actually build with the new native dependency, does a real device's
+    fingerprint prompt genuinely fire) is the next GitHub Actions build
+    and a real-device test, same caveat class as Remote Session Kill's
+    remaining live-test item above.
 - [x] **Product price change history log — found already built by a
       parallel session; verified correct against live data, no changes
       needed.** `product_price_history` table (one row per changed field:

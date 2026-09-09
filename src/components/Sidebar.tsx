@@ -99,6 +99,7 @@ export const SECONDARY_NAV_ITEMS = [
   { key: "expPersonal", label: "Personal Drawings", icon: User, ownerOnly: true },
   { key: "ownerreports", label: "Owner Financial Reports", icon: Shield, ownerOnly: true },
   { key: "staffAccess", label: "Android Access Area", icon: Users, ownerOnly: true },
+  { key: "staffPerformance", label: "Staff Performance", icon: TrendingUp, ownerOnly: true },
   { key: "statusDashboard", label: "System Status Dashboard", icon: Activity, ownerOnly: true },
   { key: "auditLog", label: "Audit Log", icon: ClipboardList, ownerOnly: true },
   { key: "setupWizard", label: "🚀 Shuruaati Setup Checklist", icon: Rocket, ownerOnly: true },

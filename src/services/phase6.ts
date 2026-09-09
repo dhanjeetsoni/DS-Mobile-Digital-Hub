@@ -120,6 +120,41 @@ export async function listReturnApprovalRequests(storeId: string, status: "pendi
   return (data || []) as ReturnApprovalRequest[];
 }
 
+// Phase 6: refund/return requires owner approval before it completes.
+// request_return_approval already existed server-side (SECURITY DEFINER,
+// hard-rejects any caller whose role isn't 'staff') but had no client
+// wrapper -- nothing could actually call it. record_return itself already
+// refuses staff directly ('staff return requires owner approval'), so
+// without this, a staff member trying to process a return today just hits
+// that raw Postgres error with no graceful path.
+export async function requestReturnApproval(input: {
+  storeId: string;
+  saleId: string | null;
+  returnNo: string;
+  customerId: string | null;
+  returnType: string;
+  reason: string;
+  refundMethod: string;
+  notes: string;
+  items: unknown[];
+  idempotencyKey: string;
+}): Promise<string> {
+  const { data, error } = await supabase.rpc("request_return_approval", {
+    p_store_id: input.storeId,
+    p_sale_id: input.saleId,
+    p_return_no: input.returnNo,
+    p_customer_id: input.customerId,
+    p_return_type: input.returnType,
+    p_reason: input.reason,
+    p_refund_method: input.refundMethod,
+    p_notes: input.notes,
+    p_items: input.items,
+    p_idempotency_key: input.idempotencyKey,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
 export async function approveReturn(requestId: string, approve: boolean, note = "") {
   const { data, error } = await supabase.rpc("approve_return_approval", {
     p_request_id: requestId,

@@ -489,6 +489,31 @@ Deno.serve(async (req) => {
       return json({ ok: true, requestId: id });
     }
 
+    // 2026-09-06 fix: security_alert must fire regardless of WHO is on the
+    // device when a PIN is guessed wrong — Phase 2 gave every profile
+    // (owner, manager, AND staff) their own PIN, so this needed to move
+    // ahead of the owner/manager-only gate below (same pattern already used
+    // for confidential_price_request above) so a staff device's wrong PIN
+    // attempts actually reach the owner. Also switched the connection
+    // lookup from `user_id = auth.uid()` (the CALLER's own Telegram
+    // connection — staff never has one, only the owner/manager who ran
+    // Telegram Connect does) to `store_id = profile.store_id` (same fix as
+    // confidential_price_request above), so it finds the OWNER's connection
+    // no matter which profile's device triggered the alert. Verified this
+    // was actually broken: a staff-session call to this action, before this
+    // fix, always hit the 403 "Not authorized" gate below and the alert
+    // silently never sent (the client only console.warns on failure here,
+    // never surfaces it to the person on the PIN screen).
+    if (action === "security_alert") {
+      const { data: connection } = await admin.from("telegram_connections")
+        .select("chat_id").eq("store_id", profile.store_id).maybeSingle();
+      if (!connection?.chat_id) return json({ error: "Telegram is not connected." }, 400);
+      const customMsg = String(body.message || "Security alert on your shop's counter device.");
+      const text = `🔴 SECURITY ALERT — DS Mobile & Digital Hub\n\n${customMsg}\n\nTime: ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`;
+      const result = await telegram("sendMessage", { chat_id: connection.chat_id, text });
+      return json({ ok: true, telegramMessageId: result?.message_id });
+    }
+
     if (!["owner", "manager"].includes(profile.role)) return json({ error: "Not authorized" }, 403);
 
     if (action === "begin") {
@@ -527,16 +552,6 @@ Deno.serve(async (req) => {
       // koi bhi Owner connect nahi kar sakta). botToken is only ever read from this function's
       // own env, never sent to or trusted from the client, so this is a safe boolean-only flag.
       return json({ connected: !!connection?.chat_id, connection: connection || null, botConfigured: Boolean(botToken) });
-    }
-
-    if (action === "security_alert") {
-      const { data: connection } = await admin.from("telegram_connections")
-        .select("chat_id").eq("user_id", user.id).eq("store_id", profile.store_id).maybeSingle();
-      if (!connection?.chat_id) return json({ error: "Telegram is not connected." }, 400);
-      const customMsg = String(body.message || "Security alert on your shop's counter device.");
-      const text = `🔴 SECURITY ALERT — DS Mobile & Digital Hub\n\n${customMsg}\n\nTime: ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`;
-      const result = await telegram("sendMessage", { chat_id: connection.chat_id, text });
-      return json({ ok: true, telegramMessageId: result?.message_id });
     }
 
     if (action === "send_report") {

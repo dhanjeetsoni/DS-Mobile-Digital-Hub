@@ -61,6 +61,8 @@ export const sendTelegramSecurityAlert=(message:string)=>call('security_alert',m
 // Generic plain-text report sender (Customer Directory export, etc.) — same
 // transport as the security alert but without the alert framing/prefix.
 export const sendTelegramReport=(message:string)=>call('send_report',message);
-// Weekly owner report — sends a designed PDF (not plain text) built server-side
-// from the report object computed in utils/weeklyReport.ts.
+// Weekly owner report — sends a designed PDF (not plain text) built server-side.
+// The report object's numbers now come from the get_my_weekly_report_payload
+// RPC (relational sales/sale_items/purchases/products tables — see
+// OwnerReportsView.tsx), not a client-computed blob.
 export const sendWeeklyReportToTelegram=(report:unknown)=>call('send_weekly_report',undefined,report);

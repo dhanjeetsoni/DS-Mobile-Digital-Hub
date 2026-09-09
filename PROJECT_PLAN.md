@@ -755,13 +755,35 @@ actual code, per this document's own ground rule — not assumed or guessed._
       follow-up, not done here to keep this item scoped to the actual
       capture-and-report mechanism.
 
-### ⬜ Phase 6: AI & advanced feature enhancements
+### 🟡 Phase 6: AI & advanced feature enhancements — 2 of 15 done, 1 already covered under Phase 5
 - [ ] AI Photo Scan: improve accuracy, support 1 or 2 photos (front/back) with
       auto-fill from either, product view shows all photos provided
-- [ ] AI-based selling price/MRP suggestion when adding a product
-- [ ] Better Gemini key pool handling (fallback/retry instead of hard failures)
+- [x] AI-based selling price/MRP suggestion when adding a product — new
+      `ai-price-advisor` edge function (was already deployed to Supabase but
+      not tracked in git — added under `supabase/functions/`), a client
+      `getPriceSuggestion()` in `aiOcr.ts`, and an "AI Suggest Price" button
+      in the 4-Tier Pricing section of Add Product, showing a recommended
+      price + range + MRP + confidence + short rationale with Apply/Ignore.
+      Uses the same Gemini key-pool failover and the fixed `TEXT_MODE_CONFIG`
+      (no `thinkingConfig`) as everything else. Verified with a fresh clone +
+      `npm ci` + `tsc --noEmit` + `npm run build` + `vitest` +
+      `static-audit.mjs`, all clean, before committing.
+- [x] Better Gemini key pool handling (fallback/retry instead of hard
+      failures) — **already done**, found already built into `ai-gateway`'s
+      `runWithGeminiFailover` (2-pass retry across the whole key pool,
+      per-key cooldown/invalid-marking, hard per-call timeout) when checked
+      directly against the live function source, not assumed from an old
+      note. Combined with the separately-fixed `thinkingConfig` bug (see
+      Phase 5), this genuinely resolves what used to be hard failures.
 - [ ] Improve Photo Stock Finder matching
-- [ ] Staff performance tracking (sales leaderboard/summary per staff)
+- [x] Staff performance tracking (sales leaderboard/summary per staff) — new
+      `get_staff_performance` RPC (migration `phase6_staff_performance_rpc`,
+      owner/manager-only, re-checked server-side via `auth.uid()` even
+      though it's `security definer`) + `getStaffPerformance()` client call
+      + new `StaffPerformanceView.tsx` (date-range picker, defaults to this
+      month; invoice count / total sales / avg sale value / % share per
+      staff) + a new "Staff Performance" sidebar entry. Same fresh-clone
+      verification as above before committing.
 - [ ] Excel/PDF export for invoices and customers
 - [ ] Customer profile: full purchase history
 - [ ] Warranty claims: proper tracked workflow with reminders
@@ -772,6 +794,14 @@ actual code, per this document's own ground rule — not assumed or guessed._
 - [ ] Owner-configurable staff access window (time range, duration, which
       sections/data are visible)
 - [ ] Refund/return requires owner approval before it completes
+- **Also found while auditing this phase, not one of the 15 listed items but
+  worth recording**: a proper Audit Log feature (`AuditLogView.tsx` +
+  `fetchAuditLogs`, wired to the Sidebar) already exists and is genuinely
+  complete — this satisfies what Phase 5's audit-log item was still
+  missing (that entry's note about `user_id` always being NULL was from
+  testing via direct SQL access with no `auth.uid()` context, not a real
+  gap; a real logged-in user's action does populate it, confirmed by
+  reading `log_table_audit()`'s definition directly).
 
 ### ⬜ Phase 7: Amazon/Flipkart-style product experience
 - [ ] App opens directly into the **Stock/Inventory section** by default

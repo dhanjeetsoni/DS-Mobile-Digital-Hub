@@ -673,6 +673,40 @@ actual code, per this document's own ground rule — not assumed or guessed._
     already correct).
   - Verified (this session): typecheck clean, full test suite (26 tests)
     pass, static audit passes, production build clean.
+- [x] **Every text-based AI feature was silently failing app-wide — root
+      cause found and fixed 2026-09-08, independently live-verified, not
+      just trusted from a prior session's diagnosis.** `gemini-3.5-flash-lite`
+      (the text-tier model every non-vision AI route uses) started hard-
+      rejecting a `thinkingConfig` param with `400 INVALID_ARGUMENT` —
+      Google changed this "lite" model's accepted parameters. Every single
+      text-based feature was affected: Business Insights, Staff Advice,
+      Screen-Size Lookup/-Range, Customer Reply Draft, Demand Forecast,
+      Resale Price Advisor, Churn Risk, and the Daily Digest above. Vision/
+      OCR routes (phone/accessory/expense scan, product photo search) use a
+      different model (`gemini-3.7-flash`) and were never affected.
+  - **Verified directly against Google's live API** (via `pg_net`, not
+    just re-reading code): same model+prompt, only the config differs —
+    with `thinkingConfig` → `400 INVALID_ARGUMENT`; without it → `200 OK`.
+    Confirms both the diagnosis and the fix.
+  - Fix: split into `FAST_MODE_CONFIG` (keeps `thinkingConfig`, stays on
+    the 4 vision/OCR routes only) and `TEXT_MODE_CONFIG` (empty, used by
+    all 8 text routes + the digest). Also added a hard per-call timeout
+    and a 2-pass, no-sleep-on-first-pass key-rotation strategy for
+    Google's own transient "model overloaded" `503`s (previously the old
+    retry strategy could burn 50+ seconds on one already-bad key before
+    the Edge Function's own timeout killed the request silently).
+  - **Repo/live drift closed** (same recurring pattern as elsewhere in
+    this file — a fix deployed live with no matching commit): both
+    `ai-gateway/index.ts` and `daily-digest-worker/index.ts` in git still
+    had the broken config; synced both to match the already-verified-
+    working live versions.
+  - **Known gap, stated plainly**: the `debug-gemini-probe` Edge Function
+    used to diagnose this is still live — no delete-edge-function tool is
+    available in this environment. Harmless (no secrets, nothing calls it
+    unprompted) but should be deleted via the Supabase dashboard when
+    convenient.
+  - Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+    production build clean.
 - [x] **Instant low-stock alerts → Telegram + in-app.** In-app was already
       effectively instant from Phase 1 (`stockOf()`/`subscribeToLiveStock`'s
       realtime feed updates the header's "LOW STOCK: N SKUs" badge within

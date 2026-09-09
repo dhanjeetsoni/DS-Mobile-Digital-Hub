@@ -955,9 +955,46 @@ actual code, per this document's own ground rule — not assumed or guessed._
   - Verified: `tsc --noEmit`, full test suite (26/26), static audit
     (16/16), production build — all clean.
 - [ ] Biometric (fingerprint) unlock alongside PIN
-- [ ] Remote session kill (owner force-logs-out a device from Windows)
-- [ ] Product price change history log
-- [ ] Customizable receipt branding (shop logo/name/address)
+- [ ] Remote session kill (owner force-logs-out a device from Windows) —
+      **partially designed, NOT applied/deployed yet**: drafted a
+      `profiles.force_logout_at` column + doc comment, intended to piggyback
+      on the realtime channel App.tsx already subscribes to per staff
+      profile (`staff-access-<id>`, currently used for the access_enabled
+      revoke push) so an owner setting this timestamp kicks an already-open
+      staff session immediately without disabling the account. Not yet
+      migrated live, no RPC, no StaffAccessView button, no client-side
+      realtime handler update. Next session: do all of that, then test with
+      a real second session before checking this off.
+- [x] **Product price change history log — found already built by a
+      parallel session; verified correct against live data, no changes
+      needed.** `product_price_history` table (one row per changed field:
+      `field`/`old_value`/`new_value`, covers cost_price/selling_price/mrp/
+      confidential_price) + `record_product_price_history()` AFTER UPDATE
+      trigger on `products` + `get_product_price_history(store_id,
+      product_id, limit)` RPC (owner/manager-gated). Tested live: changed a
+      real product's selling_price 80→85→80, both changes appeared via the
+      RPC in the right order. **My own mistake caught and reverted in the
+      same session**: I didn't check for this existing work first and wrote
+      a second, incompatible trigger+table migration (wide-format columns
+      that didn't match the table that already existed) — it would have
+      thrown on every future price edit (a failed trigger rolls back the
+      whole UPDATE). Caught before it was ever deployed to the live DB
+      config permanently — dropped my trigger/function/policy immediately,
+      confirmed only the original (correct) trigger remains. **Still open**:
+      no frontend UI reads `get_product_price_history` anywhere yet
+      (EditProductModal has no "Price History" button) — the log is being
+      captured but an owner can't see it in-app yet, only via direct DB
+      query. Next session should add that button/view.
+- [x] **Customizable receipt branding (shop logo/name/address) — done.**
+      shopName/address/phone/gstin/upiId/invoiceTerms/invoiceFooter were
+      already fully wired end-to-end (Settings inputs -> `db.settings` ->
+      `InvoiceViewerModal` render) before this session touched it — only
+      gap was `logo`: the invoice viewer already rendered
+      `db.settings.logo` if present, but nothing in Settings could ever set
+      it. Added an Upload/Remove logo control (small preview, compressed to
+      ~240px/40KB via `compressImageToDataUrl` since — unlike per-product
+      photos — this one field re-syncs on every unrelated settings save).
+      `tsc --noEmit` clean.
 - [ ] Owner-configurable staff access window (time range, duration, which
       sections/data are visible)
 - [ ] Refund/return requires owner approval before it completes

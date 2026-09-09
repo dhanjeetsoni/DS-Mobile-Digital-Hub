@@ -351,7 +351,7 @@ export default function App() {
   const [staffLoginPassword, setStaffLoginPassword] = useState("");
   const [staffLoginBusy, setStaffLoginBusy] = useState(false);
   const [staffLoginError, setStaffLoginError] = useState("");
-  const [staffDeniedReason, setStaffDeniedReason] = useState<"disabled" | "expired" | null>(null);
+  const [staffDeniedReason, setStaffDeniedReason] = useState<"disabled" | "expired" | "kicked" | null>(null);
   const [gateShakeError, setGateShakeError] = useState(false);
   const [gateBusy, setGateBusy] = useState(false);
   const [gateAttempts, setGateAttempts] = useState<{ count: number; lockUntil: number }>(() => {
@@ -988,6 +988,23 @@ export default function App() {
   // is online, an owner turning access OFF (or changing the window) reaches
   // an already-logged-in staff device immediately instead of waiting for
   // their next 5s local-clock check or their next app open.
+  // Phase 6 — Remote Session Kill: owner taps "Force Logout" on a staff
+  // device from Windows/Owner app (see admin_force_logout_profile(), wired
+  // in StaffAccessView below). That RPC only writes profiles.force_logout_at
+  // = now(); this baseline + realtime check is what actually turns that
+  // into an instant, "even mid-sale" sign-out on the targeted device —
+  // otherwise the timestamp would just sit there unread.
+  // Baseline captured once per login: whatever force_logout_at already was
+  // at sign-in time is "old news" (a kill from a previous session, already
+  // acted on) — only a value that changes AFTER this baseline is a fresh,
+  // live kill signal for the session currently running on this device.
+  const forceLogoutBaselineRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (gateUnlocked && cloudProfile?.role === "staff") {
+      forceLogoutBaselineRef.current = cloudProfile?.force_logout_at ?? null;
+    }
+  }, [gateUnlocked, cloudProfile?.role, cloudProfile?.id]);
+
   useEffect(() => {
     if (!gateUnlocked || cloudProfile?.role !== "staff" || !cloudProfile?.id) return;
     const forceKickDeleted = () => {
@@ -1011,6 +1028,18 @@ export default function App() {
         (payload: any) => {
           const row = payload.new;
           if (!row) return;
+          if (row.force_logout_at && row.force_logout_at !== forceLogoutBaselineRef.current) {
+            clearCachedStaffSession();
+            supabase.auth.signOut().catch(() => {});
+            setCloudUser(null);
+            setCloudProfile(null);
+            setOwnerMode(false);
+            setStaffDeniedReason("kicked");
+            setGateStage("staffDenied");
+            setGateUnlocked(false);
+            showToast("Owner ne aapko is device se turant logout kar diya.", "amber");
+            return;
+          }
           if (!row.access_enabled) {
             clearCachedStaffSession();
             supabase.auth.signOut().catch(() => {});
@@ -4135,13 +4164,15 @@ export default function App() {
             <div className="gate-auth-head">
               <div className="warn-badge"><ShieldAlert size={22} /></div>
               <div>
-                <h3>{staffDeniedReason === "expired" ? "Access Time Khatam Ho Gaya" : "Access Disabled"}</h3>
+                <h3>{staffDeniedReason === "expired" ? "Access Time Khatam Ho Gaya" : staffDeniedReason === "kicked" ? "Logout Kar Diya Gaya" : "Access Disabled"}</h3>
                 <p>Contact Shop Owner for Access</p>
               </div>
             </div>
             <div className="notice" style={{ marginTop: 8 }}>
               {staffDeniedReason === "expired"
                 ? "Owner ne aapko jitna time diya tha wo poora ho chuka hai. Dobara access ke liye shop owner se baat karo."
+                : staffDeniedReason === "kicked"
+                ? "Owner ne aapko is device se turant logout kar diya hai. Dobara login karne ke liye shop owner se baat karo."
                 : "Owner ne aapka access is waqt band kar rakha hai. Dobara access ke liye shop owner se baat karo."}
             </div>
             <button

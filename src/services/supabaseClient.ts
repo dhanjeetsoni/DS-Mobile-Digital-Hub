@@ -77,4 +77,4 @@ if (!isCloudConfigured && typeof console !== "undefined") {
 }
 
 export async function getCurrentUser(){ const {data}=await supabase.auth.getUser(); return data.user ?? null; }
-export async function getCurrentProfile(){ const user=await getCurrentUser(); if(!user)return null; const {data}=await supabase.from('profiles').select('id,email,full_name,store_id,role,staff_login_id,staff_name,access_enabled,access_mode,access_expires_at,access_granted_at,visibility_from').eq('id',user.id).maybeSingle(); return data ?? null; }
+export async function getCurrentProfile(){ const user=await getCurrentUser(); if(!user)return null; const {data}=await supabase.from('profiles').select('id,email,full_name,store_id,role,staff_login_id,staff_name,access_enabled,access_mode,access_expires_at,access_granted_at,visibility_from,force_logout_at').eq('id',user.id).maybeSingle(); return data ?? null; }

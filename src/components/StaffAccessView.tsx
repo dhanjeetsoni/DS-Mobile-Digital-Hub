@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Check, Clock, Copy, KeyRound, Loader2, Lock, Plus, Power, RefreshCcw, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
+import { Check, Clock, Copy, KeyRound, Loader2, Lock, LogOut, Plus, Power, RefreshCcw, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { adminResetPin, adminClearPin } from "../services/pinAuth";
+import { forceLogoutStaff } from "../services/phase6";
 import {
   createStaffAccount,
   deleteStaffAccount,
@@ -295,6 +296,25 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
     }
   };
 
+  // Phase 6 — Remote Session Kill: staff's account/access stays exactly as
+  // it is (unlike Turn OFF / Delete above) — this only force-signs-out
+  // whatever device they're CURRENTLY logged in on right now (e.g. phone
+  // lost/stolen, or handed to someone else), instantly if that device is
+  // online. They can simply log back in again right after with their same
+  // Login ID + Password — this is not a ban, just a kick.
+  const handleForceLogout = async (member: StaffProfile) => {
+    if (!window.confirm(`${member.staff_name || member.staff_login_id} ko is waqt jis bhi device par login hai, wahan se turant logout kar dein?\n\nUnka account/access band nahi hoga — wo dobara apni Login ID/Password se turant login kar sakte hain.`)) return;
+    setBusyId(member.id);
+    try {
+      await forceLogoutStaff(member.id);
+      toast("Force-logout bhej diya gaya (agar wo online hain to turant kick ho jayenge).", "green");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Force logout fail hua.", "red");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   if (!isCloudConfigured) {
     return (
       <div className="section">
@@ -426,6 +446,9 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
                       </button>
                       <button className="btn sm" onClick={() => handlePinClear(s)} disabled={busyId === s.id}>
                         {busyId === s.id ? <Loader2 size={12} className="spin" /> : <Lock size={12} />} Clear PIN
+                      </button>
+                      <button className="btn sm" style={{ color: "#b45309", borderColor: "#f59e0b" }} onClick={() => handleForceLogout(s)} disabled={busyId === s.id} title="Jis bhi device par ye staff abhi login hai, wahan se turant nikaal do">
+                        {busyId === s.id ? <Loader2 size={12} className="spin" /> : <LogOut size={12} />} Force Logout
                       </button>
                       <button className="btn sm danger" onClick={() => handleDelete(s)} disabled={busyId === s.id}>
                         <Trash2 size={12} /> Delete

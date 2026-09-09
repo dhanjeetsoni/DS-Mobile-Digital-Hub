@@ -801,7 +801,27 @@ actual code, per this document's own ground rule — not assumed or guessed._
       of this codebase already makes elsewhere.
       Verified: `npm install && npx tsc --noEmit && npx vitest run (26/26)
       && npm run build && node scripts/static-audit.mjs (16/16)` all clean.
-- [ ] Warranty claims: proper tracked workflow with reminders
+- [x] **Warranty claims: proper tracked workflow with reminders — backend
+      was already fully built and running live (trigger + daily cron +
+      Telegram), it just never showed up anywhere in the UI.** Found while
+      deep-verifying: `schedule_warranty_claim_reminder` trigger,
+      `dispatch_due_warranty_reminders()` daily cron, and
+      `next_reminder_at`/`last_reminder_at`/`reminder_count`/
+      `reminder_interval_days` columns on `warranty_claims` all already
+      existed and were already firing for real. This session:
+  - Wired a live fetch of that reminder data into
+    `ReturnsExchangesView.tsx` (matched by `claim_no`, not the claim's
+    local id — same "client-local id isn't the real relational id"
+    pattern already established for products).
+  - Added a "Next Reminder" column (date + how many times sent so far) to
+    both the desktop table and the mobile card view.
+  - Added a new `remind_warranty_claim_now(p_claim_id)` RPC (owner/manager
+    only) + a "Remind Now" button, so a claim can be nudged immediately
+    instead of waiting for its next scheduled date — mirrors the cron's
+    own per-claim logic (same message format, same reminder_count/
+    next_reminder_at bump) rather than just re-implementing it differently.
+  - Verified: `tsc --noEmit`, full test suite (26/26), static audit
+    (16/16), production build — all clean.
 - [ ] Biometric (fingerprint) unlock alongside PIN
 - [ ] Remote session kill (owner force-logs-out a device from Windows)
 - [ ] Product price change history log

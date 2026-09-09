@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { RotateCcw, Search, CheckCircle2, ArrowRight, Printer, AlertTriangle, RefreshCw, ShieldCheck, Clock } from "lucide-react";
 import { Database, Sale, ReturnRecord, ExchangeRecord, ReturnItem, WarrantyClaim, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
@@ -68,6 +68,79 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
   const [warrantyIssue, setWarrantyIssue] = useState("");
   const [isSavingWarranty, setIsSavingWarranty] = useState(false);
   const [claimStatusDraft, setClaimStatusDraft] = useState<{ [claimId: string]: string }>({});
+  // Phase 6: the warranty-reminder backend (schedule_warranty_claim_reminder
+  // trigger + the daily dispatch_due_warranty_reminders() cron + Telegram)
+  // already existed and was already running live — it just never showed up
+  // anywhere in the UI (no "next reminder" date, no reminder count, no way
+  // to nudge one manually). Keyed by claim_no rather than the claim's local
+  // id, same "client-local id != real relational id" pattern as products.
+  const [reminderInfo, setReminderInfo] = useState<Record<string, { id: string; nextReminderAt: string | null; reminderCount: number; lastReminderAt: string | null }>>({});
+  const [remindingClaimNo, setRemindingClaimNo] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isCloudConfigured || !storeId) return;
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from("warranty_claims")
+        .select("id, claim_no, next_reminder_at, reminder_count, last_reminder_at")
+        .eq("store_id", storeId);
+      if (!active || error || !data) return;
+      const map: Record<string, { id: string; nextReminderAt: string | null; reminderCount: number; lastReminderAt: string | null }> = {};
+      for (const row of data) {
+        if (!row.claim_no) continue;
+        map[row.claim_no] = {
+          id: row.id,
+          nextReminderAt: row.next_reminder_at,
+          reminderCount: row.reminder_count || 0,
+          lastReminderAt: row.last_reminder_at,
+        };
+      }
+      setReminderInfo(map);
+    })();
+    return () => { active = false; };
+  }, [isCloudConfigured, storeId, db.warrantyClaims]);
+
+  const handleRemindNow = async (claimNo: string) => {
+    const info = reminderInfo[claimNo];
+    if (!info) {
+      toast("Ye claim abhi cloud se sync nahi hua — thodi der baad try karein.", "amber");
+      return;
+    }
+    setRemindingClaimNo(claimNo);
+    try {
+      const { data, error } = await supabase.rpc("remind_warranty_claim_now", { p_claim_id: info.id });
+      if (error) throw error;
+      if (data?.sent) {
+        toast(`Reminder bhej diya — ${claimNo}`, "green");
+        setReminderInfo((prev) => ({
+          ...prev,
+          [claimNo]: {
+            ...prev[claimNo],
+            reminderCount: (prev[claimNo]?.reminderCount || 0) + 1,
+            lastReminderAt: new Date().toISOString(),
+          },
+        }));
+      } else {
+        toast("Telegram connected nahi hai — Settings mein connect karein.", "amber");
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Reminder bhejne mein error aaya.", "red");
+    } finally {
+      setRemindingClaimNo(null);
+    }
+  };
+
+  function formatReminderDate(iso: string | null): string {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    const now = new Date();
+    const diffDays = Math.round((d.getTime() - now.setHours(0, 0, 0, 0)) / 86400000);
+    if (diffDays === 0) return "Today";
+    if (diffDays === 1) return "Tomorrow";
+    if (diffDays < 0) return `${d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} (overdue)`;
+    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  }
 
   const handleSearchInvoice = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1114,6 +1187,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
                     <th>Customer</th>
                     <th>Issue</th>
                     <th>Status</th>
+                    <th>Next Reminder</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -1130,6 +1204,26 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
                         <td>{c.customer?.name || "Walk-in"}</td>
                         <td style={{ maxWidth: "220px" }}>{c.issueDescription}</td>
                         <td><span className="badge" style={{ background: statusColor, color: "#fff" }}>{c.status}</span></td>
+                        <td>
+                          {c.status === "Resolved" || c.status === "Rejected" ? (
+                            <span className="hint">—</span>
+                          ) : reminderInfo[c.claimNo] ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                              <span style={{ fontWeight: 700 }}>{formatReminderDate(reminderInfo[c.claimNo].nextReminderAt)}</span>
+                              <span className="hint">{reminderInfo[c.claimNo].reminderCount}x sent</span>
+                              <button
+                                className="btn sm"
+                                style={{ marginTop: "2px" }}
+                                disabled={remindingClaimNo === c.claimNo}
+                                onClick={() => handleRemindNow(c.claimNo)}
+                              >
+                                {remindingClaimNo === c.claimNo ? "Sending…" : "Remind Now"}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="hint">Syncing…</span>
+                          )}
+                        </td>
                         <td>
                           <div style={{ display: "flex", gap: "6px" }}>
                             <select
@@ -1172,6 +1266,25 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
                       <span className="badge" style={{ background: statusColor, color: "#fff", height: "fit-content" }}>{c.status}</span>
                     </div>
                     <span className="hint">{c.issueDescription}</span>
+                    {c.status !== "Resolved" && c.status !== "Rejected" && (
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        {reminderInfo[c.claimNo] ? (
+                          <span className="hint">
+                            Next reminder: <b>{formatReminderDate(reminderInfo[c.claimNo].nextReminderAt)}</b> • {reminderInfo[c.claimNo].reminderCount}x sent
+                          </span>
+                        ) : (
+                          <span className="hint">Syncing…</span>
+                        )}
+                        <button
+                          className="btn sm"
+                          style={{ minHeight: "36px" }}
+                          disabled={!reminderInfo[c.claimNo] || remindingClaimNo === c.claimNo}
+                          onClick={() => handleRemindNow(c.claimNo)}
+                        >
+                          {remindingClaimNo === c.claimNo ? "Sending…" : "Remind Now"}
+                        </button>
+                      </div>
+                    )}
                     <div style={{ display: "flex", gap: "6px" }}>
                       <select
                         style={{ flex: 1, minHeight: "40px" }}

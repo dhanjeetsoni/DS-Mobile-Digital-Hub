@@ -49,6 +49,7 @@ import { OwnerReportsView } from "./components/OwnerReportsView";
 import { WindowsAppModal } from "./components/WindowsAppModal";
 import { LowStockAlertsView } from "./components/LowStockAlertsView";
 import { AuditLogView } from "./components/AuditLogView";
+import { StaffPerformanceView } from "./components/StaffPerformanceView";
 import { LoyaltyRewardsView } from "./components/LoyaltyRewardsView";
 import { DownloadAreaView } from "./components/DownloadAreaView";
 import { ProfitLossDashboardView } from "./components/ProfitLossDashboardView";
@@ -3515,6 +3516,9 @@ export default function App() {
 
       case "auditLog":
         return <AuditLogView storeId={cloudProfile?.store_id} cloudProfile={cloudProfile} showToast={showToast} />;
+
+      case "staffPerformance":
+        return <StaffPerformanceView showToast={showToast} />;
 
       case "downloadArea":
         return <DownloadAreaView db={catalogDb} isStaff={cloudProfile?.role === "staff"} showToast={showToast} />;

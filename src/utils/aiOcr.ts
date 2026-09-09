@@ -224,3 +224,47 @@ export async function processPhoneOcr(
 
 }
 
+// Phase 6: AI-based selling price/MRP suggestion when adding a product.
+// Separate edge function (ai-price-advisor) from ai-gateway, deliberately
+// kept independent since it's a distinct feature with its own rate limit.
+const AI_PRICE_ADVISOR_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/ai-price-advisor` : "";
+
+export interface PriceSuggestion {
+  mrp: number | null;
+  recommendedSellingPrice: number;
+  priceRangeLow: number;
+  priceRangeHigh: number;
+  confidence: "low" | "medium" | "high";
+  rationale: string;
+}
+
+export async function getPriceSuggestion(input: {
+  brand?: string;
+  productName: string;
+  category: string;
+  compatibleModels?: string[];
+  purchasePrice?: number | null;
+  currentSellingPrice?: number | null;
+  currentMrp?: number | null;
+}): Promise<PriceSuggestion> {
+  if (!AI_PRICE_ADVISOR_URL) throw new Error("AI unavailable — cloud not configured.");
+  const res = await fetch(AI_PRICE_ADVISOR_URL, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify(input),
+  });
+  const json = await res.json().catch(() => null);
+  if (res.ok && json?.success && json?.recommendation) {
+    const r = json.recommendation;
+    return {
+      mrp: r.mrp === null || r.mrp === undefined ? null : Number(r.mrp),
+      recommendedSellingPrice: Number(r.recommendedSellingPrice) || 0,
+      priceRangeLow: Number(r.priceRangeLow) || 0,
+      priceRangeHigh: Number(r.priceRangeHigh) || 0,
+      confidence: ["low", "medium", "high"].includes(r.confidence) ? r.confidence : "low",
+      rationale: String(r.rationale || ""),
+    };
+  }
+  throw new Error(json?.error || "AI price suggestion failed. Enter manually.");
+}
+

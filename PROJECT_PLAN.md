@@ -954,17 +954,46 @@ actual code, per this document's own ground rule — not assumed or guessed._
     next_reminder_at bump) rather than just re-implementing it differently.
   - Verified: `tsc --noEmit`, full test suite (26/26), static audit
     (16/16), production build — all clean.
+- [x] **Remote session kill (owner force-logs-out a device from Windows) —
+      completed 2026-09-07.** The design drafted below was correct; finished
+      wiring it end-to-end:
+  - Live-DB audit found the backend (`profiles.force_logout_at`,
+    `admin_force_logout_profile()` RPC, `phase6.ts`'s `forceLogoutStaff()`)
+    was already there from an earlier session, but genuinely could not have
+    worked: Phase 2's column-level SELECT allow-list on `profiles` (written
+    before `force_logout_at` existed) silently excluded it too, alongside
+    the real secrets (`pin_hash` etc.) it was meant to protect — no client
+    could ever read the kill signal. Fixed with
+    `grant select (force_logout_at) on public.profiles to authenticated`.
+  - `getCurrentProfile()` didn't fetch the column even once it became
+    readable — added to its select list.
+  - Added the "Force Logout" button to StaffAccessView (same
+    busyId/confirm/toast pattern as the existing Clear PIN/Delete
+    actions), worded to make clear this only kicks the current session —
+    account/access stays untouched, they can log back in immediately with
+    the same Login ID/Password.
+  - Wired the actual kick into App.tsx by reusing the existing
+    `staff-access-<id>` realtime channel (the one that already instantly
+    kills a session when the owner disables access) — added a
+    `force_logout_at` check to its UPDATE handler, with a per-login
+    baseline ref so an old/stale timestamp from a *previous* kill can never
+    re-trigger on the *next* legitimate login.
+  - Added a new `"kicked"` staffDeniedReason + matching Hinglish message,
+    distinct from the existing "disabled"/"expired" screens — this is a
+    kick, not a ban, and the message says so.
+  - Verified: `tsc --noEmit` and `vite build` both clean;
+    `has_column_privilege` confirmed the grant fix actually took effect
+    (`force_logout_at` was `false`/unreadable before, `true` after); the
+    one existing staff account's `force_logout_at` is `null` (clean slate,
+    won't spuriously fire on their next login).
+  - Not yet done (needs a second physical/browser session to verify,
+    flagging honestly rather than checking it off blind): an actual live
+    two-device test — owner clicks Force Logout while a staff device is
+    genuinely logged in and mid-session, confirming the kick really lands
+    within a few seconds. Everything up to that final live click has been
+    verified as correctly wired; next session (or the owner) should do that
+    one real-world test before fully trusting it under pressure.
 - [ ] Biometric (fingerprint) unlock alongside PIN
-- [ ] Remote session kill (owner force-logs-out a device from Windows) —
-      **partially designed, NOT applied/deployed yet**: drafted a
-      `profiles.force_logout_at` column + doc comment, intended to piggyback
-      on the realtime channel App.tsx already subscribes to per staff
-      profile (`staff-access-<id>`, currently used for the access_enabled
-      revoke push) so an owner setting this timestamp kicks an already-open
-      staff session immediately without disabling the account. Not yet
-      migrated live, no RPC, no StaffAccessView button, no client-side
-      realtime handler update. Next session: do all of that, then test with
-      a real second session before checking this off.
 - [x] **Product price change history log — found already built by a
       parallel session; verified correct against live data, no changes
       needed.** `product_price_history` table (one row per changed field:

@@ -80,6 +80,7 @@ import { getRepairDiagnosis } from "./services/aiOps";
 import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./services/whatsapp";
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
 import { celebrate } from "./utils/celebrate";
+import { compressImageToDataUrl, estimateDataUrlBytes, formatBytes } from "./utils/imageCompress";
 import {
   Search,
   Plus,
@@ -302,6 +303,13 @@ export default function App() {
   // Phase 2: self-service "My PIN" form state (used by owner/manager in
   // Settings, and by anyone via the account menu — see myPinForm usage).
   const [myPinForm, setMyPinForm] = useState({ current: "", next: "", confirm: "", busy: false, msg: "" });
+  // Phase 6: shop logo upload (Settings -> receipt branding). Kept as a
+  // small compressed data URL directly in db.settings.logo (already read
+  // by InvoiceViewerModal everywhere it prints a receipt/invoice — the
+  // rendering side was already fully wired, only this upload control was
+  // missing). Compressed hard (240px/40KB) since, unlike product photos,
+  // this one small image re-syncs on every unrelated settings save.
+  const [logoUploadBusy, setLogoUploadBusy] = useState(false);
   // Phase 5 — Daily Sales Digest (Telegram) on/off. null = not loaded yet
   // (fetched lazily the first time the Settings page is opened by an
   // owner/manager, since it's an extra round trip nobody needs on every
@@ -3713,6 +3721,61 @@ export default function App() {
                     value={db.settings.address}
                     onChange={(e) => setDb({ ...db, settings: { ...db.settings, address: e.target.value } })}
                   />
+                </div>
+                <div className="field full">
+                  <label>Shop Logo (bills/receipts par dikhega)</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div
+                      style={{
+                        width: 56, height: 56, borderRadius: 10, overflow: "hidden",
+                        background: "var(--paper)", display: "flex", alignItems: "center", justifyContent: "center",
+                        border: "1px solid var(--line)", flexShrink: 0,
+                      }}
+                    >
+                      {db.settings.logo ? (
+                        <img src={db.settings.logo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                      ) : (
+                        <span style={{ fontSize: 11, color: "var(--ink-soft)" }}>No logo</span>
+                      )}
+                    </div>
+                    <label className="btn sm" style={{ cursor: "pointer" }}>
+                      {logoUploadBusy ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
+                      {logoUploadBusy ? "Uploading…" : "Upload Logo"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        disabled={logoUploadBusy}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (!file) return;
+                          setLogoUploadBusy(true);
+                          try {
+                            const dataUrl = await compressImageToDataUrl(file, { maxDimension: 240, quality: 0.75, maxBytes: 40 * 1024 });
+                            setDb({ ...db, settings: { ...db.settings, logo: dataUrl } });
+                            showToast(`Logo lag gaya (${formatBytes(estimateDataUrlBytes(dataUrl))}) — Save Settings dabana na bhoolein`, "green");
+                          } catch (err) {
+                            showToast(err instanceof Error ? err.message : "Logo upload fail hua.", "red");
+                          } finally {
+                            setLogoUploadBusy(false);
+                          }
+                        }}
+                      />
+                    </label>
+                    {db.settings.logo && (
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => setDb({ ...db, settings: { ...db.settings, logo: "" } })}
+                      >
+                        <Trash2 size={13} /> Remove
+                      </button>
+                    )}
+                  </div>
+                  <div className="hint" style={{ marginTop: "4px" }}>
+                    Chhota, saaf logo best rehta hai (jaise square icon). Ye har invoice/receipt ke top par dikhega.
+                  </div>
                 </div>
                 <div className="field">
                   <label>UPI ID (For Instant QR Code on Bills)</label>

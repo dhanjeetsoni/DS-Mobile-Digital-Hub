@@ -218,6 +218,14 @@ jobs:
         # Web Bluetooth.
         run: node scripts/ci-wire-android-bluetooth-permissions.mjs src-tauri/gen/android/app/src/main/AndroidManifest.xml
 
+      - name: Wire Camera permission into AndroidManifest.xml (barcode/QR scanner, idempotent, always run)
+        # `tauri android init`'s template has no CAMERA permission at all,
+        # so getUserMedia() in CameraScannerModal.tsx always failed with
+        # "Camera access denied or unavailable" on every release APK,
+        # regardless of what the user tapped on the OS permission dialog
+        # (there was no dialog — the app was never even allowed to ask).
+        run: node scripts/ci-wire-android-camera-permissions.mjs src-tauri/gen/android/app/src/main/AndroidManifest.xml
+
       - name: Write keystore.properties (if the release keystore secret is set)
         shell: bash
         run: |

@@ -50,6 +50,10 @@ interface SidebarProps {
   /** 2026-09-04: narrow-screen (Android/small window) off-canvas drawer state — see index.css's 900px breakpoint. Both no-ops on desktop widths. */
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
+  /** True when the currently logged-in identity is staff (regardless of
+   * ownerMode's momentary value) — staff must never even be offered the
+   * option to attempt owner mode, not just be blocked after trying. */
+  isStaffIdentity?: boolean;
 }
 
 // 6 Core Daily Counter Items for Ultra-Easy Counter Work
@@ -95,6 +99,7 @@ export const SECONDARY_NAV_ITEMS = [
   { key: "expPersonal", label: "Personal Drawings", icon: User, ownerOnly: true },
   { key: "ownerreports", label: "Owner Financial Reports", icon: Shield, ownerOnly: true },
   { key: "staffAccess", label: "Android Access Area", icon: Users, ownerOnly: true },
+  { key: "staffPerformance", label: "Staff Performance", icon: TrendingUp, ownerOnly: true },
   { key: "statusDashboard", label: "System Status Dashboard", icon: Activity, ownerOnly: true },
   { key: "auditLog", label: "Audit Log", icon: ClipboardList, ownerOnly: true },
   { key: "setupWizard", label: "🚀 Shuruaati Setup Checklist", icon: Rocket, ownerOnly: true },
@@ -186,6 +191,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenWindowsModal,
   isMobileOpen = false,
   onCloseMobile,
+  isStaffIdentity = false,
 }) => {
   const [showAllTools, setShowAllTools] = useState<boolean>(false);
   const [easyMode, setEasyMode] = useState<boolean>(false);
@@ -311,7 +317,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             design: snap a photo of what's in front of them, find it in
             stock, add straight to the bill; it must stay reachable without
             switching to Owner mode). */}
-        {(ownerMode ? PRIMARY_NAV_ITEMS : PRIMARY_NAV_ITEMS.filter((i) => i.key === "sell" || i.key === "photoFinder")).map((item) => {
+        {((ownerMode && !isStaffIdentity) ? PRIMARY_NAV_ITEMS : PRIMARY_NAV_ITEMS.filter((i) => i.key === "sell" || i.key === "photoFinder")).map((item) => {
           const Icon = item.icon;
           const isActive = currentPage === item.key;
           let badgeCount = 0;
@@ -364,7 +370,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {SECONDARY_NAV_GROUPS.map((group) => {
                   const visibleItems = group.itemKeys
                     .map((key) => SECONDARY_NAV_ITEMS.find((n) => n.key === key))
-                    .filter((n): n is (typeof SECONDARY_NAV_ITEMS)[number] => !!n && (!n.ownerOnly || ownerMode));
+                    .filter((n): n is (typeof SECONDARY_NAV_ITEMS)[number] => !!n && (!n.ownerOnly || (ownerMode && !isStaffIdentity)));
 
                   if (visibleItems.length === 0) return null;
 
@@ -512,26 +518,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <span style={{ opacity: 0.7 }}>Appearance Studio →</span>
         </button>
 
-        <div className="mode-pill">
-          <button
-            id="btnStaffMode"
-            className={!ownerMode ? "on" : ""}
-            onClick={() => {
-              if (ownerMode) onToggleOwnerMode();
-            }}
-          >
-            Staff ()
-          </button>
-          <button
-            id="btnOwnerMode"
-            className={ownerMode ? "on" : ""}
-            onClick={() => {
-              if (!ownerMode) onToggleOwnerMode();
-            }}
-          >
-            Owner ()
-          </button>
-        </div>
+        {!isStaffIdentity && (
+          <div className="mode-pill">
+            <button
+              id="btnStaffMode"
+              className={!ownerMode ? "on" : ""}
+              onClick={() => {
+                if (ownerMode) onToggleOwnerMode();
+              }}
+            >
+              Staff ()
+            </button>
+            <button
+              id="btnOwnerMode"
+              className={ownerMode ? "on" : ""}
+              onClick={() => {
+                if (!ownerMode) onToggleOwnerMode();
+              }}
+            >
+              Owner ()
+            </button>
+          </div>
+        )}
       </div>
     </aside>
     </>

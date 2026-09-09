@@ -2,15 +2,13 @@ import React, { useRef, useState } from "react";
 import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcode, ShieldCheck, Search } from "lucide-react";
 import { Database, Product, StockBatch } from "../types";
 import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
-import { inr } from "../utils/indianCurrency";
-import { processAccessoryOcr, lookupScreenSizeRange } from "../utils/aiOcr";
+import { processAccessoryOcr, lookupScreenSizeRange, getPriceSuggestion } from "../utils/aiOcr";
 import { compressImageToDataUrl } from "../utils/imageCompress";
 import { uploadProductPhotoOrFallback, isStorageUrl } from "../services/photoStorage";
 import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
-import { suggestProductPrice } from "../services/phase6";
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -127,6 +125,41 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   // already typed in this form.
   const [priceAutoFilledHint, setPriceAutoFilledHint] = useState<string>("");
   const priceFieldsAreBlank = () => !purchasePrice && !confidentialPrice && !sellingPrice && !mrp;
+  const [priceSuggestLoading, setPriceSuggestLoading] = useState(false);
+  const [priceSuggestion, setPriceSuggestion] = useState<{ recommendedSellingPrice: number; mrp: number | null; priceRangeLow: number; priceRangeHigh: number; confidence: "low" | "medium" | "high"; rationale: string } | null>(null);
+
+  async function handleSuggestPrice() {
+    if (!name.trim() || !category.trim()) {
+      toast("Pehle product name aur category bharein", "amber");
+      return;
+    }
+    setPriceSuggestLoading(true);
+    setPriceSuggestion(null);
+    try {
+      const suggestion = await getPriceSuggestion({
+        brand: brand.trim() || undefined,
+        productName: name.trim(),
+        category: category.trim(),
+        compatibleModels: compatibleModels.length ? compatibleModels : undefined,
+        purchasePrice: purchasePrice || null,
+        currentSellingPrice: sellingPrice || null,
+        currentMrp: mrp || null,
+      });
+      setPriceSuggestion(suggestion);
+    } catch (err: any) {
+      toast(err?.message || "AI price suggestion abhi available nahi hai", "amber");
+    } finally {
+      setPriceSuggestLoading(false);
+    }
+  }
+
+  function applyPriceSuggestion() {
+    if (!priceSuggestion) return;
+    setSellingPrice(priceSuggestion.recommendedSellingPrice);
+    if (priceSuggestion.mrp) setMrp(priceSuggestion.mrp);
+    setPriceSuggestion(null);
+    toast("AI suggestion apply ho gaya — check karke Save karein", "green");
+  }
   const tryAutoFillPriceFromBrand = (brandValue: string, categoryValue: string) => {
     const brandKey = brandValue.trim().toLowerCase();
     if (!brandKey || !priceFieldsAreBlank()) return;
@@ -143,39 +176,10 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   };
 
   // Phase 6 — "AI-based selling price/MRP suggestion when adding a
-  // product": a distinct, opt-in AI call (button, not automatic) since
-  // unlike the brand-price auto-fill above (which copies a real price the
-  // shop already charged), this is a genuine AI *guess* with no cost basis
-  // guarantee — must never silently overwrite anything without the owner
-  // explicitly asking for it.
-  const [priceSuggestState, setPriceSuggestState] = useState<{ loading: boolean; error: string }>({ loading: false, error: "" });
-  const handleAiSuggestPrice = async () => {
-    if (!name.trim() || !category.trim()) {
-      toast("Pehle Product Name aur Category bharein", "amber");
-      return;
-    }
-    setPriceSuggestState({ loading: true, error: "" });
-    try {
-      const rec = await suggestProductPrice({
-        brand,
-        productName: name,
-        category,
-        compatibleModels,
-        purchasePrice: purchasePrice || null,
-        currentSellingPrice: sellingPrice || null,
-        currentMrp: mrp || null,
-      });
-      setSellingPrice(rec.recommendedSellingPrice || sellingPrice);
-      if (rec.mrp) setMrp(rec.mrp);
-      setPriceSuggestState({ loading: false, error: "" });
-      toast(
-        `AI suggestion: ${inr(rec.recommendedSellingPrice)}${rec.mrp ? ` (MRP ${inr(rec.mrp)})` : ""} — ${rec.rationale}`,
-        rec.confidence === "low" ? "amber" : "green"
-      );
-    } catch (e) {
-      setPriceSuggestState({ loading: false, error: e instanceof Error ? e.message : "AI price suggestion fail ho gaya." });
-    }
-  };
+  // product" is handled above by handleSuggestPrice()/priceSuggestion —
+  // review-before-apply, rather than auto-applying the moment the AI
+  // responds.
+
   const [stock, setStock] = useState<number>(0);
   const [minStock, setMinStock] = useState<number>(2);
   const [supplier, setSupplier] = useState("");
@@ -921,21 +925,43 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               </div>
 
               <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
                   <div style={{ fontWeight: 700, fontSize: "13px" }}>4-Tier Pricing</div>
-                  <button type="button" className="btn sm" onClick={handleAiSuggestPrice} disabled={priceSuggestState.loading}>
-                    <Sparkles size={13} /> {priceSuggestState.loading ? "Soch raha hai..." : "AI Price Suggest"}
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={handleSuggestPrice}
+                    disabled={priceSuggestLoading}
+                    style={{ display: "flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <Sparkles size={13} /> {priceSuggestLoading ? "Sochte hain…" : "AI Suggest Price"}
                   </button>
                 </div>
                 <div className="hint" style={{ marginTop: "2px" }}>
                   Original (aapki kharidari) → Confidential (staff sirf Telegram-approval ke baad) → Selling (sab ko dikhta hai) → MRP (sirf display ke liye). Confidential aur MRP optional hain — khali chhod sakte hain.
                 </div>
-                {priceSuggestState.error && (
-                  <div className="hint" style={{ marginTop: "4px", color: "var(--red)" }}>{priceSuggestState.error}</div>
-                )}
                 {priceAutoFilledHint && (
                   <div className="hint" style={{ marginTop: "4px", color: "var(--glow)", fontWeight: 600 }}>
                     ✓ {priceAutoFilledHint}
+                  </div>
+                )}
+                {priceSuggestion && (
+                  <div style={{ marginTop: "8px", padding: "8px 10px", borderRadius: "8px", background: "var(--card)", border: "1px solid var(--line)" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700 }}>
+                      AI suggestion: ₹{priceSuggestion.recommendedSellingPrice} (₹{priceSuggestion.priceRangeLow}–₹{priceSuggestion.priceRangeHigh})
+                      {priceSuggestion.mrp ? ` · MRP ₹${priceSuggestion.mrp}` : ""}
+                      {" "}
+                      <span style={{ opacity: 0.7, fontWeight: 500 }}>
+                        ({priceSuggestion.confidence === "low" ? "kam confidence — purchase price nahi diya to" : priceSuggestion.confidence === "medium" ? "medium confidence" : "high confidence"})
+                      </span>
+                    </div>
+                    {priceSuggestion.rationale && (
+                      <div className="hint" style={{ marginTop: "2px" }}>{priceSuggestion.rationale}</div>
+                    )}
+                    <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
+                      <button type="button" className="btn sm primary" onClick={applyPriceSuggestion}>Apply karein</button>
+                      <button type="button" className="btn sm" onClick={() => setPriceSuggestion(null)}>Ignore</button>
+                    </div>
                   </div>
                 )}
               </div>

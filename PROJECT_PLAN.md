@@ -673,6 +673,40 @@ actual code, per this document's own ground rule — not assumed or guessed._
     already correct).
   - Verified (this session): typecheck clean, full test suite (26 tests)
     pass, static audit passes, production build clean.
+- [x] **Every text-based AI feature was silently failing app-wide — root
+      cause found and fixed 2026-09-08, independently live-verified, not
+      just trusted from a prior session's diagnosis.** `gemini-3.5-flash-lite`
+      (the text-tier model every non-vision AI route uses) started hard-
+      rejecting a `thinkingConfig` param with `400 INVALID_ARGUMENT` —
+      Google changed this "lite" model's accepted parameters. Every single
+      text-based feature was affected: Business Insights, Staff Advice,
+      Screen-Size Lookup/-Range, Customer Reply Draft, Demand Forecast,
+      Resale Price Advisor, Churn Risk, and the Daily Digest above. Vision/
+      OCR routes (phone/accessory/expense scan, product photo search) use a
+      different model (`gemini-3.7-flash`) and were never affected.
+  - **Verified directly against Google's live API** (via `pg_net`, not
+    just re-reading code): same model+prompt, only the config differs —
+    with `thinkingConfig` → `400 INVALID_ARGUMENT`; without it → `200 OK`.
+    Confirms both the diagnosis and the fix.
+  - Fix: split into `FAST_MODE_CONFIG` (keeps `thinkingConfig`, stays on
+    the 4 vision/OCR routes only) and `TEXT_MODE_CONFIG` (empty, used by
+    all 8 text routes + the digest). Also added a hard per-call timeout
+    and a 2-pass, no-sleep-on-first-pass key-rotation strategy for
+    Google's own transient "model overloaded" `503`s (previously the old
+    retry strategy could burn 50+ seconds on one already-bad key before
+    the Edge Function's own timeout killed the request silently).
+  - **Repo/live drift closed** (same recurring pattern as elsewhere in
+    this file — a fix deployed live with no matching commit): both
+    `ai-gateway/index.ts` and `daily-digest-worker/index.ts` in git still
+    had the broken config; synced both to match the already-verified-
+    working live versions.
+  - **Known gap, stated plainly**: the `debug-gemini-probe` Edge Function
+    used to diagnose this is still live — no delete-edge-function tool is
+    available in this environment. Harmless (no secrets, nothing calls it
+    unprompted) but should be deleted via the Supabase dashboard when
+    convenient.
+  - Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+    production build clean.
 - [x] **Instant low-stock alerts → Telegram + in-app.** In-app was already
       effectively instant from Phase 1 (`stockOf()`/`subscribeToLiveStock`'s
       realtime feed updates the header's "LOW STOCK: N SKUs" badge within
@@ -740,68 +774,110 @@ actual code, per this document's own ground rule — not assumed or guessed._
       2-photo/merge capability is the accuracy improvement here — more
       surface area for the AI to read from).
 - [x] **AI-based selling price/MRP suggestion when adding a product — done
-      2026-09-07.** New standalone Edge Function `ai-price-advisor`
-      (deployed live), matching the contract an earlier session's
-      `src/services/phase6.ts` already expected but never had a backend
-      for. Explicitly does NOT claim a live market-price lookup (no search
-      grounding wired in) — reasons from purchase price + general Indian
-      retail-margin knowledge, confidence is forced to `"low"` server-side
-      whenever no purchase price was given, and `sources` is always empty
-      rather than let the model invent a citation. Wired into
-      `AddProductModal` as an "AI Price Suggest" button next to the 4-Tier
-      Pricing block — fills Selling Price and MRP, never overwrites
-      Purchase/Confidential price.
+      2026-09-07, two independent sessions converged on this at nearly the
+      same time; merged into one.** Standalone Edge Function
+      `ai-price-advisor` (deployed live, now also tracked in git — an
+      earlier pass had it live but not committed). Explicitly does NOT
+      claim a live market-price lookup (no search grounding wired in) —
+      reasons from purchase price + general Indian retail-margin knowledge,
+      confidence is forced to `"low"` server-side whenever no purchase
+      price was given, `sources` always empty rather than let the model
+      invent a citation, and uses `TEXT_MODE_CONFIG` (no `thinkingConfig` —
+      see the Phase 5 root-cause note on why that matters for this model).
+      Client: `getPriceSuggestion()` in `aiOcr.ts`. UI: an "AI Suggest
+      Price" button next to the 4-Tier Pricing block in Add Product shows
+      the recommendation (price + range + MRP + confidence + rationale)
+      with explicit **Apply/Ignore** buttons — never auto-applies before
+      the owner reviews it, on purpose. (An earlier variant of this button
+      auto-applied immediately; superseded by this review-first version
+      during the merge, since it's the safer of the two designs.)
 - [x] **Better Gemini key pool handling (fallback/retry instead of hard
-      failures) — done 2026-09-07, partially deployed live (see caveat
-      below).** Two real, distinct gaps found and fixed, not just assumed
-      from the item's title:
-      1. Client-side: every AI call (`aiOcr.ts`, `aiInsights.ts`,
-         `aiOps.ts`) was a single `fetch()` attempt with zero retry — a
-         one-off network blip or Edge Function cold start was an immediate
-         hard "AI unavailable" error. New `src/utils/fetchWithRetry.ts`:
-         retries a network-level throw or 5xx response (2 attempts,
-         exponential backoff), returns 4xx responses immediately
-         unretried (retrying a genuine bad request wastes time). Wired into
-         all 3 files' fetch calls, plus a matching small retry loop added to
-         `phase6.ts`'s `suggestProductPrice()` (uses
-         `supabase.functions.invoke`, not raw fetch, so needed its own
-         wrapper). **This half ships with the next app build — no Edge
-         Function redeploy needed, already verified (`tsc`, tests, build all
-         clean).**
-      2. Server-side (`ai-gateway/index.ts`'s `runWithGeminiFailover`,
-         already a solid multi-key/timeout/2-pass retry system from an
-         earlier session before this pass): `classifyGeminiFailure()` had
-         no case for a genuine network-transport failure (dropped
-         connection, DNS blip, a raw `TypeError` from Deno's fetch layer) —
-         those fell through to `null` and were rethrown immediately without
-         ever trying another key, identical in effect to "every key is
-         broken" even though the failure had nothing to do with which key
-         was used. Fixed by classifying these the same as the existing
-         "unavailable" (503/overloaded) case: retryable, key stays in
-         rotation. Applied to `ai-gateway/index.ts`, `daily-digest-worker/
-         index.ts`, and included from the start in the new
-         `ai-price-advisor/index.ts`.
-      **Honest caveat — do not skip this**: fix #2's *source* is committed
-      here, and `ai-price-advisor` (which includes it from the start) is
-      deployed live. But `ai-gateway/index.ts` and `daily-digest-worker/
-      index.ts` themselves were **not redeployed** in this pass — both
-      files have grown very large (1491 and 271 lines) from several
-      sessions' combined work, and manually retyping either one in full to
-      redeploy risked a transcription error breaking the *already-working*
-      OCR/business-insights/staff-advice/telegram-digest routes for every
-      store, for the sake of a genuinely rare edge case (most real
-      failures are quota/invalid/503, which already retried correctly
-      before this fix). The safer call was to leave the live versions of
-      those two functions as they were and document this precisely rather
-      than claim a redeploy that didn't happen. **Next session: redeploy
-      `ai-gateway` and `daily-digest-worker` from the current repo source**
-      (or apply just this specific diff) to actually put fix #2 live for
-      those two functions.
+      failures) — done, both source AND now confirmed how much of it is
+      actually live.** Real work here, not just "already fine":
+      1. `ai-gateway/index.ts`'s `runWithGeminiFailover` already had a solid
+         2-pass, multi-key, per-call-timeout retry system before this
+         round. Combined with the separately-found-and-fixed
+         `thinkingConfig` bug (Phase 5 — `gemini-3.5-flash-lite` hard-rejects
+         that param; every text-based AI feature was silently failing on
+         every call because of it), this genuinely resolves what used to be
+         hard failures for the common cases (quota/invalid/503/timeout).
+      2. On top of that, a real remaining gap was found and fixed: neither
+         `classifyGeminiFailure()` nor the client side had any handling for
+         a genuine network-transport failure (dropped connection, DNS blip,
+         a raw fetch `TypeError`) — those bypassed the whole retry system
+         and failed immediately. Fixed server-side (classified the same as
+         the existing "unavailable"/503 case) in `ai-gateway/index.ts` and
+         `daily-digest-worker/index.ts`, and client-side via new
+         `src/utils/fetchWithRetry.ts` (wired into `aiOcr.ts`/
+         `aiInsights.ts`/`aiOps.ts`).
+      **Live-deploy status, checked directly against the running function
+      rather than assumed — do not skip this**: `ai-price-advisor` (v1) has
+      both fixes from the start. `ai-gateway` is live at v14 with the
+      `thinkingConfig` fix confirmed live, but its network-transport-error
+      classification fix is **only in git, not yet in the live v14** — a
+      redeploy overwrote it at some point during the back-and-forth between
+      sessions. Also found in this same check: three routes added in an
+      earlier pass (`due-reminder`, `repair-diagnosis`, `reorder-suggestion`
+      — small AI features for customer reminders/repair-ticket diagnosis/
+      reorder quantities) are **present in git but missing from the live
+      v14 deploy entirely**, apparently dropped during one of several
+      "sync git with live drifted Edge Function" commits visible in this
+      file's history. Nothing currently in the app UI calls those 3 routes
+      (double-checked: no call sites reference them), so this isn't an
+      active user-facing bug today — but it means `ai-gateway` genuinely
+      needs a real redeploy from current git source before either the
+      network-error fix or those 3 routes are actually live. Flagging
+      precisely rather than re-attempting a manual redeploy blind in this
+      pass, given how much this specific file has churned between sessions
+      recently — safer to redeploy it once, deliberately, after confirming
+      git is the intended final state and nothing else is mid-edit.
 - [ ] Improve Photo Stock Finder matching
-- [ ] Staff performance tracking (sales leaderboard/summary per staff)
-- [ ] Excel/PDF export for invoices and customers
-- [ ] Customer profile: full purchase history
-- [ ] Warranty claims: proper tracked workflow with reminders
+- [x] Staff performance tracking (sales leaderboard/summary per staff) — new
+      `get_staff_performance` RPC (migration `phase6_staff_performance_rpc`,
+      owner/manager-only, re-checked server-side via `auth.uid()` even
+      though it's `security definer`) + `getStaffPerformance()` client call
+      + new `StaffPerformanceView.tsx` (date-range picker, defaults to this
+      month; invoice count / total sales / avg sale value / % share per
+      staff) + a new "Staff Performance" sidebar entry. Same fresh-clone
+      verification as above before committing.
+- [x] Excel/PDF export for invoices and customers — invoices already had a
+      working CSV export (`SalesHistoryView`, untouched); added the missing
+      customers side (`CustomerDirectoryView`'s new "Export Excel" button,
+      via a new dependency-free `csvExport.ts` helper — plain CSV with a
+      UTF-8 BOM so Excel renders ₹/Hindi correctly, deliberately not a new
+      xlsx/SheetJS dependency for what a CSV already satisfies). PDF export
+      (browser print) already existed on both screens.
+- [x] Customer profile: full purchase history — `CustomerDirectoryView` rows
+      are now clickable, opening a profile modal (lifetime spend, visit
+      count, avg order value, outstanding due, loyalty points, full sales +
+      returns history). Matched by phone number, not a customer-record FK —
+      sales/returns/exchanges/warranty claims all embed their own
+      `{name, phone}` snapshot rather than a customer id (see `types.ts`),
+      so phone is the only reliable join key here, same assumption the rest
+      of this codebase already makes elsewhere.
+      Verified: `npm install && npx tsc --noEmit && npx vitest run (26/26)
+      && npm run build && node scripts/static-audit.mjs (16/16)` all clean.
+- [x] **Warranty claims: proper tracked workflow with reminders — backend
+      was already fully built and running live (trigger + daily cron +
+      Telegram), it just never showed up anywhere in the UI.** Found while
+      deep-verifying: `schedule_warranty_claim_reminder` trigger,
+      `dispatch_due_warranty_reminders()` daily cron, and
+      `next_reminder_at`/`last_reminder_at`/`reminder_count`/
+      `reminder_interval_days` columns on `warranty_claims` all already
+      existed and were already firing for real. This session:
+  - Wired a live fetch of that reminder data into
+    `ReturnsExchangesView.tsx` (matched by `claim_no`, not the claim's
+    local id — same "client-local id isn't the real relational id"
+    pattern already established for products).
+  - Added a "Next Reminder" column (date + how many times sent so far) to
+    both the desktop table and the mobile card view.
+  - Added a new `remind_warranty_claim_now(p_claim_id)` RPC (owner/manager
+    only) + a "Remind Now" button, so a claim can be nudged immediately
+    instead of waiting for its next scheduled date — mirrors the cron's
+    own per-claim logic (same message format, same reminder_count/
+    next_reminder_at bump) rather than just re-implementing it differently.
+  - Verified: `tsc --noEmit`, full test suite (26/26), static audit
+    (16/16), production build — all clean.
 - [ ] Biometric (fingerprint) unlock alongside PIN
 - [ ] Remote session kill (owner force-logs-out a device from Windows)
 - [ ] Product price change history log
@@ -809,6 +885,14 @@ actual code, per this document's own ground rule — not assumed or guessed._
 - [ ] Owner-configurable staff access window (time range, duration, which
       sections/data are visible)
 - [ ] Refund/return requires owner approval before it completes
+- **Also found while auditing this phase, not one of the 15 listed items but
+  worth recording**: a proper Audit Log feature (`AuditLogView.tsx` +
+  `fetchAuditLogs`, wired to the Sidebar) already exists and is genuinely
+  complete — this satisfies what Phase 5's audit-log item was still
+  missing (that entry's note about `user_id` always being NULL was from
+  testing via direct SQL access with no `auth.uid()` context, not a real
+  gap; a real logged-in user's action does populate it, confirmed by
+  reading `log_table_audit()`'s definition directly).
 
 ### ⬜ Phase 7: Amazon/Flipkart-style product experience
 - [ ] App opens directly into the **Stock/Inventory section** by default

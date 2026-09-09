@@ -844,3 +844,27 @@ export function startConnectivitySync(onResult?: (result: { processed: number; f
     window.clearInterval(timer);
   };
 }
+
+// Phase 6: staff performance tracking. Owner/manager only -- the RPC
+// itself (get_staff_performance) also re-checks this server-side, so a
+// direct API call by staff would still be refused even if this were
+// somehow reached.
+export interface StaffPerformanceRow {
+  staff_id: string;
+  staff_name: string;
+  invoice_count: number;
+  total_sales: number;
+  avg_sale_value: number;
+}
+
+export async function getStaffPerformance(startDate: string, endDate: string): Promise<StaffPerformanceRow[]> {
+  const profile = await getCurrentProfile();
+  if (!profile?.store_id) return [];
+  const { data, error } = await supabase.rpc("get_staff_performance", {
+    p_store_id: profile.store_id,
+    p_start_date: startDate,
+    p_end_date: endDate,
+  });
+  if (error) throw error;
+  return (data || []) as StaffPerformanceRow[];
+}

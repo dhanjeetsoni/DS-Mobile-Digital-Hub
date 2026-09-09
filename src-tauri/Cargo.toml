@@ -39,3 +39,13 @@ tauri-plugin-process = "2"
 # inside the packaged Android app, window.open() has nowhere to go, so
 # telegram.ts / whatsapp.ts call this plugin's open() instead.
 tauri-plugin-shell = "2"
+
+# Biometric (fingerprint/Face) unlock — Phase 6. The plugin's own source
+# (verified directly, not assumed) is `#![cfg(mobile)]` and would refuse to
+# compile at all on desktop anyway, but this is scoped as an
+# Android/iOS-only [target...dependencies] section regardless, so the
+# Windows desktop build's dependency graph never even attempts to touch it —
+# same reasoning as why tauri-plugin-updater/process are desktop-only in
+# lib.rs below, just enforced one layer earlier here.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-biometric = "2"

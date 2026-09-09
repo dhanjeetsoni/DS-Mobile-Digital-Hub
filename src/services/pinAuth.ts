@@ -145,3 +145,39 @@ export async function adminClearPin(targetProfileId: string): Promise<{ ok: bool
   }
   return { ok: true, message: "" };
 }
+
+// Phase 6: Biometric (fingerprint/Face) unlock, layered ON TOP of the PIN
+// above — never a replacement for it. Deliberately per-profile AND
+// per-device (plain localStorage, never synced to the server): a
+// fingerprint enrolled in one phone's sensor has no meaning on a second
+// device, so "is biometric on" can only ever be a local, this-device fact,
+// same as how the PIN cache itself is per-device (see readCachedPin
+// above). Enabling it does not replace/remove the PIN — verifyPin() above
+// still works exactly as before; this is purely an alternate, faster
+// unlock path that a successful native OS biometric prompt substitutes
+// for typing the PIN, never a way to unlock without ever having set one.
+const BIOMETRIC_PREF_PREFIX = "dsmdh_biometric_enabled_v1_";
+
+function biometricPrefKey(profileId: string) {
+  return `${BIOMETRIC_PREF_PREFIX}${profileId}`;
+}
+
+export function isBiometricEnabled(profileId: string): boolean {
+  try {
+    return localStorage.getItem(biometricPrefKey(profileId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Turns biometric unlock on/off for this profile, on THIS device only. Caller is responsible for
+ *  only turning it on after confirming (a) a PIN is already configured and (b) the device's own
+ *  checkStatus() reports isAvailable — this function itself does neither check, it's just storage. */
+export function setBiometricEnabled(profileId: string, enabled: boolean) {
+  try {
+    if (enabled) localStorage.setItem(biometricPrefKey(profileId), "1");
+    else localStorage.removeItem(biometricPrefKey(profileId));
+  } catch {
+    // best-effort — a failed write just means the toggle didn't stick, not a functional break
+  }
+}

@@ -234,33 +234,28 @@ export async function setStaffAccessConfig(profileId: string, input: {
   });
 }
 
-// NOTE (merged 2026-09-07, build-break fixed 2026-09-07): @tauri-apps/
-// plugin-biometric is not an installed dependency yet (checked: not in
-// package.json, and it's a native Tauri plugin — adding it for real needs
-// a Cargo.toml/Rust-side change under src-tauri, not just `npm install`,
-// plus nothing in the UI calls these two functions yet). The original
-// `@ts-expect-error` only silenced TypeScript's module-resolution error —
-// it does NOT stop Vite/Rollup from statically seeing a literal
-// `import("@tauri-apps/plugin-biometric")` string, trying to resolve and
-// bundle it at build time, and failing the production build outright
-// (confirmed: `tsc --noEmit` passed clean while `npm run build` hard-
-// failed on exactly this). Routing the specifier through a variable +
-// `@vite-ignore` stops Rollup from attempting static resolution/bundling,
-// while keeping the exact same runtime behavior as before: still throws
-// (or degrades, for biometricCheck) at runtime until the plugin is
-// genuinely installed with its native half wired up.
-const BIOMETRIC_PLUGIN_SPECIFIER = "@tauri-apps/plugin-biometric";
+// 2026-09-09: @tauri-apps/plugin-biometric is now a real installed
+// dependency (npm install done, Cargo.toml has a mobile-only target
+// dependency on tauri-plugin-biometric, lib.rs registers it under
+// #[cfg(mobile)], capabilities/default.json grants "biometric:default",
+// and the CI workflow injects the USE_BIOMETRIC/USE_FINGERPRINT Android
+// manifest permissions the plugin's own bundled manifest doesn't declare
+// — verified against the plugin's actual published source, not assumed).
+// A plain static import is safe on Windows too: the JS bindings package
+// bundles fine everywhere (it's pure JS), and on desktop, where the Rust
+// plugin is never registered, a call simply fails at the Tauri IPC layer
+// — which biometricCheck()'s catch below already turns into a clean
+// "not available" instead of an uncaught error.
+import { checkStatus, authenticate } from "@tauri-apps/plugin-biometric";
 
 export async function biometricCheck() {
   try {
-    const mod = await import(/* @vite-ignore */ BIOMETRIC_PLUGIN_SPECIFIER);
-    return await mod.checkStatus();
+    return await checkStatus();
   } catch {
     return { isAvailable: false, biometryType: 0 };
   }
 }
 
 export async function authenticateBiometric(reason = "Unlock DS Mobile & Digital Hub") {
-  const mod = await import(/* @vite-ignore */ BIOMETRIC_PLUGIN_SPECIFIER);
-  await mod.authenticate(reason, { allowDeviceCredential: true });
+  await authenticate(reason, { allowDeviceCredential: true });
 }

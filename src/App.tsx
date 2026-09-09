@@ -67,7 +67,8 @@ import { ConfidentialPriceModal } from "./components/ConfidentialPriceModal";
 import { ConnectionStatusBadge } from "./components/ConnectionStatusBadge";
 import { AddGiftModal } from "./components/AddGiftModal";
 import { staffSignIn, isAccessWindowExpired, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
-import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured } from "./services/pinAuth";
+import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured, isBiometricEnabled, setBiometricEnabled } from "./services/pinAuth";
+import { biometricCheck, authenticateBiometric } from "./services/phase6";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
 import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
@@ -102,6 +103,7 @@ import {
   Monitor,
   Users,
   Lock,
+  Fingerprint,
   LogIn,
   Pencil,
   ShieldAlert,
@@ -518,6 +520,69 @@ export default function App() {
     } else {
       persistGateAttempts({ count: nextCount, lockUntil: 0 });
       showToast(`Incorrect passcode. ${3 - nextCount} attempt(s) left.`, "red");
+    }
+  };
+
+  // Phase 6: Biometric unlock — an alternate, faster path to the exact same
+  // "correct PIN" success branch above, never a separate/weaker check. Only
+  // ever offered when (a) this profile has actually turned it on for this
+  // device (isBiometricEnabled) and (b) the device itself confirms it has
+  // usable hardware right now (checkStatus, re-checked every time this
+  // screen is shown rather than trusted from whenever it was last toggled
+  // on — hardware/enrollment can change between sessions).
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (gateStage === "personalPin" && cloudProfile?.id && isBiometricEnabled(cloudProfile.id)) {
+      biometricCheck().then((status) => {
+        if (!cancelled) setBiometricAvailable(Boolean(status?.isAvailable));
+      });
+    } else {
+      setBiometricAvailable(false);
+    }
+    return () => { cancelled = true; };
+  }, [gateStage, cloudProfile?.id]);
+
+  // Phase 6: separate availability check for the Settings "My PIN" card's
+  // enable/disable toggle — deliberately independent of the gate-screen
+  // effect above (that one only ever checks when biometric is ALREADY on,
+  // to decide whether to show the unlock button; this one needs to know
+  // whether hardware exists in the first place, to decide whether to offer
+  // turning it on at all).
+  const [settingsBiometricAvailable, setSettingsBiometricAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (cloudProfile?.id) {
+      biometricCheck().then((status) => {
+        if (!cancelled) setSettingsBiometricAvailable(Boolean(status?.isAvailable));
+      });
+    } else {
+      setSettingsBiometricAvailable(false);
+    }
+    return () => { cancelled = true; };
+  }, [cloudProfile?.id]);
+
+  const handleBiometricUnlock = async () => {
+    if (!cloudProfile?.id) return;
+    try {
+      await authenticateBiometric(`Unlock as ${cloudProfile.staff_name || cloudProfile.full_name || "yourself"}`);
+      // Success is a hard native OS guarantee (fingerprint/Face match) —
+      // exactly the same "unlocked" outcome as a correct typed PIN, so it
+      // reuses the identical branch handleGateOwnerSubmit's `correct` path
+      // takes above: reset attempts, restore owner mode if applicable,
+      // unlock the gate.
+      persistGateAttempts({ count: 0, lockUntil: 0 });
+      if (cloudProfile.role === "owner" || cloudProfile.role === "manager") setOwnerMode(true);
+      setGateUnlocked(true);
+      setGatePassInput("");
+      showToast(`Welcome back, ${cloudProfile.staff_name || cloudProfile.full_name || "back"}!`, "green");
+    } catch {
+      // Cancelled by the person, or a genuine failed match — never treat
+      // this as a wrong-PIN attempt (no lockout counter, no Telegram
+      // alert): the OS's own biometric prompt already enforces its own
+      // retry/lockout policy before ever calling back here, and the PIN
+      // field right below remains available as a fallback either way.
+      showToast("Fingerprint match nahi hua — PIN se try karein.", "amber");
     }
   };
 
@@ -3863,6 +3928,36 @@ export default function App() {
                         </div>
                       </form>
                     )}
+                    {cloudProfile?.id && hasPinConfigured(cloudProfile.id) && settingsBiometricAvailable && (
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontWeight: 600, fontSize: 13 }}>
+                        <input
+                          type="checkbox"
+                          checked={isBiometricEnabled(cloudProfile.id)}
+                          onChange={async (e) => {
+                            const enabling = e.target.checked;
+                            if (enabling) {
+                              // Require one successful native prompt before
+                              // turning this on — never trust the OS-level
+                              // "hardware available" check alone as proof
+                              // the person can actually authenticate (no
+                              // finger enrolled, sensor faulty, etc).
+                              try {
+                                await authenticateBiometric("Enable fingerprint/Face unlock for DS Mobile & Digital Hub");
+                              } catch {
+                                showToast("Fingerprint verify nahi ho paya — enable nahi kiya.", "red");
+                                return;
+                              }
+                            }
+                            setBiometricEnabled(cloudProfile.id, enabling);
+                            showToast(enabling ? "Fingerprint/Face unlock is device ke liye ON kar diya." : "Fingerprint/Face unlock OFF kar diya.", "green");
+                            // Force a re-render so the checkbox reflects the
+                            // just-written localStorage value immediately.
+                            setMyPinForm((f) => ({ ...f }));
+                          }}
+                        />
+                        <Fingerprint size={14} /> Fingerprint / Face se bhi unlock karne do (is device par)
+                      </label>
+                    )}
                   </div>
                 </div>
                 <div className="field full">
@@ -4075,6 +4170,16 @@ export default function App() {
                     {gateBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {gateBusy ? "Sending alert…" : "Unlock"}
                   </button>
                 </div>
+                {gateStage === "personalPin" && biometricAvailable && (
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ width: "100%", justifyContent: "center", marginTop: 10 }}
+                    onClick={handleBiometricUnlock}
+                  >
+                    <Fingerprint size={15} /> Use Fingerprint / Face
+                  </button>
+                )}
               </form>
             )}
 

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Lock, Barcode, ShieldCheck, Upload, Sparkles, RefreshCw, AlertCircle, Trash2 } from "lucide-react";
 import { Database, Product } from "../types";
 import { genBarcode } from "../utils/fifoEngine";
-import { compressImageToDataUrl } from "../utils/imageCompress";
+import { compressImageToDataUrl, compressImageForScan } from "../utils/imageCompress";
 import { processAccessoryOcr } from "../utils/aiOcr";
 import { ProductThumb } from "./ProductThumb";
 import { uploadProductPhotoOrFallback, deleteProductPhotoByUrl, isStorageUrl } from "../services/photoStorage";
@@ -187,7 +187,8 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       setPhoto2(dataUrl);
       const { url } = await uploadProductPhotoOrFallback(storeId, `${product.id}-back`, file);
       setPhoto2(url);
-      await runScan(dataUrl, "merge-gaps");
+      const scanDataUrl = await compressImageForScan(file).catch(() => dataUrl);
+      await runScan(scanDataUrl, "merge-gaps");
     } catch (err: any) {
       toast(err?.message || "Back photo process nahi ho payi, dobara try karein", "red");
     } finally {

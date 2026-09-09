@@ -769,10 +769,51 @@ actual code, per this document's own ground rule — not assumed or guessed._
       (shared by the product table, mobile card, Low Stock view, and both
       modals) now takes an optional `photos` prop and becomes a small
       prev/next gallery on click when more than one photo exists — wired at
-      every existing call site. "Improve accuracy" was not separately
-      addressed (no concrete accuracy problem identified to fix; the
-      2-photo/merge capability is the accuracy improvement here — more
-      surface area for the AI to read from).
+      every existing call site. **"Improve accuracy" was not separately
+      addressed in this specific pass** (no concrete accuracy problem had
+      been identified yet at the time — the 2-photo/merge capability was
+      the accuracy improvement here, more surface area for the AI to read
+      from). **Addressed concretely in the very next entry below
+      (2026-09-09)**, once the specific accuracy problem (storage-grade
+      compression degrading small print before the AI ever sees it) was
+      identified.
+- [x] **AI Photo Scan accuracy: send a separately higher-quality copy of
+      the photo to the AI OCR scanner than what gets saved as the
+      permanent product photo — done 2026-09-09.** The permanent-photo
+      compression preset (`imageCompress.ts` `DEFAULTS`: ~1280px longest
+      side, ~220KB JPEG cap) is tuned for small/fast sync, and until now
+      that exact same compressed copy was also what got sent to Gemini for
+      OCR — the identified failure mode: a 27-model compatibility list, a
+      small IMEI, a faint MRP sticker are the first detail lost when an
+      image is shrunk that far.
+  - New `compressImageForScan()` (`imageCompress.ts`) — same
+    decode/orientation-correction/compress pipeline as the existing
+    `compressImageToDataUrl()`, but at a new `SCAN_DEFAULTS` preset
+    (2048px longest side, ~1.8MB JPEG cap, quality 0.92) used ONLY for the
+    copy handed to the AI scanner. The smaller preset is untouched and
+    still what gets shown as an on-screen preview and saved as the
+    permanent stored photo — this doesn't make synced state any bigger.
+  - Wired into every "select a photo -> AI scans it immediately" path:
+    `AddProductModal`'s front + back photo pickers, `EditProductModal`'s
+    back-photo picker, and `PhotoStockFinderView`'s identify flow. Each
+    falls back to the already-compressed smaller copy if the
+    higher-quality pass fails for any reason (defensive, not expected to
+    actually trigger).
+  - **Known, accepted limitation, not fixed here**: the 3 "Re-scan with
+    AI" buttons (`AddProductModal.rescanCurrentPhoto`,
+    `EditProductModal.handleRescan`, `PhotoStockFinderView`'s
+    re-identify button) re-scan whatever photo is *already stored/shown*
+    — by that point only the smaller, already-compressed copy exists in
+    memory or Storage; the original higher-resolution file was never kept
+    anywhere to re-derive a fresh high-quality copy from. Fixing that
+    would mean holding onto the raw `File` object for the modal's
+    lifetime (or re-fetching+re-uploading a fresh high-res copy on every
+    re-scan) — a bigger architectural change than this item's actual ask
+    (send a better photo for the scan, which now happens on every *first*
+    scan, the common case). Flagging rather than silently leaving it
+    undocumented.
+  - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
+    clean.
 - [x] **AI-based selling price/MRP suggestion when adding a product — done
       2026-09-07, two independent sessions converged on this at nearly the
       same time; merged into one.** Standalone Edge Function
@@ -831,7 +872,42 @@ actual code, per this document's own ground rule — not assumed or guessed._
       pass, given how much this specific file has churned between sessions
       recently — safer to redeploy it once, deliberately, after confirming
       git is the intended final state and nothing else is mid-edit.
-- [ ] Improve Photo Stock Finder matching
+- [x] **Improve Photo Stock Finder matching — done 2026-09-09.** Found and
+      fixed two real bugs while implementing this, not just a vague
+      "improve":
+  1. **Stale stock displayed/matched on**: `PhotoStockFinderView` was
+     receiving `catalogDb` (Phase 1's live-relational-catalog merge —
+     photo/MRP/warranty/etc.), but `catalogOf()` never touches `.stock`
+     (that's `stockOf()`'s job, kept separate on purpose — see Phase 1).
+     This screen was one of the ones missed when other screens were
+     switched over. Fixed at the `App.tsx` call site: stock is now also
+     overlaid via `stockOf()` before the products reach this view, same
+     live number the rest of the app shows.
+  2. **Editing the search box after a photo scan silently did nothing**:
+     `searchTerms` preferred `result.searchKeywords` (the AI's keywords
+     from whenever the photo was scanned) over the live `manualQuery`
+     text WHENEVER a scan had ever happened — so typing a different query
+     into the (visibly editable) search box after a scan kept matching
+     against the old, stale AI keywords instead of what was actually
+     typed. `manualQuery` is the one always-current source of truth (a
+     scan's keywords only ever *seed* it once, right when the scan
+     finishes) — now always tokenizes `manualQuery` itself, correct
+     whether or not a scan ever happened.
+  3. **Added relevance ranking** — matching was an unordered filter (ANY
+     single keyword substring anywhere in a product = a match), so a
+     broad AI guess like "cover" could surface every cover in stock in
+     arbitrary catalog order with no way to tell which one the photo
+     actually was closest to. Each candidate is now scored by how many
+     distinct search terms it actually contains (plus a small bonus when
+     the existing Hindi/English color-synonym `naturalMatch()` also
+     fires) and sorted best-match-first.
+  - Also gave this screen the same higher-quality AI-scan photo fix as
+    the entry above (send the higher-resolution copy to `identifyProductPhoto`,
+    keep the smaller compressed copy for the on-screen preview) — a
+    brand/model printed on packaging is exactly the kind of small text
+    that benefits from it here too.
+  - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
+    clean.
 - [x] Staff performance tracking (sales leaderboard/summary per staff) — new
       `get_staff_performance` RPC (migration `phase6_staff_performance_rpc`,
       owner/manager-only, re-checked server-side via `auth.uid()` even

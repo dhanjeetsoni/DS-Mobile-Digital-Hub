@@ -3,7 +3,7 @@ import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcod
 import { Database, Product, StockBatch } from "../types";
 import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
 import { processAccessoryOcr, lookupScreenSizeRange, getPriceSuggestion } from "../utils/aiOcr";
-import { compressImageToDataUrl } from "../utils/imageCompress";
+import { compressImageToDataUrl, compressImageForScan } from "../utils/imageCompress";
 import { uploadProductPhotoOrFallback, isStorageUrl } from "../services/photoStorage";
 import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
@@ -276,7 +276,15 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
           setPhotoIsUploaded(uploaded);
         })
         .catch(() => {});
-      await runScan(dataUrl);
+      // Phase 6 (AI accuracy): the AI scanner gets a separately-compressed,
+      // higher-resolution copy of the SAME photo — small print (IMEI, a
+      // long compatible-models list, a faint MRP sticker) reads far more
+      // reliably at this size than the ~1280px/220KB copy tuned for the
+      // permanent stored photo. Falls back to the already-compressed
+      // preview copy if the higher-quality pass fails for any reason
+      // (e.g. an unusual format only the first pass managed to decode).
+      const scanDataUrl = await compressImageForScan(file).catch(() => dataUrl);
+      await runScan(scanDataUrl);
       await uploadPromise;
     } catch (err: any) {
       toast(err?.message || "Photo process nahi ho payi, dobara try karein", "red");
@@ -298,7 +306,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
           setPhoto2IsUploaded(uploaded);
         })
         .catch(() => {});
-      await runScan(dataUrl, "merge-gaps");
+      const scanDataUrl2 = await compressImageForScan(file).catch(() => dataUrl);
+      await runScan(scanDataUrl2, "merge-gaps");
       await uploadPromise;
     } catch (err: any) {
       toast(err?.message || "Back photo process nahi ho payi, dobara try karein", "red");

@@ -3408,7 +3408,7 @@ export default function App() {
       case "photoFinder":
         return (
           <PhotoStockFinderView
-            db={catalogDb}
+            db={{ ...catalogDb, products: catalogDb.products.map((p) => ({ ...p, stock: stockOf(p) })) }}
             onAddToCart={(p) => {
               addToCart(p);
               showToast(`Added ${p.name} to cart!`, "green");

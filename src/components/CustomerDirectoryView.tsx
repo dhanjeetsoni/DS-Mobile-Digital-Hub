@@ -6,6 +6,7 @@ import { todayStr } from "../utils/fifoEngine";
 import { sendTelegramReport } from "../services/telegram";
 import { getDueReminderMessage } from "../services/aiOps";
 import { openWhatsApp } from "../services/whatsapp";
+import { downloadCsv } from "../utils/csvExport";
 
 interface CustomerDirectoryViewProps {
   db: Database;
@@ -27,6 +28,12 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({ db
   const [customTo, setCustomTo] = useState("");
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  // Phase 6: Customer profile — full purchase history. Sales/returns/
+  // exchanges/warranty claims embed their own `{ name, phone }` snapshot
+  // rather than a customer-record id (see types.ts), so phone number is the
+  // only reliable join key back to the directory here — same assumption
+  // CustomerKhata/DailyGallaModal already make elsewhere in this codebase.
+  const [profileCustomerId, setProfileCustomerId] = useState<string | null>(null);
   // 2026-09-04: AI-drafted WhatsApp due-payment reminder, one draft at a time
   // (keyed by customer id) shown inline under the row rather than a modal —
   // this is a short list of customers, not worth a popup per item.
@@ -86,6 +93,24 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({ db
     rangeMode === "custom" ? `${customFrom || "…"} to ${customTo || "…"}` :
     "All Time";
 
+  const profileCustomer = useMemo(() => {
+    if (!profileCustomerId) return null;
+    const c = (db.customers || []).find((x) => x.id === profileCustomerId);
+    if (!c) return null;
+    const phone = (c.phone || "").trim();
+    const sales = phone
+      ? (db.sales || [])
+          .filter((s) => (s.customer?.phone || "").trim() === phone && s.status !== "Cancelled")
+          .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))
+      : [];
+    const returns = phone ? (db.returns || []).filter((r) => (r.customer?.phone || "").trim() === phone) : [];
+    const totalSpent = sales.reduce((a, s) => a + (Number(s.total) || 0), 0);
+    const totalRefunded = returns.reduce((a, r) => a + (Number(r.settlementAmount) || 0), 0);
+    const visitCount = sales.length;
+    const avgOrderValue = visitCount > 0 ? totalSpent / visitCount : 0;
+    return { customer: c, sales, returns, totalSpent, totalRefunded, visitCount, avgOrderValue };
+  }, [profileCustomerId, db.customers, db.sales, db.returns]);
+
   const buildReportText = () => {
     const shop = db.settings.shopName || "Our Shop";
     const lines = [
@@ -122,6 +147,16 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({ db
     }
   };
 
+  const handleExportExcel = () => {
+    if (filtered.length === 0) { toast("Is filter mein koi customer nahi mila", "amber"); return; }
+    downloadCsv(
+      `customers-${rangeLabel.replace(/[^a-z0-9]+/gi, "-")}`,
+      ["Name", "Mobile Number", "Address", "Added On", "Outstanding Due", "Loyalty Points"],
+      filtered.map((c) => [c.name, c.phone, c.address || "", ymd(c.createdAt), c.totalDue || 0, c.loyaltyPoints || 0])
+    );
+    toast("Excel (CSV) file download ho gayi", "green");
+  };
+
   return (
     <div>
       <div className="section">
@@ -133,6 +168,9 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({ db
             </button>
             <button className="btn sm" onClick={handleSendTelegram} disabled={isSending}>
               <Send size={14} /> {isSending ? "Sending..." : "Send to Telegram"}
+            </button>
+            <button className="btn sm" onClick={handleExportExcel}>
+              <Download size={14} /> Export Excel
             </button>
             <button className="btn primary sm" onClick={() => setIsPrintOpen(true)}>
               <Download size={14} /> Export PDF
@@ -183,7 +221,7 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({ db
             </thead>
             <tbody>
               {filtered.map((c) => (
-                <tr key={c.id}>
+                <tr key={c.id} className="clickable-row" style={{ cursor: "pointer" }} onClick={() => setProfileCustomerId(c.id)}>
                   <td><b className="truncate" title={c.name}>{c.name}</b></td>
                   <td>{c.phone}</td>
                   <td>{c.address || "—"}</td>
@@ -191,7 +229,7 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({ db
                   <td style={{ fontWeight: 800, color: (c.totalDue || 0) > 0 ? "var(--red)" : "var(--green)" }}>
                     {inr(c.totalDue || 0)}
                   </td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     {(c.totalDue || 0) > 0 ? (
                       <div style={{ minWidth: "180px" }}>
                         {!reminderState[c.id] && (
@@ -249,6 +287,116 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({ db
           </table>
         </div>
       </div>
+
+      {profileCustomer && (
+        <div className="overlay show">
+          <div className="modal wide">
+            <div className="modal-head">
+              <h3>{profileCustomer.customer.name} — Purchase History</h3>
+              <button onClick={() => setProfileCustomerId(null)}>&times;</button>
+            </div>
+
+            <div style={{ padding: "4px 0 14px" }}>
+              <div className="hint" style={{ marginBottom: "10px" }}>
+                {profileCustomer.customer.phone}
+                {profileCustomer.customer.address ? ` • ${profileCustomer.customer.address}` : ""}
+                {profileCustomer.customer.email ? ` • ${profileCustomer.customer.email}` : ""}
+              </div>
+
+              <div className="stat-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", marginBottom: "16px" }}>
+                <div className="stat-card">
+                  <div className="hint">Lifetime Spend</div>
+                  <div style={{ fontWeight: 800, fontSize: "16px" }}>{inr(profileCustomer.totalSpent)}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="hint">Total Visits</div>
+                  <div style={{ fontWeight: 800, fontSize: "16px" }}>{profileCustomer.visitCount}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="hint">Avg. Order Value</div>
+                  <div style={{ fontWeight: 800, fontSize: "16px" }}>{inr(profileCustomer.avgOrderValue)}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="hint">Outstanding Due</div>
+                  <div style={{ fontWeight: 800, fontSize: "16px", color: (profileCustomer.customer.totalDue || 0) > 0 ? "var(--red)" : "var(--green)" }}>
+                    {inr(profileCustomer.customer.totalDue || 0)}
+                  </div>
+                </div>
+              </div>
+
+              {(profileCustomer.customer.loyaltyPoints || 0) > 0 && (
+                <div className="hint" style={{ marginBottom: "12px" }}>
+                  🎁 Loyalty Points: <b>{profileCustomer.customer.loyaltyPoints}</b>
+                </div>
+              )}
+
+              <h4 style={{ margin: "0 0 8px" }}>All Purchases ({profileCustomer.sales.length})</h4>
+              <div className="table-wrap" style={{ maxHeight: "320px", overflowY: "auto" }}>
+                {profileCustomer.sales.length === 0 ? (
+                  <div className="empty">Is customer ka abhi tak koi purchase record nahi hai.</div>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Invoice #</th>
+                        <th>Items</th>
+                        <th>Payment</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {profileCustomer.sales.map((s) => (
+                        <tr key={s.id}>
+                          <td>{s.date} <span className="hint">{s.time}</span></td>
+                          <td><b>{s.invoiceNo}</b></td>
+                          <td style={{ maxWidth: "260px", fontSize: "12px" }}>
+                            {s.items.map((i) => `${i.name} (x${i.qty})`).join(", ")}
+                          </td>
+                          <td><span className="badge info">{s.payment}</span></td>
+                          <td style={{ fontWeight: 700 }}>{inr(s.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {profileCustomer.returns.length > 0 && (
+                <>
+                  <h4 style={{ margin: "16px 0 8px" }}>Returns ({profileCustomer.returns.length}, {inr(profileCustomer.totalRefunded)} refunded)</h4>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Return #</th>
+                          <th>Invoice Ref</th>
+                          <th>Refund</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {profileCustomer.returns.map((r) => (
+                          <tr key={r.id}>
+                            <td>{r.date}</td>
+                            <td>{r.returnNo}</td>
+                            <td>{r.invoiceNo}</td>
+                            <td style={{ color: "var(--red)", fontWeight: 700 }}>{inr(r.settlementAmount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setProfileCustomerId(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isPrintOpen && (
         <div className="overlay show">

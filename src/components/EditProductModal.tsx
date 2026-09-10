@@ -63,6 +63,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   // a replaced/removed Storage photo can be best-effort deleted on Save
   // instead of being left orphaned in the bucket.
   const originalPhotoRef = useRef<string>("");
+  const originalPhoto2Ref = useRef<string>("");
   const { closing, requestClose } = useAnimatedClose(onClose);
 
   useEffect(() => {
@@ -84,6 +85,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       setPhoto(product.photo || "");
       originalPhotoRef.current = product.photo || "";
       setPhoto2((product.photos && product.photos[1]) || "");
+      originalPhoto2Ref.current = (product.photos && product.photos[1]) || "";
       setScanError("");
     }
   }, [product]);
@@ -273,6 +275,15 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     // blocks or fails the save — see deleteProductPhotoByUrl.
     if (originalPhotoRef.current && originalPhotoRef.current !== photo && isStorageUrl(originalPhotoRef.current)) {
       void deleteProductPhotoByUrl(originalPhotoRef.current);
+    }
+    // Same cleanup for the back photo — this was missing before (only the
+    // front photo's old file was ever cleaned up on replace/remove), so a
+    // repeatedly-replaced back photo would silently orphan a new R2 file
+    // on every edit. Not a data-loss bug (the current photo was always
+    // safe), just unbounded storage bloat over time — closing it while
+    // auditing this Phase 7 durability item.
+    if (originalPhoto2Ref.current && originalPhoto2Ref.current !== photo2 && isStorageUrl(originalPhoto2Ref.current)) {
+      void deleteProductPhotoByUrl(originalPhoto2Ref.current);
     }
 
     // Phase 1 (continued) — mirror the full edited catalog relationally

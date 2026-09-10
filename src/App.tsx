@@ -1210,12 +1210,15 @@ export default function App() {
   // see services/photoStorage.ts.
   useEffect(() => {
     if (!cloudUser || !cloudProfile?.store_id) return;
-    backfillLegacyProductPhotos(cloudProfile.store_id, db, (productId, url) => {
+    backfillLegacyProductPhotos(cloudProfile.store_id, db, (productId, slotIndex, url) => {
       const product = db.products.find((p) => p.id === productId);
-      if (product) {
-        product.photo = url;
-        saveState({ ...db });
-      }
+      if (!product) return;
+      const photos = product.photos && product.photos.length ? [...product.photos] : [product.photo];
+      while (photos.length <= slotIndex) photos.push("");
+      photos[slotIndex] = url;
+      product.photos = photos.filter(Boolean);
+      if (slotIndex === 0) product.photo = url; // keep the legacy single-photo field in sync — every existing read site still uses it
+      saveState({ ...db });
     });
     // Deliberately not re-running on every db change — that would fight
     // with in-progress uploads. It re-checks on reconnect/store change,

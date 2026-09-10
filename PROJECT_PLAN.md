@@ -1204,8 +1204,56 @@ actual code, per this document's own ground rule — not assumed or guessed._
       display it; captured/stored correctly for now, just not shown yet.
 - [ ] AI sources/generates good-quality product photos automatically (not
       only what the owner uploads)
-- [ ] All product photos permanently stored on Cloudflare R2 (durable,
-      never lost)
+- [x] **All product photos permanently stored on Cloudflare R2 (durable,
+      never lost) — audited and closed 2026-09-09.** The architecture
+      (`photoStorage.ts`, `r2Client.ts`, the `r2-storage` Edge Function)
+      already existed and was well-built — this pass was a real audit of
+      it, not a from-scratch build, and found + fixed 2 genuine gaps.
+  - **Live-verified R2 is actually configured and reachable** — not just
+    "code looks right": called the deployed `r2-storage` function directly
+    for a made-up file path and got a real `404 File not found` from
+    Cloudflare's own API (not the function's own `503 "R2 not configured"`
+    fallback), which only happens if `CF_ACCOUNT_ID`/access keys are set
+    **and** correctly SigV4-signed **and** R2 actually received and
+    processed the request. Confirms the one manual setup step in
+    `STEP7.1-CLOUDFLARE-SETUP.md` was genuinely completed, live, right now.
+  - **Real gap found and fixed**: `backfillLegacyProductPhotos()` (the
+    safety net that uploads any photo still stuck as a local `data:` URL
+    to R2 whenever the app comes online) only ever checked
+    `product.photo` — the *primary* photo slot. A product's *second*
+    ("back") photo lives in `product.photos[1]` (Phase 6's multi-photo
+    addition) and could independently still be a `data:` URL (e.g. if
+    only the front photo's upload succeeded at save time) without this
+    backfill ever picking it up — it would stay stuck as a fragile local
+    blob inside the synced JSON state indefinitely. This was the one
+    actual "not really durable" gap in the whole system. Fixed: now walks
+    every slot in `photos[]` (falling back to `[photo]` for
+    pre-multi-photo products), uploads whichever ones are still local,
+    and the App.tsx callback was updated to correctly write back into
+    either `product.photo` (slot 0, kept in sync for every existing
+    single-photo read site) or `product.photos[slotIndex]`.
+  - **Secondary gap found and fixed** (storage-bloat, not data-loss, but
+    same area): neither `EditProductModal`'s old-photo cleanup-on-replace
+    nor `cleanupStaleOutOfStockPhotos` (the 90-days-out-of-stock cleanup)
+    handled the second/back photo — only ever the front one. A repeatedly
+    replaced back photo, or an out-of-stock product with 2 photos, would
+    silently orphan files in R2 forever. Both now handle every URL in
+    `photos[]`.
+  - Confirmed already correct and didn't need changes: upload path never
+    actually loses a photo on failure (falls back to the data: URL
+    in-memory, picked up by the backfill above later — verified by
+    reading the actual fallback code path, not just the comments);
+    delete-on-replace/cleanup are both best-effort and never block or
+    fail a save; the 90-day out-of-stock cleanup only ever touches the
+    photo file, never the product record.
+  - Verified: `npm install` (picked up a separately-added dependency that
+    was blocking typecheck, `@tauri-apps/plugin-biometric` — declared in
+    package.json/Cargo.toml by a parallel Phase 6 session but not yet
+    installed), `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+    production build clean. **Not device-tested** (same caveat as
+    elsewhere in this plan — the R2 connectivity itself is live-verified
+    above, but a real end-to-end photo upload from an actual Android
+    device/camera hasn't been watched happen).
 - [ ] Dedicated **product detail page** per product (tap a product →
       full page), showing MRP (struck through), discount %, and selling
       price, e-commerce style

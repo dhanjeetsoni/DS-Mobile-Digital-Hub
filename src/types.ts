@@ -142,6 +142,11 @@ export interface Product {
   requireCustomerDetails: boolean;
   supplier: string;
   notes: string;
+  // Phase 7: "AI auto-fills full specifications for a product when added".
+  // Structured spec sheet (Display/RAM/Storage/etc for a phone, Material/
+  // Compatibility/etc for an accessory) — optional so every pre-existing
+  // product (with no specifications) keeps loading without a migration.
+  specifications?: { label: string; value: string }[];
   compatibleModels: string[];
   // Screen size in inches this accessory (Tempered Glass / Curved Glass /
   // Back Cover) fits. Used as a fallback match when a customer's exact

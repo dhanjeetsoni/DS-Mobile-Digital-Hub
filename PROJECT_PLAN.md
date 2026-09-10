@@ -755,7 +755,7 @@ actual code, per this document's own ground rule — not assumed or guessed._
       follow-up, not done here to keep this item scoped to the actual
       capture-and-report mechanism.
 
-### 🟡 Phase 6: AI & advanced feature enhancements
+### ✅ Phase 6: AI & advanced feature enhancements — all 15 items done, plus 1 bonus finding recorded below
 - [x] **AI Photo Scan: 1 or 2 photos (front/back), auto-fill from either,
       product view shows all photos provided — done 2026-09-07.**
       `types.ts`: `Product.photos?: string[]` added alongside the existing
@@ -1134,7 +1134,16 @@ actual code, per this document's own ground rule — not assumed or guessed._
         into any UI or enforcement here — out of scope for what was asked
         (a time *window* and section *visibility*), left for a future pass
         if wanted.
-- [ ] Refund/return requires owner approval before it completes
+- [x] **Refund/return requires owner approval before it completes — already
+      fully built (client + server), plan checkbox was just stale.**
+      Independently re-verified: `record_return`'s SQL body itself raises
+      `'staff return requires owner approval'` for any role other than
+      owner/manager (real server-side enforcement, not just a client-side
+      gate that a staff device could bypass), and `ReturnsExchangesView.tsx`
+      branches staff down a `requestReturnApproval()` path before ever
+      calling `record_return` directly. `request_return_approval`,
+      `list_return_approval_requests`, and `approve_return_approval` RPCs
+      all exist and are wired to a "Pending Approvals" tab in the same view.
 - **Also found while auditing this phase, not one of the 15 listed items but
   worth recording**: a proper Audit Log feature (`AuditLogView.tsx` +
   `fetchAuditLogs`, wired to the Sidebar) already exists and is genuinely

@@ -1184,8 +1184,24 @@ actual code, per this document's own ground rule — not assumed or guessed._
       same toggle-by-CSS-breakpoint technique used elsewhere in this
       file). Verified: `tsc --noEmit` clean, vitest 26/26, static-audit
       16/16, production build clean. **Not device-tested.**
-- [ ] AI auto-fills full specifications for a product when added (extends
-      Phase 6's photo-scan work)
+- [x] **AI auto-fills full specifications for a product when added (extends
+      Phase 6's photo-scan work) — done 2026-09-09.** New standalone
+      `ai-product-specs` edge function (same key-pool/failover/rate-limit
+      pattern as `ai-gateway`, deployed separately like `ai-price-advisor`
+      to avoid re-pasting the whole 1400-line gateway file) reasons from
+      general knowledge of the named product/category — explicitly
+      caveated in the prompt as not live/authoritative data, same honesty
+      requirement as the price advisor. Added `Product.specifications?`
+      (label/value pairs, optional so every existing product keeps loading
+      without a migration), `getProductSpecifications()` client call, and
+      an "AI Fill Specifications" section in Add Product with editable
+      rows (add/edit/remove before saving). Verified with a fresh clone +
+      `npm ci` + `tsc --noEmit` + `npm run build`, all clean, and confirmed
+      no other session had touched these files in between (local pre-edit
+      blob hashes matched GitHub's SHAs) before committing. **Not yet
+      surfaced on the product list/detail view** — this phase's later
+      "dedicated product detail page" item is the natural place to actually
+      display it; captured/stored correctly for now, just not shown yet.
 - [ ] AI sources/generates good-quality product photos automatically (not
       only what the owner uploads)
 - [ ] All product photos permanently stored on Cloudflare R2 (durable,

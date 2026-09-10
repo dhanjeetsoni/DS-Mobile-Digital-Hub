@@ -112,6 +112,8 @@ import {
   Barcode,
   Gift,
   Menu,
+  LayoutGrid,
+  Table as TableIcon,
 } from "lucide-react";
 
 const LS_KEY = "dsmdh_db_v2";
@@ -313,6 +315,9 @@ export default function App() {
   // Phase 2: self-service "My PIN" form state (used by owner/manager in
   // Settings, and by anyone via the account menu — see myPinForm usage).
   const [myPinForm, setMyPinForm] = useState({ current: "", next: "", confirm: "", busy: false, msg: "" });
+  // Phase 7: Product Catalog view mode — "grid" (default, Amazon/Flipkart-
+  // style photo-forward cards) or "table" (dense spreadsheet view, opt-in).
+  const [productViewMode, setProductViewMode] = useState<"grid" | "table">("grid");
   // Phase 6: shop logo upload (Settings -> receipt branding). Kept as a
   // small compressed data URL directly in db.settings.logo (already read
   // by InvoiceViewerModal everywhere it prints a receipt/invoice — the
@@ -3043,7 +3048,21 @@ export default function App() {
             <div className="section">
               <div className="section-head">
                 <h2>Product Catalog &amp; Inventory ({db.products.length})</h2>
-                <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <div className="view-toggle">
+                    <button
+                      className={`btn sm ${productViewMode === "grid" ? "primary" : ""}`}
+                      onClick={() => setProductViewMode("grid")}
+                    >
+                      <LayoutGrid size={14} /> Grid
+                    </button>
+                    <button
+                      className={`btn sm ${productViewMode === "table" ? "primary" : ""} table-view-toggle-btn`}
+                      onClick={() => setProductViewMode("table")}
+                    >
+                      <TableIcon size={14} /> Table
+                    </button>
+                  </div>
                   {ownerMode ? (
                     <>
                       <button className="btn primary sm" onClick={() => setIsAddProductOpen(true)}>
@@ -3061,7 +3080,60 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="table-wrap product-desktop-table">
+              {/* Phase 7 — Amazon/Flipkart-style photo-forward card grid,
+                  now the DEFAULT product-list experience (not just a
+                  mobile fallback like Phase 4's original .product-mobile-list
+                  single-column cards, which this supersedes visually while
+                  keeping the same underlying data/actions). "Table" stays
+                  available as an explicit choice for anyone who wants the
+                  dense spreadsheet-style view (SKU/barcode/cost/etc all at
+                  once) — see .table-view-toggle-btn / product-desktop-table
+                  in index.css for why Table forces back to Grid under
+                  900px regardless of this toggle (a 13-column table has no
+                  usable form on a phone screen either way). */}
+              <div className={`product-card-grid ${productViewMode === "table" ? "product-card-grid-hidden-for-table" : ""}`}>
+                {catalogProducts.map((p) => {
+                  const pct = p.category !== "Cyber Cafe" ? computeDiscountPercent(p.mrp, p.sellingPrice) : null;
+                  const low = stockOf(p) <= p.minStock;
+                  const out = stockOf(p) <= 0;
+                  return (
+                    <div key={p.id} className="product-card">
+                      <div className="product-card-photo">
+                        <ProductThumb photo={p.photo} photos={p.photos} name={p.name} />
+                        {pct !== null && pct > 0 && <span className="product-card-discount-badge">{pct}% OFF</span>}
+                        {out && <span className="product-card-oos-badge">Out of Stock</span>}
+                      </div>
+                      <div className="product-card-body">
+                        <div className="product-card-name" title={p.name}>{p.name}</div>
+                        <div className="product-card-sub">{[p.brand, p.category].filter(Boolean).join(" · ")}</div>
+                        <div className="product-card-price-row">
+                          <span className="product-card-price">{inr(p.sellingPrice)}</span>
+                          {p.mrp ? <span className="product-card-mrp">{inr(p.mrp)}</span> : null}
+                        </div>
+                        <div className="product-card-meta">
+                          <span className={`badge ${low ? "danger" : "ok"}`}>Stock: {stockOf(p)}</span>
+                          {p.warrantyEnabled && <span className="hint">{p.warrantyMonths}m warranty</span>}
+                        </div>
+                        {ownerMode && (
+                          <div className="product-card-actions">
+                            <button className="btn sm" onClick={() => { setEditingProduct(p); setIsEditProductOpen(true); }}>
+                              <Pencil size={12} /> Edit
+                            </button>
+                            <button className="btn sm danger" onClick={() => void handleDeleteProduct(p)} title="Product permanently delete karo (photo bhi cloud se hat jayegi)">
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {catalogProducts.length === 0 && (
+                  <div className="empty" style={{ gridColumn: "1 / -1" }}>Koi product nahi mila.</div>
+                )}
+              </div>
+
+              <div className={`table-wrap product-desktop-table ${productViewMode === "grid" ? "product-table-hidden-for-grid" : ""}`}>
                 <table>
                   <thead>
                     <tr>
@@ -3131,50 +3203,6 @@ export default function App() {
                     ))}
                   </tbody>
                 </table>
-              </div>
-
-              {/* Phase 4 — Product Catalog mobile pass. The table above has
-                  up to 13 columns; even with horizontal scroll that's
-                  genuinely unusable on a ~360-400px phone (this was one of
-                  the most-reported "kuch dikhta hi nahi" complaints).
-                  Same photo/price/stock data, rendered as touch-friendly
-                  stacked cards instead — shown only under 900px via CSS
-                  (.product-mobile-list), same toggle technique as
-                  .mobile-cart-bar elsewhere in this file. */}
-              <div className="product-mobile-list">
-                {catalogProducts.map((p) => {
-                  const pct = p.category !== "Cyber Cafe" ? computeDiscountPercent(p.mrp, p.sellingPrice) : null;
-                  const low = stockOf(p) <= p.minStock;
-                  return (
-                    <div key={p.id} className="product-mobile-card">
-                      <div className="product-mobile-photo"><ProductThumb photo={p.photo} photos={p.photos} name={p.name} /></div>
-                      <div className="product-mobile-info">
-                        <div className="product-mobile-name">{p.name}</div>
-                        <div className="product-mobile-sub">{[p.brand, p.category].filter(Boolean).join(" · ")}</div>
-                        <div className="product-mobile-price-row">
-                          <span className="product-mobile-price">{inr(p.sellingPrice)}</span>
-                          {p.mrp ? <span className="product-mobile-mrp">{inr(p.mrp)}</span> : null}
-                          {pct !== null && <span className="badge ok">{pct}% off</span>}
-                        </div>
-                        <div className="product-mobile-meta">
-                          <span className={`badge ${low ? "danger" : "ok"}`}>Stock: {stockOf(p)}</span>
-                          <span className="hint">{p.warrantyEnabled ? `${p.warrantyMonths}m warranty` : "No warranty"}</span>
-                          <span className="hint">SKU: {p.sku}</span>
-                        </div>
-                        {ownerMode && (
-                          <div className="product-mobile-actions">
-                            <button className="btn sm" onClick={() => { setEditingProduct(p); setIsEditProductOpen(true); }}>
-                              <Pencil size={12} /> Edit Price
-                            </button>
-                            <button className="btn sm danger" onClick={() => void handleDeleteProduct(p)} title="Product permanently delete karo (photo bhi cloud se hat jayegi)">
-                              <Trash2 size={12} /> Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
             </div>
           </div>

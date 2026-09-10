@@ -1168,8 +1168,22 @@ actual code, per this document's own ground rule — not assumed or guessed._
       "Dismiss" button, neither of which fires unconditionally on load.
       Verified: `npm install && npx tsc --noEmit && npx vitest run (26/26)
       && npm run build && node scripts/static-audit.mjs (16/16)` all clean.
-- [ ] Product list redesigned as e-commerce style cards (photo-forward,
-      like Amazon/Flipkart)
+- [x] **Product list redesigned as e-commerce style cards (photo-forward,
+      like Amazon/Flipkart) — done 2026-09-09.** Card grid is now the
+      *default* product-list view at every screen width — not just a
+      mobile fallback like Phase 4's original single-column
+      `.product-mobile-list` (removed, superseded by this). Each card:
+      square photo with a discount-% badge overlay and an "Out of Stock"
+      overlay, 2-line-clamped name, brand/category subtitle, selling price
+      + struck-through MRP, stock/warranty badges, owner-only Edit/Delete.
+      A Grid/Table toggle keeps the dense spreadsheet table (all 13
+      columns) available as an explicit opt-in — under 900px Grid always
+      wins regardless of the toggle (a 13-column table has no usable form
+      on a phone either way; the toggle button itself hides there too).
+      Responsive via CSS grid `auto-fill` (no JS viewport-width state,
+      same toggle-by-CSS-breakpoint technique used elsewhere in this
+      file). Verified: `tsc --noEmit` clean, vitest 26/26, static-audit
+      16/16, production build clean. **Not device-tested.**
 - [ ] AI auto-fills full specifications for a product when added (extends
       Phase 6's photo-scan work)
 - [ ] AI sources/generates good-quality product photos automatically (not

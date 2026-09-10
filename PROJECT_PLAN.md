@@ -1198,10 +1198,9 @@ actual code, per this document's own ground rule — not assumed or guessed._
       rows (add/edit/remove before saving). Verified with a fresh clone +
       `npm ci` + `tsc --noEmit` + `npm run build`, all clean, and confirmed
       no other session had touched these files in between (local pre-edit
-      blob hashes matched GitHub's SHAs) before committing. **Not yet
-      surfaced on the product list/detail view** — this phase's later
-      "dedicated product detail page" item is the natural place to actually
-      display it; captured/stored correctly for now, just not shown yet.
+      blob hashes matched GitHub's SHAs) before committing. **Now shown on
+      the product detail page** (see the entry right below) — the AI-filled
+      specifications table renders there whenever a product has any.
 - [ ] AI sources/generates good-quality product photos automatically (not
       only what the owner uploads)
 - [x] **All product photos permanently stored on Cloudflare R2 (durable,
@@ -1254,9 +1253,38 @@ actual code, per this document's own ground rule — not assumed or guessed._
     elsewhere in this plan — the R2 connectivity itself is live-verified
     above, but a real end-to-end photo upload from an actual Android
     device/camera hasn't been watched happen).
-- [ ] Dedicated **product detail page** per product (tap a product →
-      full page), showing MRP (struck through), discount %, and selling
-      price, e-commerce style
+- [x] **Dedicated product detail page per product (tap a product -> full
+      page), showing MRP (struck through), discount %, and selling price,
+      e-commerce style — done 2026-09-09.** New `ProductDetailView.tsx`,
+      rendered as a genuine full-page takeover (App.tsx's
+      `renderCurrentPage()` returns it directly, in place of whatever
+      `currentPage`/tab was active) rather than a modal — matches how
+      Amazon/Flipkart replace the listing with the product's own screen on
+      tap, not a popup over it.
+  - Reuses the exact same `computeDiscountPercent()`/`inr()` utilities the
+    card grid above already uses for its own struck-through-MRP + discount
+    badge, so the number shown here can never drift from what the card
+    showed before tapping it.
+  - Photo gallery (prev/next + thumbnail strip when a product has 2
+    photos, from Phase 6's front/back photo support), stock/warranty
+    badges, compatible-models chip list, screen size, notes, the AI
+    specifications table from the entry above (now actually has somewhere
+    to render), SKU/barcode, and owner-only Edit/Delete actions (Edit
+    closes this page and opens the existing `EditProductModal`, so there's
+    only ever one edit flow, not two).
+  - Wired from the Product Catalog & Inventory grid: tapping a card's text
+    area (name/price/stock, not the photo itself — the photo already has
+    its own working zoom-on-tap via `ProductThumb`, left untouched) opens
+    this page; the owner's existing Edit/Delete buttons inside that same
+    card call `e.stopPropagation()` so they still work independently
+    instead of also triggering the detail page underneath them.
+  - `onAddToCart` is wired but only actually rendered on screens that pass
+    it (currently none do yet, since this was reached from the Inventory
+    management grid, not the Sell/POS catalog) — the prop exists so a
+    future "open detail from POS" tap point can light it up for free.
+  - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
+    clean. **Not device-tested** (same standing caveat as the rest of this
+    phase's UI work).
 - [ ] "Confidential Price" button available directly on this page —
       **reuse the existing flow** (`confidentialPrice.ts` + the
       `telegram-connect` Edge Function): staff tap it, owner gets an

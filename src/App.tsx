@@ -49,6 +49,7 @@ import { OwnerReportsView } from "./components/OwnerReportsView";
 import { WindowsAppModal } from "./components/WindowsAppModal";
 import { LowStockAlertsView } from "./components/LowStockAlertsView";
 import { AuditLogView } from "./components/AuditLogView";
+import { ProductDetailView } from "./components/ProductDetailView";
 import { StaffPerformanceView } from "./components/StaffPerformanceView";
 import { LoyaltyRewardsView } from "./components/LoyaltyRewardsView";
 import { DownloadAreaView } from "./components/DownloadAreaView";
@@ -318,6 +319,11 @@ export default function App() {
   // Phase 7: Product Catalog view mode — "grid" (default, Amazon/Flipkart-
   // style photo-forward cards) or "table" (dense spreadsheet view, opt-in).
   const [productViewMode, setProductViewMode] = useState<"grid" | "table">("grid");
+  // Phase 7: dedicated product detail page — set to a product id to show
+  // a full-page takeover (App.tsx renders ProductDetailView instead of the
+  // normal page body while this is set) instead of a modal, matching how
+  // e-commerce apps open a full product page on tap rather than a popup.
+  const [viewingProductId, setViewingProductId] = useState<string | null>(null);
   // Phase 6: shop logo upload (Settings -> receipt branding). Kept as a
   // small compressed data URL directly in db.settings.logo (already read
   // by InvoiceViewerModal everywhere it prints a receipt/invoice — the
@@ -2275,6 +2281,44 @@ export default function App() {
 
   // Render main page
   const renderCurrentPage = () => {
+    // Phase 7: dedicated product detail page — a genuine full-page
+    // takeover (not a modal), rendered instead of whatever `currentPage`
+    // is currently selected, exactly like tapping a product on an
+    // e-commerce app replaces the listing with its own screen.
+    if (viewingProductId) {
+      const viewedProduct = catalogProducts.find((p) => p.id === viewingProductId);
+      if (viewedProduct) {
+        return (
+          <ProductDetailView
+            product={viewedProduct}
+            stock={stockOf(viewedProduct)}
+            isOwner={ownerMode}
+            onBack={() => setViewingProductId(null)}
+            onEdit={
+              ownerMode
+                ? () => {
+                    setEditingProduct(viewedProduct);
+                    setIsEditProductOpen(true);
+                    setViewingProductId(null);
+                  }
+                : undefined
+            }
+            onDelete={ownerMode ? () => void handleDeleteProduct(viewedProduct) : undefined}
+            onAddToCart={
+              stockOf(viewedProduct) > 0
+                ? () => {
+                    addToCart(viewedProduct);
+                    showToast(`Added ${viewedProduct.name} to cart!`, "green");
+                  }
+                : undefined
+            }
+          />
+        );
+      }
+      // Product no longer exists (deleted from another device, etc.) —
+      // fall through to the normal page instead of showing a dead end.
+      setViewingProductId(null);
+    }
     switch (currentPage) {
       case "dashboard": {
         const todaySales = visibleSales.filter((s) => s.date === todayStr());
@@ -3106,7 +3150,12 @@ export default function App() {
                         {pct !== null && pct > 0 && <span className="product-card-discount-badge">{pct}% OFF</span>}
                         {out && <span className="product-card-oos-badge">Out of Stock</span>}
                       </div>
-                      <div className="product-card-body">
+                      <div
+                        className="product-card-body"
+                        style={{ cursor: "pointer" }}
+                        onClick={() => setViewingProductId(p.id)}
+                        title="Tap to view full details"
+                      >
                         <div className="product-card-name" title={p.name}>{p.name}</div>
                         <div className="product-card-sub">{[p.brand, p.category].filter(Boolean).join(" · ")}</div>
                         <div className="product-card-price-row">
@@ -3119,10 +3168,10 @@ export default function App() {
                         </div>
                         {ownerMode && (
                           <div className="product-card-actions">
-                            <button className="btn sm" onClick={() => { setEditingProduct(p); setIsEditProductOpen(true); }}>
+                            <button className="btn sm" onClick={(e) => { e.stopPropagation(); setEditingProduct(p); setIsEditProductOpen(true); }}>
                               <Pencil size={12} /> Edit
                             </button>
-                            <button className="btn sm danger" onClick={() => void handleDeleteProduct(p)} title="Product permanently delete karo (photo bhi cloud se hat jayegi)">
+                            <button className="btn sm danger" onClick={(e) => { e.stopPropagation(); void handleDeleteProduct(p); }} title="Product permanently delete karo (photo bhi cloud se hat jayegi)">
                               <Trash2 size={12} />
                             </button>
                           </div>

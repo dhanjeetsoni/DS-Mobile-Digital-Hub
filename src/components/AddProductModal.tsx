@@ -2,7 +2,7 @@ import React, { useRef, useState } from "react";
 import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcode, ShieldCheck, Search } from "lucide-react";
 import { Database, Product, StockBatch } from "../types";
 import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
-import { processAccessoryOcr, lookupScreenSizeRange, getPriceSuggestion } from "../utils/aiOcr";
+import { processAccessoryOcr, lookupScreenSizeRange, getPriceSuggestion, getProductSpecifications } from "../utils/aiOcr";
 import { compressImageToDataUrl, compressImageForScan } from "../utils/imageCompress";
 import { uploadProductPhotoOrFallback, isStorageUrl } from "../services/photoStorage";
 import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay";
@@ -105,6 +105,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   // same as screenSizeInches".
   const [screenSizeMaxInches, setScreenSizeMaxInches] = useState<number>(0);
   const [notes, setNotes] = useState("");
+  const [specifications, setSpecifications] = useState<{ label: string; value: string }[]>([]);
+  const [specsLoading, setSpecsLoading] = useState(false);
   const isScreenAccessory = category === "Tempered Glass" || category === "Curved Glass" || category === "Back Covers";
 
   // These are always left blank for the shop to fill in — never guessed by AI.
@@ -159,6 +161,34 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     if (priceSuggestion.mrp) setMrp(priceSuggestion.mrp);
     setPriceSuggestion(null);
     toast("AI suggestion apply ho gaya — check karke Save karein", "green");
+  }
+
+  // Phase 7: AI auto-fills full specifications for a product when added.
+  async function handleSuggestSpecifications() {
+    if (!name.trim() || !category.trim()) {
+      toast("Pehle product name aur category bharein", "amber");
+      return;
+    }
+    setSpecsLoading(true);
+    try {
+      const result = await getProductSpecifications({
+        brand: brand.trim() || undefined,
+        productName: name.trim(),
+        category: category.trim(),
+        compatibleModels: compatibleModels.length ? compatibleModels : undefined,
+      });
+      setSpecifications(result.specifications);
+      toast(
+        result.confidence === "low"
+          ? "Specifications bhar diye — kam confidence hai, check kar lein"
+          : "AI ne specifications bhar diye — check kar lein",
+        "green",
+      );
+    } catch (err: any) {
+      toast(err?.message || "AI specifications abhi available nahi hain", "amber");
+    } finally {
+      setSpecsLoading(false);
+    }
   }
   const tryAutoFillPriceFromBrand = (brandValue: string, categoryValue: string) => {
     const brandKey = brandValue.trim().toLowerCase();
@@ -216,6 +246,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     setScreenSizeMaxInches(0);
     setSizeManuallyEdited(false);
     setNotes("");
+    setSpecifications([]);
     setPurchasePrice(0);
     setConfidentialPrice(0);
     setSellingPrice(0);
@@ -504,6 +535,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       requireCustomerDetails: warrantyEnabled ? true : requireCustomerDetails,
       supplier: supplier.trim(),
       notes: notes.trim(),
+      specifications: specifications.length ? specifications : undefined,
       compatibleModels,
       screenSizeInches: isScreenAccessory && screenSizeInches ? screenSizeInches : undefined,
       // Step 3.4b: only save a max when it's a real, distinct range (and
@@ -973,6 +1005,60 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 700, fontSize: "13px" }}>Specifications</div>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={handleSuggestSpecifications}
+                    disabled={specsLoading}
+                    style={{ display: "flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <Sparkles size={13} /> {specsLoading ? "Sochte hain…" : "AI Fill Specifications"}
+                  </button>
+                </div>
+                <div className="hint" style={{ marginTop: "2px" }}>
+                  Product ka full spec-sheet (Display, RAM, Camera, Battery, waghera ya accessory ke liye Material/Compatibility) —
+                  AI apni general knowledge se bharta hai, ye live/confirmed data nahi hai, isliye check kar lein.
+                </div>
+                {specifications.length > 0 && (
+                  <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    {specifications.map((spec, i) => (
+                      <div key={i} style={{ display: "flex", gap: "8px", fontSize: "12px" }}>
+                        <input
+                          value={spec.label}
+                          onChange={(e) => setSpecifications((prev) => prev.map((s, si) => (si === i ? { ...s, label: e.target.value } : s)))}
+                          style={{ flex: "0 0 120px", fontSize: "12px" }}
+                          placeholder="Label"
+                        />
+                        <input
+                          value={spec.value}
+                          onChange={(e) => setSpecifications((prev) => prev.map((s, si) => (si === i ? { ...s, value: e.target.value } : s)))}
+                          style={{ flex: 1, fontSize: "12px" }}
+                          placeholder="Value"
+                        />
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() => setSpecifications((prev) => prev.filter((_, si) => si !== i))}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn sm"
+                  style={{ marginTop: "6px" }}
+                  onClick={() => setSpecifications((prev) => [...prev, { label: "", value: "" }])}
+                >
+                  <Plus size={12} /> Spec add karein
+                </button>
               </div>
 
               <div className="field">

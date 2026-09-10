@@ -269,3 +269,35 @@ export async function getPriceSuggestion(input: {
   throw new Error(json?.error || "AI price suggestion failed. Enter manually.");
 }
 
+// Phase 7: AI auto-fills full specifications for a product when added.
+// Separate deployed function (ai-product-specs), same pattern as
+// ai-price-advisor above (own rate limit, own concern).
+const AI_PRODUCT_SPECS_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/ai-product-specs` : "";
+
+export interface ProductSpecSuggestion {
+  specifications: { label: string; value: string }[];
+  confidence: "low" | "medium" | "high";
+}
+
+export async function getProductSpecifications(input: {
+  brand?: string;
+  productName: string;
+  category: string;
+  compatibleModels?: string[];
+}): Promise<ProductSpecSuggestion> {
+  if (!AI_PRODUCT_SPECS_URL) throw new Error("AI unavailable — cloud not configured.");
+  const res = await fetch(AI_PRODUCT_SPECS_URL, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify(input),
+  });
+  const json = await res.json().catch(() => null);
+  if (res.ok && json?.success && Array.isArray(json?.specifications)) {
+    return {
+      specifications: json.specifications.map((s: any) => ({ label: String(s?.label || ""), value: String(s?.value || "") })),
+      confidence: ["low", "medium", "high"].includes(json.confidence) ? json.confidence : "low",
+    };
+  }
+  throw new Error(json?.error || "AI specifications suggestion failed. Enter manually.");
+}
+

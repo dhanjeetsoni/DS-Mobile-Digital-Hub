@@ -1305,8 +1305,21 @@ actual code, per this document's own ground rule — not assumed or guessed._
     code, zero changes to the modal itself.
   - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
     clean.
-- [ ] "Add to Cart" **and** "Buy Now" (direct checkout) both available from
-      the product page, like Amazon
+- [x] **"Add to Cart" and "Buy Now" (direct checkout) both available from
+      the product page, like Amazon — done 2026-09-09.** Add to Cart
+      already existed (wired by an earlier Phase 7 pass); added Buy Now
+      alongside it — adds the item to the same cart via the existing
+      `addToCart()` (no new cart logic) then closes the product detail
+      page and jumps straight to the Sell/checkout screen, vs. Add to Cart
+      which stays on the product page. Distinct warm-orange styling
+      (`.product-detail-buynow-btn`) so it visually reads as the fast path,
+      matching Amazon/Flipkart's own Buy-Now-vs-Add-to-Cart color
+      convention. Both hidden together when out of stock (same guard the
+      existing button used). Verified: `npm install` (picked up
+      `@tauri-apps/plugin-biometric`, declared by an earlier session but
+      not yet installed — was blocking a clean `tsc` unrelated to this
+      change), `tsc --noEmit` clean, `vitest` 26/26, `npm run build` clean,
+      `static-audit.mjs` 16/16. **Not device-tested.**
 - [ ] AI auto-designs the rest of the product page layout (feature
       highlights, photo gallery) per product, saved permanently so it
       loads instantly next time (including offline)

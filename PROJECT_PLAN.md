@@ -1476,3 +1476,20 @@ unused table+RPCs (`profile_pins`, `get_own_pin_status`, `set_own_pin`,
 `verify_own_pin`, `reset_staff_pin`) if the owner decides the offline-first
 design is worth keeping the fragility. Not deciding this alone; flagging
 it for whoever picks Phase 2 back up.
+
+**Update 2026-09-09 (later same day) — Confidential Price reveal window
+changed from 5 minutes to 1 minute**, per the owner's explicit ask.
+Changed at the one authoritative source
+(`supabase/functions/telegram-connect/index.ts`'s
+`reveal_expires_at: new Date(Date.now() + 1 * 60_000)`, was `5 * 60_000`)
+plus every place that duration was mentioned in staff/owner-facing text
+(the Telegram approve confirmation + footer, the initial request message,
+`ConfidentialPriceModal`'s pre-request explainer and countdown comment,
+`confidentialPrice.ts`'s doc comment). The separate 30-minute
+*pending-request* timeout (`expire_confidential_price_requests()` — an
+unattended request auto-expiring before the Owner ever responds) is a
+different thing and was correctly left alone; only the *after-approval*
+reveal window changed. Historical entries above describing "5 minutes"
+are left as-is (accurate for what was true when they were written) rather
+than rewritten, per this file's own ground rule about not erasing past
+entries — this note is the record of the change.

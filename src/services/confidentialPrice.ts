@@ -8,7 +8,7 @@ import { describeFunctionsError } from './telegram';
 // creates a row here and messages the Owner on Telegram with Approve/Deny
 // buttons. The Owner's tap is handled entirely server-side (Telegram
 // callback_query -> the same Edge Function's webhook branch), which writes
-// `revealed_price` + a 5-minute `reveal_expires_at` back onto this exact row.
+// `revealed_price` + a 1-minute `reveal_expires_at` back onto this exact row.
 // The staff device is listening on Supabase Realtime for that row to change,
 // so the reveal appears the moment the Owner taps Approve — no polling.
 //

@@ -1065,6 +1065,17 @@ html[data-font-style="mono"] {
   flex-wrap: wrap;
   margin-top: 22px;
 }
+/* Phase 7: Amazon-style Buy Now — a distinct warm accent so it visually
+   reads as "the fast path" next to the plain Add to Cart button, same
+   convention Amazon/Flipkart use (orange Buy Now vs yellow/neutral Add to
+   Cart) even though this app's own .btn.primary is blue elsewhere. */
+.product-detail-buynow-btn {
+  background: linear-gradient(135deg, #f97316, #ea580c) !important;
+  border-color: transparent !important;
+}
+.product-detail-buynow-btn:hover {
+  background: linear-gradient(135deg, #ea580c, #c2410c) !important;
+}
 @media (max-width: 900px) {
   .product-detail-layout {
     grid-template-columns: 1fr;

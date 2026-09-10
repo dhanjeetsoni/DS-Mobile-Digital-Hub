@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, ImageOff, Pencil, Trash2, ShoppingCart, Lock } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ImageOff, Pencil, Trash2, ShoppingCart, Lock, Zap } from "lucide-react";
 import type { Product } from "../types";
 import { inr, computeDiscountPercent } from "../utils/indianCurrency";
 
@@ -11,6 +11,11 @@ interface ProductDetailViewProps {
   onEdit?: () => void;
   onDelete?: () => void;
   onAddToCart?: () => void;
+  // Phase 7 — Amazon-style "Buy Now": adds the item to the cart AND jumps
+  // straight to the checkout (Sell) screen ready to complete the sale, as
+  // opposed to Add to Cart which stays on this page (matches the real
+  // Amazon/Flipkart distinction between the two buttons).
+  onBuyNow?: () => void;
   // Phase 7 — "Confidential Price" button, reusing the existing Telegram
   // approve/deny flow (confidentialPrice.ts + telegram-connect Edge
   // Function) as-is. This page only surfaces the entry point — App.tsx
@@ -35,6 +40,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
   onEdit,
   onDelete,
   onAddToCart,
+  onBuyNow,
   onConfidentialPrice,
 }) => {
   const photos = product.photos && product.photos.length > 0 ? product.photos : product.photo ? [product.photo] : [];
@@ -184,8 +190,13 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
           </div>
 
           <div className="product-detail-actions">
+            {onBuyNow && !out && (
+              <button className="btn primary product-detail-buynow-btn" onClick={onBuyNow}>
+                <Zap size={15} /> Buy Now
+              </button>
+            )}
             {onAddToCart && !out && (
-              <button className="btn primary" onClick={onAddToCart}>
+              <button className="btn" onClick={onAddToCart}>
                 <ShoppingCart size={15} /> Add to Cart
               </button>
             )}

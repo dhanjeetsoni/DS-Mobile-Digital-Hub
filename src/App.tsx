@@ -2312,6 +2312,19 @@ export default function App() {
                   }
                 : undefined
             }
+            onBuyNow={
+              stockOf(viewedProduct) > 0
+                ? () => {
+                    // Phase 7 "Buy Now" — Amazon-style direct checkout:
+                    // add the item then jump straight to the Sell/checkout
+                    // screen with it already in the cart, instead of
+                    // staying on this page like plain Add to Cart does.
+                    addToCart(viewedProduct);
+                    setViewingProductId(null);
+                    setCurrentPage("sell");
+                  }
+                : undefined
+            }
             onConfidentialPrice={() => setConfidentialPriceProduct(viewedProduct)}
           />
         );

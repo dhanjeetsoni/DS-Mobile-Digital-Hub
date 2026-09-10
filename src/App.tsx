@@ -66,9 +66,9 @@ import { SetupWizardView } from "./components/SetupWizardView";
 import { ConfidentialPriceModal } from "./components/ConfidentialPriceModal";
 import { ConnectionStatusBadge } from "./components/ConnectionStatusBadge";
 import { AddGiftModal } from "./components/AddGiftModal";
-import { staffSignIn, isAccessWindowExpired, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
+import { staffSignIn, isAccessWindowExpired, isOutsideDailyWindow, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
 import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured, isBiometricEnabled, setBiometricEnabled } from "./services/pinAuth";
-import { biometricCheck, authenticateBiometric } from "./services/phase6";
+import { biometricCheck, authenticateBiometric, getMyStaffAccessPolicy } from "./services/phase6";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
 import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
@@ -353,7 +353,7 @@ export default function App() {
   const [staffLoginPassword, setStaffLoginPassword] = useState("");
   const [staffLoginBusy, setStaffLoginBusy] = useState(false);
   const [staffLoginError, setStaffLoginError] = useState("");
-  const [staffDeniedReason, setStaffDeniedReason] = useState<"disabled" | "expired" | "kicked" | null>(null);
+  const [staffDeniedReason, setStaffDeniedReason] = useState<"disabled" | "expired" | "kicked" | "outsideWindow" | null>(null);
   const [gateShakeError, setGateShakeError] = useState(false);
   const [gateBusy, setGateBusy] = useState(false);
   const [gateAttempts, setGateAttempts] = useState<{ count: number; lockUntil: number }>(() => {
@@ -454,6 +454,11 @@ export default function App() {
       }
       if (result.status === "expired") {
         setStaffDeniedReason("expired");
+        setGateStage("staffDenied");
+        return;
+      }
+      if (result.status === "outsideWindow") {
+        setStaffDeniedReason("outsideWindow");
         setGateStage("staffDenied");
         return;
       }
@@ -1026,7 +1031,7 @@ export default function App() {
   // immediately when a staff session starts.
   useEffect(() => {
     if (!gateUnlocked || cloudProfile?.role !== "staff") return;
-    const forceStaffLogout = async (reason: "disabled" | "expired") => {
+    const forceStaffLogout = async (reason: "disabled" | "expired" | "outsideWindow") => {
       clearCachedStaffSession();
       await supabase.auth.signOut().catch(() => {});
       setCloudUser(null);
@@ -1035,13 +1040,26 @@ export default function App() {
       setStaffDeniedReason(reason);
       setGateStage("staffDenied");
       setGateUnlocked(false);
-      showToast(reason === "expired" ? "Aapka access time khatam ho gaya." : "Owner ne aapka access band kar diya.", "amber");
+      showToast(
+        reason === "expired" ? "Aapka access time khatam ho gaya." :
+        reason === "outsideWindow" ? "Aapka aaj ka allowed time khatam ho gaya." :
+        "Owner ne aapka access band kar diya.",
+        "amber"
+      );
     };
     const check = () => {
       const cached = readCachedStaffSession();
       if (!cached) return;
       if (cached.accessMode !== "no_restriction" && cached.accessExpiresAt && new Date(cached.accessExpiresAt).getTime() <= Date.now()) {
         forceStaffLogout("expired");
+        return;
+      }
+      // Phase 6: recurring daily time-of-day window — same fully-offline
+      // clock-only check as the access_expires_at one above, so a staff
+      // member's session ends mid-day even with no internet, right when
+      // their allowed window (e.g. 09:00-18:00) closes.
+      if (isOutsideDailyWindow(cached.dailyStart ?? null, cached.dailyEnd ?? null)) {
+        forceStaffLogout("outsideWindow");
       }
     };
     check();
@@ -4270,7 +4288,7 @@ export default function App() {
             <div className="gate-auth-head">
               <div className="warn-badge"><ShieldAlert size={22} /></div>
               <div>
-                <h3>{staffDeniedReason === "expired" ? "Access Time Khatam Ho Gaya" : staffDeniedReason === "kicked" ? "Logout Kar Diya Gaya" : "Access Disabled"}</h3>
+                <h3>{staffDeniedReason === "expired" ? "Access Time Khatam Ho Gaya" : staffDeniedReason === "kicked" ? "Logout Kar Diya Gaya" : staffDeniedReason === "outsideWindow" ? "Abhi Login Ka Time Nahi Hai" : "Access Disabled"}</h3>
                 <p>Contact Shop Owner for Access</p>
               </div>
             </div>
@@ -4279,6 +4297,8 @@ export default function App() {
                 ? "Owner ne aapko jitna time diya tha wo poora ho chuka hai. Dobara access ke liye shop owner se baat karo."
                 : staffDeniedReason === "kicked"
                 ? "Owner ne aapko is device se turant logout kar diya hai. Dobara login karne ke liye shop owner se baat karo."
+                : staffDeniedReason === "outsideWindow"
+                ? "Owner ne aapke liye ek fix daily time set kiya hai jab app use kar sakte ho — abhi wo waqt nahi hai. Sahi time par dobara try karo."
                 : "Owner ne aapka access is waqt band kar rakha hai. Dobara access ke liye shop owner se baat karo."}
             </div>
             <button
@@ -4336,6 +4356,12 @@ export default function App() {
   // option at all, not just be blocked after attempting it; every place
   // that hides or refuses an owner-only control checks this same value.
   const isStaffIdentity = cloudProfile?.role === "staff";
+  // Phase 6: fed from the localStorage cache staffSignIn() writes at login
+  // time (see CachedStaffSession) — read here rather than threaded through
+  // state, since a successful staff sign-in triggers a full page reload
+  // (see handleStaffLoginSubmit's comment on why), so this is naturally
+  // re-derived fresh on every app boot exactly when it's needed.
+  const staffAllowedSections = isStaffIdentity ? (readCachedStaffSession()?.allowedSections ?? null) : null;
 
   return (
     <div id="app">
@@ -4369,10 +4395,12 @@ export default function App() {
         isMobileOpen={isMobileNavOpen}
         onCloseMobile={() => setIsMobileNavOpen(false)}
         isStaffIdentity={isStaffIdentity}
+        allowedSections={staffAllowedSections}
       />
       <BottomTabBar
         currentPage={currentPage}
         isStaffIdentity={isStaffIdentity}
+        allowedSections={staffAllowedSections}
         onNavigate={(page) => {
           // Same owner-passcode gate as <Sidebar>'s onNavigate above (kept
           // duplicated rather than refactored into a shared function, to

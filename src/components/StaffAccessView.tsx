@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { Check, Clock, Copy, KeyRound, Loader2, Lock, LogOut, Plus, Power, RefreshCcw, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
+import { Check, Clock, Copy, KeyRound, ListChecks, Loader2, Lock, LogOut, Plus, Power, RefreshCcw, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { adminResetPin, adminClearPin } from "../services/pinAuth";
-import { forceLogoutStaff } from "../services/phase6";
+import { forceLogoutStaff, listStaffAccessPolicies, upsertStaffAccessPolicy, StaffAccessPolicy } from "../services/phase6";
+import { PRIMARY_NAV_ITEMS, SECONDARY_NAV_ITEMS } from "./Sidebar";
 import {
   createStaffAccount,
   deleteStaffAccount,
@@ -101,6 +102,64 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
   const [grantHours, setGrantHours] = useState(0);
   const [grantMinutes, setGrantMinutes] = useState(15);
 
+  // Phase 6: Time-window (daily recurring) + section-visibility policy per
+  // staff member. Deliberately reuses Sidebar's own exported nav-item lists
+  // for the checklist rather than a separately-maintained list here, so
+  // there's no risk of this screen's checklist drifting out of sync with
+  // what Sidebar actually knows how to filter.
+  const assignableSections = [...PRIMARY_NAV_ITEMS, ...SECONDARY_NAV_ITEMS.filter((i) => !i.ownerOnly)].filter(
+    (item, idx, arr) => arr.findIndex((x) => x.key === item.key) === idx
+  );
+  const [policies, setPolicies] = useState<Record<string, StaffAccessPolicy>>({});
+  const [policyTarget, setPolicyTarget] = useState<StaffProfile | null>(null);
+  const [policyDailyStart, setPolicyDailyStart] = useState("");
+  const [policyDailyEnd, setPolicyDailyEnd] = useState("");
+  const [policySections, setPolicySections] = useState<string[]>([]);
+  const [policySaving, setPolicySaving] = useState(false);
+
+  const openPolicyModal = (member: StaffProfile) => {
+    const existing = policies[member.id];
+    setPolicyTarget(member);
+    setPolicyDailyStart(existing?.daily_start ? existing.daily_start.slice(0, 5) : "");
+    setPolicyDailyEnd(existing?.daily_end ? existing.daily_end.slice(0, 5) : "");
+    setPolicySections(existing?.allowed_sections?.length ? existing.allowed_sections : ["sell", "photoFinder"]);
+  };
+
+  const toggleSection = (key: string) => {
+    setPolicySections((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  };
+
+  const handleSavePolicy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!policyTarget) return;
+    if ((policyDailyStart && !policyDailyEnd) || (!policyDailyStart && policyDailyEnd)) {
+      toast("Daily window ke liye start aur end, dono time bharo (ya dono khali chhod do).", "amber");
+      return;
+    }
+    if (policyDailyStart && policyDailyEnd && policyDailyStart === policyDailyEnd) {
+      toast("Start aur end time same nahi ho sakte.", "amber");
+      return;
+    }
+    setPolicySaving(true);
+    try {
+      const saved = await upsertStaffAccessPolicy({
+        staffProfileId: policyTarget.id,
+        dailyStart: policyDailyStart || null,
+        dailyEnd: policyDailyEnd || null,
+        sessionMinutes: null,
+        allowedSections: policySections,
+        allowedData: {},
+      });
+      setPolicies((prev) => ({ ...prev, [policyTarget.id]: saved as StaffAccessPolicy }));
+      toast(`${policyTarget.staff_name || policyTarget.staff_login_id} ki access policy save ho gayi.`, "green");
+      setPolicyTarget(null);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Policy save nahi ho paayi.", "red");
+    } finally {
+      setPolicySaving(false);
+    }
+  };
+
   // Re-render every 30s so the "X min baaki" countdown on each row stays fresh.
   const [, forceTick] = useState(0);
   useEffect(() => {
@@ -113,6 +172,16 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
     setLoading(true);
     try {
       setStaff(await listStaffAccounts(storeId));
+      try {
+        const list = await listStaffAccessPolicies(storeId);
+        const map: Record<string, StaffAccessPolicy> = {};
+        for (const p of list) map[p.staff_profile_id] = p;
+        setPolicies(map);
+      } catch {
+        // Non-fatal — the staff list itself (the more important read) already
+        // succeeded above; the policy editor just falls back to its
+        // defaults if this couldn't load for some reason.
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : "Staff list load nahi ho paayi.", "red");
     } finally {
@@ -438,6 +507,11 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
                           <Clock size={12} /> Change Access Window
                         </button>
                       )}
+                      {s.role !== "manager" && (
+                        <button className="btn sm" onClick={() => openPolicyModal(s)}>
+                          <ListChecks size={12} /> Time Window &amp; Sections
+                        </button>
+                      )}
                       <button className="btn sm" onClick={() => { setResetTarget(s); setResetPassword(generateStaffPassword()); }}>
                         <KeyRound size={12} /> Regenerate Password
                       </button>
@@ -607,6 +681,58 @@ export const StaffAccessView: React.FC<StaffAccessViewProps> = ({ storeId, store
                 <button type="button" className="btn" onClick={() => setGrantTarget(null)}>Cancel</button>
                 <button type="submit" className="btn primary" disabled={saving}>
                   {saving ? <Loader2 size={15} className="spin" /> : <Power size={15} />} {saving ? "Granting…" : "Grant Access"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {policyTarget && (
+        <div className="modal-backdrop" onMouseDown={() => setPolicyTarget(null)}>
+          <div className="modal" style={{ maxWidth: 480 }} onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3 style={{ margin: 0 }}><ListChecks size={16} /> Time Window &amp; Sections — {policyTarget.staff_name || policyTarget.staff_login_id}</h3>
+              <button className="icon-btn" onClick={() => setPolicyTarget(null)}>&times;</button>
+            </div>
+            <form onSubmit={handleSavePolicy}>
+              <div className="field">
+                <label>Daily Login Window (optional)</label>
+                <div className="hint" style={{ marginBottom: 6 }}>
+                  Is se bahar staff login nahi kar payega, aur agar already andar hai to end-time hote hi turant
+                  logout ho jayega — roz repeat hota hai, chahe device offline ho.
+                </div>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <input type="time" value={policyDailyStart} onChange={(e) => setPolicyDailyStart(e.target.value)} />
+                  <span className="hint">se</span>
+                  <input type="time" value={policyDailyEnd} onChange={(e) => setPolicyDailyEnd(e.target.value)} />
+                  {(policyDailyStart || policyDailyEnd) && (
+                    <button type="button" className="btn sm" onClick={() => { setPolicyDailyStart(""); setPolicyDailyEnd(""); }}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="field">
+                <label>Visible Sections</label>
+                <div className="hint" style={{ marginBottom: 6 }}>
+                  Sirf ye chuni hui sections is staff ko Sidebar/Bottom bar mein dikhengi. Kam se kam ek chuno.
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "4px 10px", maxHeight: 260, overflowY: "auto" }}>
+                  {assignableSections.map((item) => (
+                    <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400, fontSize: 13 }}>
+                      <input type="checkbox" checked={policySections.includes(item.key)} onChange={() => toggleSection(item.key)} />
+                      {item.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="modal-actions">
+                <button type="button" className="btn" onClick={() => setPolicyTarget(null)}>Cancel</button>
+                <button type="submit" className="btn primary" disabled={policySaving || policySections.length === 0}>
+                  {policySaving ? <Loader2 size={15} className="spin" /> : <Check size={15} />} {policySaving ? "Saving…" : "Save Policy"}
                 </button>
               </div>
             </form>

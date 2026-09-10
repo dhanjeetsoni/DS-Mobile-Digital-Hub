@@ -54,6 +54,19 @@ interface SidebarProps {
    * ownerMode's momentary value) — staff must never even be offered the
    * option to attempt owner mode, not just be blocked after trying. */
   isStaffIdentity?: boolean;
+  /**
+   * Phase 6: per-staff-member section visibility, from
+   * staff_access_policies.allowed_sections (see phase6.ts's
+   * getMyStaffAccessPolicy / upsertStaffAccessPolicy, and StaffAccessView's
+   * new policy editor). `null`/`undefined` = no policy configured for this
+   * staff member yet — falls back to the original hardcoded "sell +
+   * photoFinder only" default below, so an existing staff account with no
+   * policy set behaves exactly as it always has. An empty array is treated
+   * the same as null (an owner clearing every checkbox almost certainly
+   * means "I haven't set this up" rather than "show them nothing at all",
+   * which would otherwise strand a staff member on a totally blank sidebar).
+   */
+  allowedSections?: string[] | null;
 }
 
 // 6 Core Daily Counter Items for Ultra-Easy Counter Work
@@ -192,6 +205,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen = false,
   onCloseMobile,
   isStaffIdentity = false,
+  allowedSections = null,
 }) => {
   const [showAllTools, setShowAllTools] = useState<boolean>(false);
   const [easyMode, setEasyMode] = useState<boolean>(false);
@@ -317,7 +331,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             design: snap a photo of what's in front of them, find it in
             stock, add straight to the bill; it must stay reachable without
             switching to Owner mode). */}
-        {((ownerMode && !isStaffIdentity) ? PRIMARY_NAV_ITEMS : PRIMARY_NAV_ITEMS.filter((i) => i.key === "sell" || i.key === "photoFinder")).map((item) => {
+        {(() => {
+          if (ownerMode && !isStaffIdentity) return PRIMARY_NAV_ITEMS;
+          const hasPolicy = Array.isArray(allowedSections) && allowedSections.length > 0;
+          return PRIMARY_NAV_ITEMS.filter((i) =>
+            hasPolicy ? allowedSections!.includes(i.key) : i.key === "sell" || i.key === "photoFinder"
+          );
+        })().map((item) => {
           const Icon = item.icon;
           const isActive = currentPage === item.key;
           let badgeCount = 0;
@@ -368,9 +388,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {(showAllTools || isCurrentSecondary) && (
               <div style={{ marginTop: "4px", display: "flex", flexDirection: "column", gap: "4px" }}>
                 {SECONDARY_NAV_GROUPS.map((group) => {
+                  const staffPolicyOk = (key: string) =>
+                    !isStaffIdentity || !Array.isArray(allowedSections) || allowedSections.length === 0 || allowedSections.includes(key);
                   const visibleItems = group.itemKeys
                     .map((key) => SECONDARY_NAV_ITEMS.find((n) => n.key === key))
-                    .filter((n): n is (typeof SECONDARY_NAV_ITEMS)[number] => !!n && (!n.ownerOnly || (ownerMode && !isStaffIdentity)));
+                    .filter((n): n is (typeof SECONDARY_NAV_ITEMS)[number] => !!n && (!n.ownerOnly || (ownerMode && !isStaffIdentity)) && staffPolicyOk(n.key));
 
                   if (visibleItems.length === 0) return null;
 

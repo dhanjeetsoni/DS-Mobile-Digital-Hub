@@ -48,6 +48,37 @@ export interface ReturnApprovalRequest {
   review_note: string | null;
 }
 
+export interface StaffAccessPolicy {
+  staff_profile_id: string;
+  daily_start: string | null;
+  daily_end: string | null;
+  session_minutes: number | null;
+  allowed_sections: string[];
+  allowed_data: Record<string, boolean>;
+  updated_at: string;
+}
+
+// Phase 6: owner-side read of every staff member's policy in one round
+// trip, for pre-filling the Time-Window & Sections editor in
+// StaffAccessView. get_my_staff_access_policy() only reads the CALLER's
+// own policy (by design — it's what a signed-in staff member's own app
+// uses to self-enforce); RLS separately grants owner/manager full SELECT
+// on staff_access_policies for their own store's rows (see
+// "staff_access_owner_manager" policy), so a direct table read is both
+// simpler than adding a new RPC and already covered by existing RLS.
+export async function listStaffAccessPolicies(storeId: string): Promise<StaffAccessPolicy[]> {
+  const { data, error } = await supabase
+    .from("staff_access_policies")
+    .select("staff_profile_id,daily_start,daily_end,session_minutes,allowed_sections,allowed_data,updated_at")
+    .eq("store_id", storeId);
+  if (error) throw error;
+  return (data || []).map((row: any) => ({
+    ...row,
+    allowed_sections: Array.isArray(row.allowed_sections) ? row.allowed_sections : [],
+    allowed_data: row.allowed_data && typeof row.allowed_data === "object" ? row.allowed_data : {},
+  }));
+}
+
 export async function suggestProductPrice(input: {
   brand?: string;
   productName: string;

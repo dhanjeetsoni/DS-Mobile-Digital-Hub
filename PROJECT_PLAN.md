@@ -1285,12 +1285,26 @@ actual code, per this document's own ground rule — not assumed or guessed._
   - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
     clean. **Not device-tested** (same standing caveat as the rest of this
     phase's UI work).
-- [ ] "Confidential Price" button available directly on this page —
-      **reuse the existing flow** (`confidentialPrice.ts` + the
-      `telegram-connect` Edge Function): staff tap it, owner gets an
-      Approve/Deny prompt on Telegram, price reveals for 5 minutes on
-      approval, all in realtime already. This page just needs to surface
-      the button, not rebuild the approval system
+- [x] **"Confidential Price" button available directly on the product
+      detail page — done 2026-09-09.** Pure surface-the-existing-flow, per
+      the request — the approval system itself (`confidentialPrice.ts` +
+      `telegram-connect` Edge Function's Telegram approve/deny +
+      `ConfidentialPriceModal`'s realtime subscription for the 5-minute
+      reveal) was NOT touched or rebuilt in any way.
+  - `ProductDetailView` gained one new optional prop
+    (`onConfidentialPrice`) and a 🔒 button next to the price block,
+    shown only for staff (`!isOwner`) — the owner already knows the
+    confidential price, matching the exact same convention the existing
+    Sell/POS catalog's own 🔒 button already follows.
+  - App.tsx wires it to the same global `confidentialPriceProduct` state
+    that already renders `ConfidentialPriceModal` at the bottom of the
+    tree — tapping the button calls the exact same
+    `setConfidentialPriceProduct(product)` the POS catalog's button calls,
+    so it's the identical request -> Telegram Approve/Deny -> realtime
+    5-minute reveal flow, from a second entry point. Zero new backend
+    code, zero changes to the modal itself.
+  - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
+    clean.
 - [ ] "Add to Cart" **and** "Buy Now" (direct checkout) both available from
       the product page, like Amazon
 - [ ] AI auto-designs the rest of the product page layout (feature

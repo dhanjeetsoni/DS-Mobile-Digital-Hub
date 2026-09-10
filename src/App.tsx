@@ -2312,6 +2312,7 @@ export default function App() {
                   }
                 : undefined
             }
+            onConfidentialPrice={() => setConfidentialPriceProduct(viewedProduct)}
           />
         );
       }

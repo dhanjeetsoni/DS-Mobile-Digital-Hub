@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, ImageOff, Pencil, Trash2, ShoppingCart } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ImageOff, Pencil, Trash2, ShoppingCart, Lock } from "lucide-react";
 import type { Product } from "../types";
 import { inr, computeDiscountPercent } from "../utils/indianCurrency";
 
@@ -11,6 +11,14 @@ interface ProductDetailViewProps {
   onEdit?: () => void;
   onDelete?: () => void;
   onAddToCart?: () => void;
+  // Phase 7 — "Confidential Price" button, reusing the existing Telegram
+  // approve/deny flow (confidentialPrice.ts + telegram-connect Edge
+  // Function) as-is. This page only surfaces the entry point — App.tsx
+  // already owns the request/reveal modal + realtime subscription
+  // (ConfidentialPriceModal, wired to the global confidentialPriceProduct
+  // state the exact same way the Sell/POS catalog's own 🔒 button already
+  // triggers it), so passing this callback is the entire integration.
+  onConfidentialPrice?: () => void;
 }
 
 // Phase 7: "Dedicated product detail page per product (tap a product ->
@@ -27,6 +35,7 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
   onEdit,
   onDelete,
   onAddToCart,
+  onConfidentialPrice,
 }) => {
   const photos = product.photos && product.photos.length > 0 ? product.photos : product.photo ? [product.photo] : [];
   const [activePhoto, setActivePhoto] = useState(0);
@@ -103,6 +112,17 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
           {product.mrp ? (
             <div className="hint" style={{ marginTop: "-4px" }}>MRP inclusive of all taxes</div>
           ) : null}
+
+          {!isOwner && onConfidentialPrice && (
+            <button
+              className="btn sm ghost"
+              style={{ marginTop: "10px" }}
+              title="Confidential Price maangein (Owner approval zaroori)"
+              onClick={onConfidentialPrice}
+            >
+              <Lock size={13} /> Confidential Price
+            </button>
+          )}
 
           <div className="product-detail-stock-row">
             <span className={`badge ${low ? "danger" : "ok"}`}>

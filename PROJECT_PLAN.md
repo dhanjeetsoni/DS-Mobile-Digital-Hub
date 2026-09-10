@@ -1081,8 +1081,59 @@ actual code, per this document's own ground rule — not assumed or guessed._
       ~240px/40KB via `compressImageToDataUrl` since — unlike per-product
       photos — this one field re-syncs on every unrelated settings save).
       `tsc --noEmit` clean.
-- [ ] Owner-configurable staff access window (time range, duration, which
-      sections/data are visible)
+- [x] **Owner-configurable staff access window (time range, duration, which
+      sections/data are visible) — client wiring done 2026-09-09.** A
+      progress report received for this item beforehand turned out to be
+      inaccurate on the client side (claimed `staffAuth.ts` functions that
+      didn't exist, and that `getCurrentProfile`/`listStaffAccounts`/
+      `staffSignIn` already selected new columns, which they didn't) —
+      caught by the usual deep-verify-before-building step. The DB side was
+      real, but not the raw `profiles.daily_window_*` columns mentioned —
+      live inspection found those are orphaned (zero functions/triggers
+      reference them). The actual backend is a separate, better-designed
+      `staff_access_policies` table (`daily_start`/`daily_end`/
+      `session_minutes`/`allowed_sections`/`allowed_data`, via
+      `get_my_staff_access_policy`/`upsert_staff_access_policy` RPCs) — built
+      client wiring on top of that real system instead:
+      - `staffAuth.ts`: new `isOutsideDailyWindow()` (handles an overnight
+        window, e.g. a 22:00-06:00 night shift, by wrapping past midnight
+        instead of treating start>end as broken) — verified standalone
+        against 13 cases (both boundaries of a normal window, the overnight
+        case, no-window-set). `staffSignIn` now fetches the caller's policy
+        right after auth and fails sign-in with a new `"outsideWindow"`
+        status if outside it; `CachedStaffSession` extended with
+        `dailyStart`/`dailyEnd`/`allowedSections` so the same check keeps
+        working fully offline for an already-signed-in session.
+      - `App.tsx`: the existing 5s periodic access-expiry check now also
+        force-logs-out an active session that crosses outside its daily
+        window; new `"outsideWindow"` denial-screen reason/message.
+      - `Sidebar.tsx` + `BottomTabBar.tsx`: new `allowedSections` prop,
+        filtering nav items to a per-staff-member policy when one is set —
+        falls back to the original hardcoded "sell + photoFinder" default
+        when none is, so an existing staff account with no policy set is
+        unaffected.
+      - `StaffAccessView.tsx`: new "Time Window & Sections" policy editor
+        per staff member (2 time inputs + a checklist built directly from
+        Sidebar's own exported nav-item lists, so it can't drift out of
+        sync with what Sidebar actually knows how to filter).
+      - `phase6.ts`: new `listStaffAccessPolicies()` for the owner-side bulk
+        read (RLS already grants owner/manager full access to this table —
+        no new RPC needed just to read it).
+      - Verified: `npm install && npx tsc --noEmit && npx vitest run
+        (26/26) && npm run build && node scripts/static-audit.mjs (16/16)`
+        all clean, plus the 13 standalone `isOutsideDailyWindow` cases.
+        **Not verified**: an actual authenticated
+        `upsert_staff_access_policy`/`get_my_staff_access_policy` round
+        trip against a real signed-in session — the RPC's SQL definition
+        was reviewed directly instead (careful/correct on inspection), but
+        a real device test of the full save → sign-in → enforce loop is
+        still worth doing.
+      - `session_minutes` (auto-logout after N minutes idle) and
+        `allowed_data` (data-level, not just section-level, permissions)
+        already exist on the same policy table/RPCs but were **not** wired
+        into any UI or enforcement here — out of scope for what was asked
+        (a time *window* and section *visibility*), left for a future pass
+        if wanted.
 - [ ] Refund/return requires owner approval before it completes
 - **Also found while auditing this phase, not one of the 15 listed items but
   worth recording**: a proper Audit Log feature (`AuditLogView.tsx` +

@@ -205,7 +205,15 @@ export default function App() {
   const [ownerMode, setOwnerMode] = useState(false);
   const initialRoutePage = (() => {
     const page = new URLSearchParams(window.location.search).get("page");
-    return page || "dashboard";
+    // Phase 7: the app now opens straight into Stock/Inventory by default
+    // instead of the Dashboard — an explicit ?page=... deep link (e.g. a
+    // bookmark, or the Setup Wizard's own navigation) still always wins.
+    // "products" is not an owner-only page (see Sidebar.tsx's
+    // SECONDARY_NAV_ITEMS entry), so this is safe as a default before the
+    // owner passcode has necessarily been entered this session — the
+    // existing owner-only-page guard a little further down only kicks in
+    // for pages that actually need it.
+    return page || "products";
   })();
   const [currentPage, setCurrentPage] = useState(initialRoutePage);
   const [cart, setCart] = useState<CartItem[]>([]);

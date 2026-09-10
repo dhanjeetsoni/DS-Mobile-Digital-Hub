@@ -1154,8 +1154,20 @@ actual code, per this document's own ground rule — not assumed or guessed._
   reading `log_table_audit()`'s definition directly).
 
 ### ⬜ Phase 7: Amazon/Flipkart-style product experience
-- [ ] App opens directly into the **Stock/Inventory section** by default
-      (not the dashboard)
+- [x] **App opens directly into the Stock/Inventory section by default (not
+      the dashboard) — done 2026-09-09.** `App.tsx`'s `initialRoutePage`
+      fallback changed from `"dashboard"` to `"products"` — an explicit
+      `?page=...` deep link (bookmark, Setup Wizard's own navigation, etc.)
+      still always wins over the default. Checked this doesn't collide with
+      the existing owner-only-page guard (`products` isn't owner-only, so
+      it's safe as a default before the owner passcode is entered) and that
+      no other code path force-resets to `"dashboard"` on every load — the
+      two other `setCurrentPage("dashboard")` call sites are a genuine
+      security guard (redirects away from an owner-only page reached via
+      deep link while logged out of owner mode) and the Setup Wizard's own
+      "Dismiss" button, neither of which fires unconditionally on load.
+      Verified: `npm install && npx tsc --noEmit && npx vitest run (26/26)
+      && npm run build && node scripts/static-audit.mjs (16/16)` all clean.
 - [ ] Product list redesigned as e-commerce style cards (photo-forward,
       like Amazon/Flipkart)
 - [ ] AI auto-fills full specifications for a product when added (extends

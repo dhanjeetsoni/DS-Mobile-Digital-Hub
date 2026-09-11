@@ -1275,8 +1275,23 @@ actual code, per this document's own ground rule — not assumed or guessed._
       **all products, all categories, everywhere**, like Amazon/Flipkart
 - [ ] Add AI-powered search on top of normal keyword search — runs by
       default alongside plain search, not instead of it
-- [ ] Search by phone **model number** must surface matching glass/cases
-      even if the product title doesn't literally contain that model
+- [x] Search by phone **model number** must surface matching glass/cases
+      even if the product title doesn't literally contain that model —
+      **fixed 2026-09-09**. Real bug found in the **most-used search box
+      in the whole app**: the Sell/POS page's own product search (`App.tsx`,
+      `filteredProds`) checked `p.name`/`p.brand`/`p.category` but never
+      `p.compatibleModels` — a generic-named glass ("Edge to Edge Curved
+      Glass", brand "Super X") tagged for "Realme 7" in its
+      `compatibleModels` array would never surface when staff typed
+      "Realme 7" into that search box, exactly the bug described. Fixed by
+      adding a `compatibleModels.some(m => naturalMatch(m, query))` check,
+      same pattern `ModelSearchView.tsx` (a separate, less-used screen)
+      already had correctly. Verified `ModelSearchView.tsx`'s own search
+      already did this right, so it needed no change — only the Sell/POS
+      one had the gap. No other search box in the app does free-text
+      product search (checked every `naturalMatch(` call site).
+  - Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+    production build clean.
 - [ ] Clicking a matched model shows **all** compatible glass/cover models
       for that phone
 - [ ] When adding a tempered-glass product, AI auto-fetches and

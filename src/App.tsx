@@ -2643,6 +2643,17 @@ export default function App() {
               naturalMatch(p.name, sellSearchQuery) ||
               naturalMatch(p.brand, sellSearchQuery) ||
               naturalMatch(p.category, sellSearchQuery) ||
+              // Phase 8 fix (2026-09-09): a tempered glass/cover's own
+              // name is usually generic ("Edge to Edge Curved Glass",
+              // brand "Super X") — the actual phone models it fits live
+              // only in compatibleModels, which this search never
+              // checked before. Searching a model number like "Realme 7"
+              // would silently miss every glass/cover tagged for it
+              // unless the model happened to also be in the product's
+              // name. This was the single most-used search box in the
+              // whole app (Sell/POS), so this was the highest-value place
+              // to fix it — ModelSearchView already did this correctly.
+              (p.compatibleModels || []).some((m) => naturalMatch(m, sellSearchQuery)) ||
               p.sku.toLowerCase().includes(q) ||
               (p.barcode || "").toLowerCase().includes(q) ||
               (p.units || []).some((u) => u.imei1.includes(q))

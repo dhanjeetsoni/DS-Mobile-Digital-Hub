@@ -1202,8 +1202,40 @@ actual code, per this document's own ground rule — not assumed or guessed._
       surfaced on the product list/detail view** — this phase's later
       "dedicated product detail page" item is the natural place to actually
       display it; captured/stored correctly for now, just not shown yet.
-- [ ] AI sources/generates good-quality product photos automatically (not
-      only what the owner uploads)
+- [x] **AI sources/generates good-quality product photos automatically —
+      done 2026-09-09, with an honest caveat.** Implemented as *generation*
+      (a clean AI studio-style representative photo), not *sourcing* (no
+      web image-search API is configured in this project) — and always
+      clearly labelled as such, never presented as a real photo of the
+      exact physical unit:
+  - New standalone `ai-product-photo` edge function (same key-pool/
+    failover pattern as `ai-price-advisor`/`ai-product-specs`), calling
+    Gemini with a studio-photo prompt built from brand/name/category.
+  - `Product.photoIsAiGenerated?: boolean` — set whenever a photo comes
+    from this path, cleared the instant a real photo is uploaded/scanned
+    over it. Shown as an "AI Photo" badge in Add Product's preview and on
+    every product card in the catalog grid.
+  - Explicit "Ya AI se photo banwayein" button in Add Product (only once
+    name/brand is filled) — deliberately not automatic-on-save, same
+    established pattern as "AI Fill Specifications"/"AI Suggest Price" in
+    this file, so it never silently burns AI-key quota without being asked.
+  - **Live-tested before shipping, found a real limitation**: confirmed
+    `gemini-2.5-flash-image` is a real, reachable model via
+    `generateContent()` on a plain Gemini API key (`gemini-3.5-flash-image`
+    404s — doesn't exist on this API version yet; the Imagen models via
+    `generateImages()` are Vertex-AI-only and reject a plain API key
+    outright). **However every key in this store's 9-key pool returned 429
+    quota-exceeded on this specific model** — image generation appears to
+    sit on a separate, much stricter free-tier quota than the text/vision
+    models already working elsewhere in this app. The code is correct and
+    will work the moment quota allows (fails gracefully with a clear
+    Hinglish message today, never blocks saving the product); it could
+    not be verified end-to-end with an actual successful image today. Flag
+    for the owner: worth checking Google AI Studio's billing/quota page
+    for this specific model if this feature needs to work today rather
+    than whenever quota resets.
+  - Verified: `tsc --noEmit`, full test suite (26/26), static audit
+    (16/16), production build — all clean.
 - [ ] All product photos permanently stored on Cloudflare R2 (durable,
       never lost)
 - [ ] Dedicated **product detail page** per product (tap a product →

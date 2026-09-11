@@ -901,8 +901,37 @@ actual code, per this document's own ground rule — not assumed or guessed._
       like Amazon/Flipkart)
 - [ ] AI auto-fills full specifications for a product when added (extends
       Phase 6's photo-scan work)
-- [ ] AI sources/generates good-quality product photos automatically (not
-      only what the owner uploads)
+- [x] **AI sources/generates good-quality product photos automatically —
+      done 2026-09-08, scoped down from the literal ask for a real legal
+      reason, explained to the owner before building anything.** Cannot
+      and did not build a Flipkart/Amazon photo scraper: copying another
+      retailer's copyrighted product photography into this shop's own
+      commercial catalog (shown to customers via invoices, WhatsApp, etc.)
+      is a real copyright problem regardless of how the feature is framed.
+      Built instead — owner picked this option when offered the choice:
+      **AI photo enhancement** of the shop's OWN uploaded photo. New
+      standalone Edge Function `enhance-product-photo` (deployed live)
+      sends the shop's photo + a deliberately conservative prompt ("same
+      product, same angle — only clean the background/lighting, never
+      invent detail") to a Gemini image-generation-capable model, and
+      returns a new e-commerce-style version (clean white background,
+      centered, studio lighting). Wired into both Add and Edit Product as
+      an "AI Enhance Photo" button — shows an explicit before/after
+      side-by-side with **Apply / Keep Original** buttons, same
+      review-before-apply pattern as the Phase 6 price suggestion; never
+      auto-replaces the real photo.
+      **Honest caveat — do not skip this**: the image-generation model name
+      (`GEMINI_MODEL_IMAGE`, defaulted to `gemini-3-pro-image`) could not be
+      confirmed against a live call in this pass — no way to test an actual
+      authenticated image-enhance request from this environment. It's
+      env-configurable specifically because of this uncertainty; if the
+      default is wrong for this account, every call fails with a clear "AI
+      enhance failed, try original photo" and nothing else breaks (the
+      original photo is never touched by this feature either way). **Please
+      test the "AI Enhance Photo" button for real on one product** and
+      report back — if it errors, the fix is almost certainly just
+      correcting `GEMINI_MODEL_IMAGE` to whatever image-gen model name is
+      actually enabled on the account's Gemini API key(s).
 - [ ] All product photos permanently stored on Cloudflare R2 (durable,
       never lost)
 - [ ] Dedicated **product detail page** per product (tap a product →

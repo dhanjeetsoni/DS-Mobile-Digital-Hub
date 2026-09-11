@@ -9,6 +9,7 @@ import { uploadProductPhotoOrFallback, deleteProductPhotoByUrl, isStorageUrl } f
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
+import { enhanceProductPhoto } from "../services/photoEnhance";
 
 interface EditProductModalProps {
   isOpen: boolean;
@@ -54,6 +55,9 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   const [photo, setPhoto] = useState<string>("");
   // Phase 6 — optional second/"back" photo, same pattern as AddProductModal.
   const [photo2, setPhoto2] = useState<string>("");
+  // Phase 7 — AI photo enhancement, review-before-apply (same pattern as AddProductModal).
+  const [enhancedPhoto, setEnhancedPhoto] = useState<string>("");
+  const [enhanceState, setEnhanceState] = useState<{ loading: boolean; error: string }>({ loading: false, error: "" });
   const fileInputRef2 = useRef<HTMLInputElement | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -174,6 +178,46 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       await runScan(imgData, "fill");
     } catch (err: any) {
       setScanError(err.message || "AI scan fail ho gaya.");
+    }
+  };
+
+  // Phase 7 — AI photo enhancement (clean background, centered, studio
+  // lighting) of the shop's OWN photo. Review-before-apply.
+  const handleEnhancePhoto = async () => {
+    if (!photo) return;
+    setEnhanceState({ loading: true, error: "" });
+    setEnhancedPhoto("");
+    try {
+      let imgData = photo;
+      if (isStorageUrl(photo)) {
+        const res = await fetch(photo);
+        const blob = await res.blob();
+        imgData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Saved photo load nahi ho payi"));
+          reader.readAsDataURL(blob);
+        });
+      }
+      const result = await enhanceProductPhoto(imgData);
+      setEnhancedPhoto(result);
+      setEnhanceState({ loading: false, error: "" });
+    } catch (err) {
+      setEnhanceState({ loading: false, error: err instanceof Error ? err.message : "AI enhance fail ho gaya." });
+    }
+  };
+
+  const applyEnhancedPhoto = async () => {
+    if (!enhancedPhoto || !product) return;
+    setPhoto(enhancedPhoto);
+    setEnhancedPhoto("");
+    try {
+      const blob = await (await fetch(enhancedPhoto)).blob();
+      const file = new File([blob], "enhanced.png", { type: blob.type || "image/png" });
+      const { url } = await uploadProductPhotoOrFallback(storeId, product.id, file);
+      setPhoto(url);
+    } catch {
+      // Enhanced photo stays as a data: URL locally if the upload step fails.
     }
   };
 
@@ -321,12 +365,43 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                     <RefreshCw size={13} /> Re-scan with AI
                   </button>
                 )}
+                {photo && !enhancedPhoto && (
+                  <button type="button" className="btn sm" disabled={enhanceState.loading} onClick={handleEnhancePhoto}>
+                    <Sparkles size={13} /> {enhanceState.loading ? "AI saaf kar raha hai..." : "AI Enhance Photo"}
+                  </button>
+                )}
                 {photo && (
                   <button type="button" className="btn sm" onClick={() => setPhoto("")}>
                     <Trash2 size={13} /> Hatayein
                   </button>
                 )}
               </div>
+              {enhanceState.error && (
+                <div className="hint" style={{ marginTop: "4px", color: "var(--red)" }}>{enhanceState.error}</div>
+              )}
+              {enhancedPhoto && (
+                <div style={{ marginTop: "10px", border: "1px solid var(--line)", borderRadius: "10px", padding: "10px", background: "var(--card)" }}>
+                  <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "6px" }}>AI Enhanced Preview — compare karein:</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                    <div>
+                      <div className="hint" style={{ textAlign: "center" }}>Original</div>
+                      <img src={photo} alt="Original" style={{ width: "100%", maxHeight: "140px", objectFit: "contain", borderRadius: "6px" }} />
+                    </div>
+                    <div>
+                      <div className="hint" style={{ textAlign: "center" }}>AI Enhanced</div>
+                      <img src={enhancedPhoto} alt="AI Enhanced" style={{ width: "100%", maxHeight: "140px", objectFit: "contain", borderRadius: "6px", border: "2px solid var(--glow)" }} />
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                    <button type="button" className="btn primary sm" style={{ flex: 1 }} onClick={applyEnhancedPhoto}>
+                      <CheckCircle2 size={13} /> Enhanced Wala Use Karein
+                    </button>
+                    <button type="button" className="btn sm" style={{ flex: 1 }} onClick={() => setEnhancedPhoto("")}>
+                      Original Rakhein
+                    </button>
+                  </div>
+                </div>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"

@@ -276,6 +276,10 @@ const AI_PRODUCT_SPECS_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/ai-pro
 
 export interface ProductSpecSuggestion {
   specifications: { label: string; value: string }[];
+  // Phase 7 (2026-09-10): "AI auto-designs the rest of the product page
+  // layout (feature highlights...)" — short customer-facing bullets,
+  // distinct from the structured label/value specifications above.
+  featureHighlights: string[];
   confidence: "low" | "medium" | "high";
 }
 
@@ -295,6 +299,7 @@ export async function getProductSpecifications(input: {
   if (res.ok && json?.success && Array.isArray(json?.specifications)) {
     return {
       specifications: json.specifications.map((s: any) => ({ label: String(s?.label || ""), value: String(s?.value || "") })),
+      featureHighlights: Array.isArray(json.featureHighlights) ? json.featureHighlights.map((h: any) => String(h || "")).filter(Boolean) : [],
       confidence: ["low", "medium", "high"].includes(json.confidence) ? json.confidence : "low",
     };
   }

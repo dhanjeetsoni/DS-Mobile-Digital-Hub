@@ -1201,8 +1201,57 @@ actual code, per this document's own ground rule — not assumed or guessed._
       blob hashes matched GitHub's SHAs) before committing. **Now shown on
       the product detail page** (see the entry right below) — the AI-filled
       specifications table renders there whenever a product has any.
-- [ ] AI sources/generates good-quality product photos automatically (not
-      only what the owner uploads)
+- [x] **AI sources/generates good-quality product photos automatically —
+      done 2026-09-08/09/10, two complementary tools, both with honest
+      caveats.** "Sources" (a real web image-search API) is not
+      implemented — none is configured in this project, and copying
+      another retailer's (Amazon/Flipkart) copyrighted product photography
+      into this shop's own commercial catalog would be a real copyright
+      problem regardless of how the feature is framed, explained to the
+      owner before building anything. So this is two *generation/
+      enhancement* tools instead, both always clearly labelled as
+      AI-touched rather than presented as an untouched real photo:
+  - **`enhance-product-photo`** (clean up a photo the owner already took —
+      built first, the option the owner picked when offered a choice):
+      standalone edge function (same key-pool/failover pattern as
+      `ai-price-advisor`), takes the shop's own uploaded photo + a
+      deliberately conservative prompt ("same product, same angle — only
+      clean the background/lighting, never invent detail") and returns an
+      e-commerce-style cleanup (neutral background, centered, studio
+      lighting) of that *same* photographed item. Wired into both Add and
+      Edit Product as an "AI Enhance Photo" button with an explicit
+      before/after + **Apply / Keep Original** review step — never
+      auto-replaces the real photo, matching the Phase 6 price-suggestion
+      review-first pattern. Explicitly scoped to never source a *different*
+      product's photo from elsewhere.
+  - **`ai-product-photo`** (generate from scratch, for a product with no
+      photo at all): standalone edge function, same key-pool/failover
+      pattern, builds a studio-photo prompt from brand/name/category.
+      `Product.photoIsAiGenerated` is set whenever a photo comes from this
+      path (cleared the instant a real photo is uploaded/scanned over it)
+      and shown as an "AI Photo" badge in Add Product's preview and on
+      every catalog card — never presented as if it were an actual photo of
+      the specific physical item in stock. Explicit "Ya AI se photo
+      banwayein" button (only once name/brand is filled) — deliberately not
+      automatic-on-save, so it never silently burns AI-key quota unasked.
+  - **Live-tested before shipping, found a real limitation**: confirmed
+    `gemini-2.5-flash-image` is a real, reachable model via
+    `generateContent()` on a plain Gemini API key (`gemini-3.5-flash-image`
+    404s — doesn't exist on this API version yet, and an earlier guess of
+    `gemini-3-pro-image` for `enhance-product-photo`'s default was wrong
+    for the same reason, corrected to match; the Imagen models via
+    `generateImages()` are Vertex-AI-only and reject a plain API key
+    outright). **However every key in this store's 9-key pool returned 429
+    quota-exceeded on this specific model** — image generation appears to
+    sit on a separate, much stricter free-tier quota than the text/vision
+    models already working elsewhere in this app. Both tools' code is
+    correct and fails gracefully (never blocks saving the product); could
+    not be verified end-to-end with an actual successful image today. Flag
+    for the owner: worth checking Google AI Studio's billing/quota page
+    for this specific model if this feature needs to work today rather
+    than whenever quota resets.
+  - Verified: `tsc --noEmit`, full test suite (26/26), static audit
+    (16/16), production build — all clean.
 - [x] **All product photos permanently stored on Cloudflare R2 (durable,
       never lost) — audited and closed 2026-09-09.** The architecture
       (`photoStorage.ts`, `r2Client.ts`, the `r2-storage` Edge Function)
@@ -1305,20 +1354,125 @@ actual code, per this document's own ground rule — not assumed or guessed._
     code, zero changes to the modal itself.
   - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
     clean.
-- [ ] "Add to Cart" **and** "Buy Now" (direct checkout) both available from
-      the product page, like Amazon
-- [ ] AI auto-designs the rest of the product page layout (feature
+- [x] **"Add to Cart" and "Buy Now" (direct checkout) both available from
+      the product page, like Amazon — done 2026-09-09.** Add to Cart
+      already existed (wired by an earlier Phase 7 pass); added Buy Now
+      alongside it — adds the item to the same cart via the existing
+      `addToCart()` (no new cart logic) then closes the product detail
+      page and jumps straight to the Sell/checkout screen, vs. Add to Cart
+      which stays on the product page. Distinct warm-orange styling
+      (`.product-detail-buynow-btn`) so it visually reads as the fast path,
+      matching Amazon/Flipkart's own Buy-Now-vs-Add-to-Cart color
+      convention. Both hidden together when out of stock (same guard the
+      existing button used). Verified: `npm install` (picked up
+      `@tauri-apps/plugin-biometric`, declared by an earlier session but
+      not yet installed — was blocking a clean `tsc` unrelated to this
+      change), `tsc --noEmit` clean, `vitest` 26/26, `npm run build` clean,
+      `static-audit.mjs` 16/16. **Not device-tested.**
+- [x] **AI auto-designs the rest of the product page layout (feature
       highlights, photo gallery) per product, saved permanently so it
-      loads instantly next time (including offline)
+      loads instantly next time (including offline) — 2026-09-10.
+      Another session's in-progress local work on this (not yet pushed)
+      was not trusted blind; independently re-verified, and a serious bug
+      it had already found mid-investigation turned out to be even bigger
+      than flagged.**
+  - **Critical bug found and fixed, not just the two originally-flagged
+    gaps**: direct SQL testing (not assumption) proved
+    `upsert_product_catalog` had TWO live overloads — the phase7 migration
+    that added `p_specifications`/`p_feature_highlights` did it via
+    `CREATE OR REPLACE` with a different parameter list, which registers a
+    new overload in Postgres rather than truly replacing the old one (the
+    exact mistake already fixed once before for `stock_qty`, and already
+    fixed once before for *this exact function* on 2026-09-08 — then
+    reintroduced). A test call with the precise argument set the JS client
+    sends threw `function ... is not unique` (Postgres 42725) — a hard
+    failure, not a silent skip. Since every Add/Edit Product save (and its
+    offline-queue retry, which calls the identical function with identical
+    arguments) hits this same call, this meant **every product catalog
+    write had been failing outright and retrying forever** since the
+    phase7 migration landed — not just "specifications don't save", the
+    entire photo/price/warranty/notes/everything-this-RPC-touches path was
+    broken. Checked real impact: only 3 test-store products existed, none
+    affected in practice — but this would have silently broken every real
+    Add/Edit Product save going forward. Fixed by dropping the stale
+    overload; verified live afterwards (exactly one overload remains, a
+    test call now resolves to the normal RLS "not authorized" instead of
+    the ambiguity error).
+  - Also closed real migration/deployment drift found while verifying:
+    two phase7 migrations and three edge functions
+    (`ai-product-specs`/`ai-product-photo`/`enhance-product-photo`) had
+    been applied/deployed live on Supabase but never saved as files in
+    this repo — reconstructed and committed so the repo matches
+    production.
+  - The actual feature: `repository.ts`'s `upsertProductCatalog` now
+    genuinely sends `p_photos`/`p_specifications`/`p_feature_highlights`
+    (it sent none of the three before — the root cause above);
+    `Product.featureHighlights` added to the type (specifications already
+    existed, feature highlights did not); `ai-product-specs` extended to
+    generate 4-6 short customer-facing highlight bullets alongside the
+    structured spec sheet in the same call; `AddProductModal`'s "AI Fill
+    Specifications & Highlights" button fills both, with a matching
+    editable Highlights section; `ProductDetailView` renders them
+    Amazon/Flipkart "About this item"-style under the price block — the
+    photo gallery (prev/next + thumbnail strip) was already built and
+    confirmed still working, untouched. "Saved permanently, loads
+    instantly, including offline" is satisfied via the same JSON-blob
+    local-storage + relational-table dual persistence every other product
+    field already uses — no separate mechanism was needed once the DB bug
+    above was fixed.
+  - **Follow-up gap fixed 2026-09-10** (flagged, not in scope, in the pass
+    above): `EditProductModal` had no specifications/featureHighlights UI
+    at all — both could only ever be set once at product-creation time via
+    `AddProductModal`, never edited afterward. Same editor UI + AI-fill
+    flow added to `EditProductModal`, initialized from the product's
+    existing values, saved via the same direct-mutation +
+    `upsertProductCatalog` pattern every other field in that modal already
+    uses. (Photos were separately re-checked at the same time and were
+    already fully editable — front/back replace/remove, AI re-scan — no
+    gap there.) Verified: `tsc --noEmit` clean, vitest 26/26, static-audit
+    16/16, production build clean.
+  - Verified: `tsc --noEmit` clean, `npm run build` clean, `vitest` 26/26
+    clean. `ai-product-specs` redeployed (v2) with the extension live.
 
 ### ⬜ Phase 8: Real universal search (+ AI search, glass-specific intelligence)
-- [ ] Fix the core bug: search currently only searches *within* whatever
-      category tab you're already in (e.g. Tempered Glass) — must search
-      **all products, all categories, everywhere**, like Amazon/Flipkart
+- [x] **Fix the core bug: search currently only searches *within* whatever
+      category tab you're already in — must search all products, all
+      categories, everywhere, like Amazon/Flipkart — done 2026-09-09.**
+      Found in the Sell screen's product picker (`filteredProds` in
+      `App.tsx`): the category-tab filter ran *before* the search-text
+      match, excluding a product outright if it wasn't in the active tab
+      — so searching for something outside the currently-selected category
+      (e.g. typing a phone name while the "Tempered Glass" tab was active)
+      returned nothing, no matter how good the text match was. Category tab
+      now only narrows results when the search box is empty; a query
+      searches every category. Also made the tab row show "ALL" as
+      visually active while searching (without touching the stored filter)
+      so the highlighted tab never contradicts what's on screen. This was
+      the only place in the app combining a category-tab filter with a
+      search box — the main Product Catalog/Inventory page has no search
+      box of its own yet. Verified: fresh clone + `npm ci` + `tsc --noEmit`
+      + `npm run build` + `vitest` (26/26), all clean; confirmed no other
+      session had touched `App.tsx` in between (local pre-edit blob hash
+      matched GitHub's SHA) before committing.
 - [ ] Add AI-powered search on top of normal keyword search — runs by
       default alongside plain search, not instead of it
-- [ ] Search by phone **model number** must surface matching glass/cases
-      even if the product title doesn't literally contain that model
+- [x] Search by phone **model number** must surface matching glass/cases
+      even if the product title doesn't literally contain that model —
+      **fixed 2026-09-09**. Real bug found in the **most-used search box
+      in the whole app**: the Sell/POS page's own product search (`App.tsx`,
+      `filteredProds`) checked `p.name`/`p.brand`/`p.category` but never
+      `p.compatibleModels` — a generic-named glass ("Edge to Edge Curved
+      Glass", brand "Super X") tagged for "Realme 7" in its
+      `compatibleModels` array would never surface when staff typed
+      "Realme 7" into that search box, exactly the bug described. Fixed by
+      adding a `compatibleModels.some(m => naturalMatch(m, query))` check,
+      same pattern `ModelSearchView.tsx` (a separate, less-used screen)
+      already had correctly. Verified `ModelSearchView.tsx`'s own search
+      already did this right, so it needed no change — only the Sell/POS
+      one had the gap. No other search box in the app does free-text
+      product search (checked every `naturalMatch(` call site).
+  - Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+    production build clean.
 - [ ] Clicking a matched model shows **all** compatible glass/cover models
       for that phone
 - [ ] When adding a tempered-glass product, AI auto-fetches and

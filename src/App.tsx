@@ -2312,6 +2312,19 @@ export default function App() {
                   }
                 : undefined
             }
+            onBuyNow={
+              stockOf(viewedProduct) > 0
+                ? () => {
+                    // Phase 7 "Buy Now" — Amazon-style direct checkout:
+                    // add the item then jump straight to the Sell/checkout
+                    // screen with it already in the cart, instead of
+                    // staying on this page like plain Add to Cart does.
+                    addToCart(viewedProduct);
+                    setViewingProductId(null);
+                    setCurrentPage("sell");
+                  }
+                : undefined
+            }
             onConfidentialPrice={() => setConfidentialPriceProduct(viewedProduct)}
           />
         );
@@ -2675,23 +2688,45 @@ export default function App() {
 
         const filteredProds = catalogProducts.filter((p) => {
           if (stockOf(p) <= 0) return false;
-          if (sellCategoryFilter !== "ALL") {
-            if (sellCategoryFilter === "Cyber & Xerox") {
-              if (p.category !== "Cyber & Xerox" && p.category !== "Services") return false;
-            } else if (p.category !== sellCategoryFilter) {
-              return false;
-            }
-          }
+          // Phase 8: "search currently only searches within whatever
+          // category tab you're already in" -- the category filter used to
+          // run FIRST and exclude a product before the search match below
+          // was even checked, so searching for something outside the
+          // Phase 8: "search currently only searches within whatever
+          // category tab you're already in" -- the category filter used to
+          // run FIRST and exclude a product before the search match below
+          // was even checked, so searching for something outside the
+          // active tab returned nothing at all. Now the category tab only
+          // narrows results when the search box is empty; typing a query
+          // searches across every category, like Amazon/Flipkart.
           if (sellSearchQuery) {
             const q = sellSearchQuery.toLowerCase();
             return (
               naturalMatch(p.name, sellSearchQuery) ||
               naturalMatch(p.brand, sellSearchQuery) ||
               naturalMatch(p.category, sellSearchQuery) ||
+              // Phase 8 fix (2026-09-09): a tempered glass/cover's own
+              // name is usually generic ("Edge to Edge Curved Glass",
+              // brand "Super X") — the actual phone models it fits live
+              // only in compatibleModels, which this search never
+              // checked before. Searching a model number like "Realme 7"
+              // would silently miss every glass/cover tagged for it
+              // unless the model happened to also be in the product's
+              // name. This was the single most-used search box in the
+              // whole app (Sell/POS), so this was the highest-value place
+              // to fix it — ModelSearchView already did this correctly.
+              (p.compatibleModels || []).some((m) => naturalMatch(m, sellSearchQuery)) ||
               p.sku.toLowerCase().includes(q) ||
               (p.barcode || "").toLowerCase().includes(q) ||
               (p.units || []).some((u) => u.imei1.includes(q))
             );
+          }
+          if (sellCategoryFilter !== "ALL") {
+            if (sellCategoryFilter === "Cyber & Xerox") {
+              if (p.category !== "Cyber & Xerox" && p.category !== "Services") return false;
+            } else if (p.category !== sellCategoryFilter) {
+              return false;
+            }
           }
           return true;
         });
@@ -2710,7 +2745,15 @@ export default function App() {
 
               {/* 1-Tap Category Filter Chips */}
               <div className="hscroll-fade" style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "8px", marginBottom: "8px" }}>
-                {CATEGORY_TABS.map((cat) => (
+                {CATEGORY_TABS.map((cat) => {
+                  // While actively searching, results span every category
+                  // (see filteredProds above) -- show "ALL" as the visually
+                  // active tab instead of whichever one was picked before,
+                  // so the highlighted tab never contradicts what's on
+                  // screen. The real sellCategoryFilter is left untouched,
+                  // so clearing the search restores the previous tab.
+                  const displayedFilter = sellSearchQuery ? "ALL" : sellCategoryFilter;
+                  return (
                   <button
                     key={cat.id}
                     onClick={() => setSellCategoryFilter(cat.id)}
@@ -2722,14 +2765,15 @@ export default function App() {
                       border: "1px solid",
                       cursor: "pointer",
                       whiteSpace: "nowrap",
-                      background: sellCategoryFilter === cat.id ? "var(--accent)" : "var(--paper)",
-                      color: sellCategoryFilter === cat.id ? "#ffffff" : "var(--ink)",
-                      borderColor: sellCategoryFilter === cat.id ? "var(--accent)" : "var(--line)",
+                      background: displayedFilter === cat.id ? "var(--accent)" : "var(--paper)",
+                      color: displayedFilter === cat.id ? "#ffffff" : "var(--ink)",
+                      borderColor: displayedFilter === cat.id ? "var(--accent)" : "var(--line)",
                     }}
                   >
                     {cat.label}
                   </button>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="searchbar">
@@ -3150,6 +3194,15 @@ export default function App() {
                         <ProductThumb photo={p.photo} photos={p.photos} name={p.name} />
                         {pct !== null && pct > 0 && <span className="product-card-discount-badge">{pct}% OFF</span>}
                         {out && <span className="product-card-oos-badge">Out of Stock</span>}
+                        {p.photoIsAiGenerated && (
+                          <span
+                            className="product-card-discount-badge"
+                            style={{ left: "auto", right: "6px", background: "var(--glow)" }}
+                            title="AI-generated representative photo, exact item ki nahi"
+                          >
+                            AI Photo
+                          </span>
+                        )}
                       </div>
                       <div
                         className="product-card-body"

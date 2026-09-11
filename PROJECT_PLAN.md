@@ -1371,10 +1371,17 @@ actual code, per this document's own ground rule — not assumed or guessed._
     local-storage + relational-table dual persistence every other product
     field already uses — no separate mechanism was needed once the DB bug
     above was fixed.
-  - **Known follow-up gap, honestly flagged, not in scope for this
-    pass**: `EditProductModal` has no specifications/featureHighlights UI
-    at all — both can currently only be set at product-creation time via
-    `AddProductModal`, never edited afterward for an existing product.
+  - **Follow-up gap fixed 2026-09-10** (flagged, not in scope, in the pass
+    above): `EditProductModal` had no specifications/featureHighlights UI
+    at all — both could only ever be set once at product-creation time via
+    `AddProductModal`, never edited afterward. Same editor UI + AI-fill
+    flow added to `EditProductModal`, initialized from the product's
+    existing values, saved via the same direct-mutation +
+    `upsertProductCatalog` pattern every other field in that modal already
+    uses. (Photos were separately re-checked at the same time and were
+    already fully editable — front/back replace/remove, AI re-scan — no
+    gap there.) Verified: `tsc --noEmit` clean, vitest 26/26, static-audit
+    16/16, production build clean.
   - Verified: `tsc --noEmit` clean, `npm run build` clean, `vitest` 26/26
     clean. `ai-product-specs` redeployed (v2) with the extension live.
 

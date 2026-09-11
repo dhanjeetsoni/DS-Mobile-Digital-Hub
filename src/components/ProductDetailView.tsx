@@ -139,6 +139,22 @@ export const ProductDetailView: React.FC<ProductDetailViewProps> = ({
             ) : null}
           </div>
 
+          {/* Phase 7: "AI auto-designs the rest of the product page layout
+              (feature highlights...)" — short punchy bullets, Amazon/
+              Flipkart "About this item" style, placed right under the
+              price/stock block same as those sites do. Distinct from the
+              structured Specifications table further down. */}
+          {product.featureHighlights && product.featureHighlights.length > 0 && (
+            <div className="product-detail-section">
+              <h3>Highlights</h3>
+              <ul className="product-detail-highlights-list">
+                {product.featureHighlights.map((h, i) => (
+                  <li key={i}>{h}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {product.compatibleModels && product.compatibleModels.length > 0 && (
             <div className="product-detail-section">
               <h3>Compatible Models ({product.compatibleModels.length})</h3>

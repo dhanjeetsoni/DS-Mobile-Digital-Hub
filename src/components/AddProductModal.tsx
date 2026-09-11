@@ -106,6 +106,10 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [screenSizeMaxInches, setScreenSizeMaxInches] = useState<number>(0);
   const [notes, setNotes] = useState("");
   const [specifications, setSpecifications] = useState<{ label: string; value: string }[]>([]);
+  // Phase 7 (2026-09-10): "AI auto-designs the rest of the product page
+  // layout (feature highlights...)" — short customer-facing bullets shown
+  // on the product detail page, separate from the structured spec sheet.
+  const [featureHighlights, setFeatureHighlights] = useState<string[]>([]);
   const [specsLoading, setSpecsLoading] = useState(false);
   const isScreenAccessory = category === "Tempered Glass" || category === "Curved Glass" || category === "Back Covers";
 
@@ -178,10 +182,11 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
         compatibleModels: compatibleModels.length ? compatibleModels : undefined,
       });
       setSpecifications(result.specifications);
+      setFeatureHighlights(result.featureHighlights);
       toast(
         result.confidence === "low"
-          ? "Specifications bhar diye — kam confidence hai, check kar lein"
-          : "AI ne specifications bhar diye — check kar lein",
+          ? "Specifications aur highlights bhar diye — kam confidence hai, check kar lein"
+          : "AI ne specifications aur highlights bhar diye — check kar lein",
         "green",
       );
     } catch (err: any) {
@@ -247,6 +252,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     setSizeManuallyEdited(false);
     setNotes("");
     setSpecifications([]);
+    setFeatureHighlights([]);
     setPurchasePrice(0);
     setConfidentialPrice(0);
     setSellingPrice(0);
@@ -536,6 +542,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       supplier: supplier.trim(),
       notes: notes.trim(),
       specifications: specifications.length ? specifications : undefined,
+      featureHighlights: featureHighlights.length ? featureHighlights : undefined,
       compatibleModels,
       screenSizeInches: isScreenAccessory && screenSizeInches ? screenSizeInches : undefined,
       // Step 3.4b: only save a max when it's a real, distinct range (and
@@ -1017,7 +1024,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                     disabled={specsLoading}
                     style={{ display: "flex", alignItems: "center", gap: "4px" }}
                   >
-                    <Sparkles size={13} /> {specsLoading ? "Sochte hain…" : "AI Fill Specifications"}
+                    <Sparkles size={13} /> {specsLoading ? "Sochte hain…" : "AI Fill Specifications & Highlights"}
                   </button>
                 </div>
                 <div className="hint" style={{ marginTop: "2px" }}>
@@ -1058,6 +1065,43 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                   onClick={() => setSpecifications((prev) => [...prev, { label: "", value: "" }])}
                 >
                   <Plus size={12} /> Spec add karein
+                </button>
+              </div>
+
+              <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
+                <div style={{ fontWeight: 700, fontSize: "13px" }}>Feature Highlights</div>
+                <div className="hint" style={{ marginTop: "2px" }}>
+                  Product detail page par dikhne wale chhote, punchy points (jaise Amazon/Flipkart ke "About this item" bullets) —
+                  "AI Fill Specifications" button in dono ko ek saath bharta hai.
+                </div>
+                {featureHighlights.length > 0 && (
+                  <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    {featureHighlights.map((h, i) => (
+                      <div key={i} style={{ display: "flex", gap: "8px", fontSize: "12px" }}>
+                        <input
+                          value={h}
+                          onChange={(e) => setFeatureHighlights((prev) => prev.map((x, xi) => (xi === i ? e.target.value : x)))}
+                          style={{ flex: 1, fontSize: "12px" }}
+                          placeholder="e.g. 6.7-inch AMOLED display"
+                        />
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() => setFeatureHighlights((prev) => prev.filter((_, xi) => xi !== i))}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn sm"
+                  style={{ marginTop: "6px" }}
+                  onClick={() => setFeatureHighlights((prev) => [...prev, ""])}
+                >
+                  <Plus size={12} /> Highlight add karein
                 </button>
               </div>
 

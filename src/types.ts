@@ -147,6 +147,13 @@ export interface Product {
   // Compatibility/etc for an accessory) — optional so every pre-existing
   // product (with no specifications) keeps loading without a migration.
   specifications?: { label: string; value: string }[];
+  // Phase 7: "AI auto-designs the rest of the product page layout (feature
+  // highlights, photo gallery)". Short punchy bullet points for the
+  // product detail page (distinct from `specifications`'s structured
+  // label/value spec sheet — these are marketing-style highlights, e.g.
+  // "6.7-inch AMOLED display", "5000mAh long-lasting battery"). Optional,
+  // same backward-compatible reasoning as specifications above.
+  featureHighlights?: string[];
   compatibleModels: string[];
   // Screen size in inches this accessory (Tempered Glass / Curved Glass /
   // Back Cover) fits. Used as a fallback match when a customer's exact

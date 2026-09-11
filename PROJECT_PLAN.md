@@ -1320,9 +1320,63 @@ actual code, per this document's own ground rule — not assumed or guessed._
       not yet installed — was blocking a clean `tsc` unrelated to this
       change), `tsc --noEmit` clean, `vitest` 26/26, `npm run build` clean,
       `static-audit.mjs` 16/16. **Not device-tested.**
-- [ ] AI auto-designs the rest of the product page layout (feature
+- [x] **AI auto-designs the rest of the product page layout (feature
       highlights, photo gallery) per product, saved permanently so it
-      loads instantly next time (including offline)
+      loads instantly next time (including offline) — 2026-09-10.
+      Another session's in-progress local work on this (not yet pushed)
+      was not trusted blind; independently re-verified, and a serious bug
+      it had already found mid-investigation turned out to be even bigger
+      than flagged.**
+  - **Critical bug found and fixed, not just the two originally-flagged
+    gaps**: direct SQL testing (not assumption) proved
+    `upsert_product_catalog` had TWO live overloads — the phase7 migration
+    that added `p_specifications`/`p_feature_highlights` did it via
+    `CREATE OR REPLACE` with a different parameter list, which registers a
+    new overload in Postgres rather than truly replacing the old one (the
+    exact mistake already fixed once before for `stock_qty`, and already
+    fixed once before for *this exact function* on 2026-09-08 — then
+    reintroduced). A test call with the precise argument set the JS client
+    sends threw `function ... is not unique` (Postgres 42725) — a hard
+    failure, not a silent skip. Since every Add/Edit Product save (and its
+    offline-queue retry, which calls the identical function with identical
+    arguments) hits this same call, this meant **every product catalog
+    write had been failing outright and retrying forever** since the
+    phase7 migration landed — not just "specifications don't save", the
+    entire photo/price/warranty/notes/everything-this-RPC-touches path was
+    broken. Checked real impact: only 3 test-store products existed, none
+    affected in practice — but this would have silently broken every real
+    Add/Edit Product save going forward. Fixed by dropping the stale
+    overload; verified live afterwards (exactly one overload remains, a
+    test call now resolves to the normal RLS "not authorized" instead of
+    the ambiguity error).
+  - Also closed real migration/deployment drift found while verifying:
+    two phase7 migrations and three edge functions
+    (`ai-product-specs`/`ai-product-photo`/`enhance-product-photo`) had
+    been applied/deployed live on Supabase but never saved as files in
+    this repo — reconstructed and committed so the repo matches
+    production.
+  - The actual feature: `repository.ts`'s `upsertProductCatalog` now
+    genuinely sends `p_photos`/`p_specifications`/`p_feature_highlights`
+    (it sent none of the three before — the root cause above);
+    `Product.featureHighlights` added to the type (specifications already
+    existed, feature highlights did not); `ai-product-specs` extended to
+    generate 4-6 short customer-facing highlight bullets alongside the
+    structured spec sheet in the same call; `AddProductModal`'s "AI Fill
+    Specifications & Highlights" button fills both, with a matching
+    editable Highlights section; `ProductDetailView` renders them
+    Amazon/Flipkart "About this item"-style under the price block — the
+    photo gallery (prev/next + thumbnail strip) was already built and
+    confirmed still working, untouched. "Saved permanently, loads
+    instantly, including offline" is satisfied via the same JSON-blob
+    local-storage + relational-table dual persistence every other product
+    field already uses — no separate mechanism was needed once the DB bug
+    above was fixed.
+  - **Known follow-up gap, honestly flagged, not in scope for this
+    pass**: `EditProductModal` has no specifications/featureHighlights UI
+    at all — both can currently only be set at product-creation time via
+    `AddProductModal`, never edited afterward for an existing product.
+  - Verified: `tsc --noEmit` clean, `npm run build` clean, `vitest` 26/26
+    clean. `ai-product-specs` redeployed (v2) with the extension live.
 
 ### ⬜ Phase 8: Real universal search (+ AI search, glass-specific intelligence)
 - [ ] Fix the core bug: search currently only searches *within* whatever

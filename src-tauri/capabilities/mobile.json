@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile-biometric",
+  "description": "Biometric unlock — Android only. tauri-plugin-biometric is registered under #[cfg(mobile)] in lib.rs and never compiles in on desktop, so this permission must not be requested there (it broke the Windows build with 'Permission biometric:default not found').",
+  "platforms": [
+    "android"
+  ],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "biometric:default"
+  ]
+}

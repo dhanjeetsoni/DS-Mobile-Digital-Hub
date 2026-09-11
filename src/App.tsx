@@ -3178,6 +3178,15 @@ export default function App() {
                         <ProductThumb photo={p.photo} photos={p.photos} name={p.name} />
                         {pct !== null && pct > 0 && <span className="product-card-discount-badge">{pct}% OFF</span>}
                         {out && <span className="product-card-oos-badge">Out of Stock</span>}
+                        {p.photoIsAiGenerated && (
+                          <span
+                            className="product-card-discount-badge"
+                            style={{ left: "auto", right: "6px", background: "var(--glow)" }}
+                            title="AI-generated representative photo, exact item ki nahi"
+                          >
+                            AI Photo
+                          </span>
+                        )}
                       </div>
                       <div
                         className="product-card-body"

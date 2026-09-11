@@ -119,7 +119,11 @@ Deno.serve(async (req: Request) => {
   if (keys.length === 0) return json({ success: false, error: "AI unavailable — no Gemini API keys configured. Owner: add keys in Settings." }, 503);
 
   const subject = [brand, productName].filter(Boolean).join(" ");
-  const prompt = `Generate a single, clean, professional e-commerce studio product photo\nof: ${subject}${category ? ` (category: ${category})` : ""}${color ? `, colour: ${color}` : ""}.\nPlain white/light-grey seamless background, soft even studio lighting, the product centred and\nfilling most of the frame, no text, no watermark, no logo overlays, no packaging/box unless the\nproduct itself IS packaging. Photorealistic, high quality, square-ish composition.`;
+  const prompt = `Generate a single, clean, professional e-commerce studio product photo
+of: ${subject}${category ? ` (category: ${category})` : ""}${color ? `, colour: ${color}` : ""}.
+Plain white/light-grey seamless background, soft even studio lighting, the product centred and
+filling most of the frame, no text, no watermark, no logo overlays, no packaging/box unless the
+product itself IS packaging. Photorealistic, high quality, square-ish composition.`;
 
   let lastError: any = null;
   for (let i = 0; i < keys.length; i++) {

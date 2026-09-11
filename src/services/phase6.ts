@@ -9,7 +9,6 @@ export interface PriceSuggestion {
   rationale: string;
   sources: { title: string; url: string }[];
 }
-
 export interface StaffPerformanceRow {
   profile_id: string;
   staff_name: string;
@@ -101,6 +100,33 @@ export async function suggestProductPrice(input: {
       if (error) throw error;
       if (!data?.recommendation) throw new Error("AI price suggestion did not return a valid recommendation.");
       return data.recommendation as PriceSuggestion;
+    } catch (err) {
+      lastError = err;
+      if (attempt === 2) break;
+      await new Promise((res) => setTimeout(res, 500 * Math.pow(2, attempt)));
+    }
+  }
+  throw lastError;
+}
+
+// Phase 7: "AI sources/generates good-quality product photos automatically".
+// Deliberately labelled a generic AI-generated representative photo, not
+// claimed as an exact photo of the physical unit — callers should set
+// Product.photoIsAiGenerated = true on the result so the UI can badge it.
+// Same retry reasoning as suggestProductPrice above.
+export async function generateProductPhoto(input: {
+  brand?: string;
+  productName: string;
+  category?: string;
+  color?: string;
+}): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      const { data, error } = await supabase.functions.invoke("ai-product-photo", { body: input });
+      if (error) throw error;
+      if (!data?.success || !data?.imageDataUrl) throw new Error(data?.error || "AI photo generate nahi ho payi.");
+      return data.imageDataUrl as string;
     } catch (err) {
       lastError = err;
       if (attempt === 2) break;

@@ -9,6 +9,7 @@ import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay"
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
+import { generateProductPhoto } from "../services/phase6";
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -69,6 +70,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const photoPathIdRef = useRef<string>(uid("tmp"));
 
   const [photo, setPhoto] = useState<string>("");
+  const [photoIsAiGenerated, setPhotoIsAiGenerated] = useState(false);
   // True once `photo` holds a real Storage URL rather than a data: URL
   // fallback. Purely informational (small hint in the UI); Save works
   // either way.
@@ -79,6 +81,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [photo2, setPhoto2] = useState<string>("");
   const [photo2IsUploaded, setPhoto2IsUploaded] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [isGeneratingPhoto, setIsGeneratingPhoto] = useState(false);
   const [scanError, setScanError] = useState("");
   const [aiApplied, setAiApplied] = useState(false);
 
@@ -165,6 +168,37 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     if (priceSuggestion.mrp) setMrp(priceSuggestion.mrp);
     setPriceSuggestion(null);
     toast("AI suggestion apply ho gaya — check karke Save karein", "green");
+  }
+
+  // Phase 7: "AI sources/generates good-quality product photos
+  // automatically". Explicit button, not automatic-on-save — same
+  // established pattern as "AI Fill Specifications"/"AI Suggest Price" in
+  // this file, so a photo is never silently generated (and never silently
+  // burns AI-key quota) without the owner asking for it.
+  const [aiPhotoError, setAiPhotoError] = useState("");
+  async function handleGenerateAiPhoto() {
+    if (!name.trim() && !brand.trim()) {
+      toast("Pehle product name ya brand bharein", "amber");
+      return;
+    }
+    setIsGeneratingPhoto(true);
+    setAiPhotoError("");
+    try {
+      const imageDataUrl = await generateProductPhoto({
+        brand: brand.trim() || undefined,
+        productName: name.trim() || category,
+        category: category || undefined,
+      });
+      setPhoto(imageDataUrl);
+      setPhotoIsAiGenerated(true);
+      toast("AI photo ban gayi — chahen to apni photo se replace kar sakte hain", "green");
+    } catch (err: any) {
+      const msg = err?.message || "AI photo generate nahi ho paayi";
+      setAiPhotoError(msg);
+      toast(msg, "amber");
+    } finally {
+      setIsGeneratingPhoto(false);
+    }
   }
 
   // Phase 7: AI auto-fills full specifications for a product when added.
@@ -307,6 +341,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     try {
       const dataUrl = await compressImageToDataUrl(file);
       setPhoto(dataUrl); // optimistic preview while upload runs
+      setPhotoIsAiGenerated(false); // a real photo just replaced any AI-generated placeholder
       const uploadPromise = uploadProductPhotoOrFallback(storeId, photoPathIdRef.current, file)
         .then(({ url, uploaded }) => {
           setPhoto(url);
@@ -528,6 +563,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       sku: genSku(category === "Tempered Glass" || category === "Curved Glass" ? "GLS" : category === "Back Covers" ? "CVR" : "ACC"),
       barcode: barcode.trim() || undefined,
       photo,
+      photoIsAiGenerated: photoIsAiGenerated || undefined,
       photos: [photo, photo2].filter(Boolean),
       purchasePrice: purchasePrice || null,
       pendingCost: !purchasePrice,
@@ -629,7 +665,18 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               onClick={() => fileInputRef.current?.click()}
             >
               {photo ? (
-                <img src={photo} alt="Product" style={{ width: "100%", maxHeight: "260px", objectFit: "contain", borderRadius: "8px" }} />
+                <div style={{ position: "relative" }}>
+                  <img src={photo} alt="Product" style={{ width: "100%", maxHeight: "260px", objectFit: "contain", borderRadius: "8px" }} />
+                  {photoIsAiGenerated && (
+                    <span
+                      className="badge"
+                      style={{ position: "absolute", top: "6px", left: "6px", background: "var(--glow)", color: "#fff" }}
+                      title="Ye AI-generated representative photo hai, exact item ki nahi"
+                    >
+                      <Sparkles size={11} style={{ marginRight: "3px" }} /> AI Photo
+                    </span>
+                  )}
+                </div>
               ) : (
                 <div style={{ padding: "26px 10px" }}>
                   <Upload size={34} style={{ color: "var(--ink-soft)", marginBottom: "8px" }} />
@@ -639,6 +686,20 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                   <button type="button" className="btn primary sm" style={{ marginTop: "12px" }}>
                     <Upload size={14} /> Select / Capture Photo
                   </button>
+                  {(name.trim() || brand.trim()) && (
+                    <button
+                      type="button"
+                      className="btn sm"
+                      style={{ marginTop: "8px" }}
+                      disabled={isGeneratingPhoto}
+                      onClick={(e) => { e.stopPropagation(); void handleGenerateAiPhoto(); }}
+                    >
+                      <Sparkles size={13} /> {isGeneratingPhoto ? "AI photo ban rahi hai…" : "Ya AI se photo banwayein"}
+                    </button>
+                  )}
+                  {aiPhotoError && (
+                    <div className="hint" style={{ color: "var(--red)", marginTop: "6px" }}>{aiPhotoError}</div>
+                  )}
                 </div>
               )}
               <input

@@ -1201,9 +1201,46 @@ actual code, per this document's own ground rule — not assumed or guessed._
       blob hashes matched GitHub's SHAs) before committing. **Now shown on
       the product detail page** (see the entry right below) — the AI-filled
       specifications table renders there whenever a product has any.
-- [ ] AI sources/generates good-quality product photos automatically (not
-      only what the owner uploads)
-- [x] **All product photos permanently stored on Cloudflare R2 (durable,
+- [x] **AI sources/generates good-quality product photos automatically —
+      done 2026-09-09/10, two complementary tools, both with honest
+      caveats.** "Sources" (a real web image-search API) is not
+      implemented — none is configured in this project — so this is two
+      *generation/enhancement* tools instead, both always clearly labelled
+      as AI-touched rather than presented as an untouched real photo:
+  - **`ai-product-photo`** (generate from scratch, for a product with no
+      photo at all): standalone edge function, same key-pool/failover
+      pattern as `ai-price-advisor`/`ai-product-specs`, builds a studio-
+      photo prompt from brand/name/category. `Product.photoIsAiGenerated`
+      is set whenever a photo comes from this path (cleared the instant a
+      real photo is uploaded/scanned over it) and shown as an "AI Photo"
+      badge in Add Product's preview and on every catalog card. Explicit
+      "Ya AI se photo banwayein" button (only once name/brand is filled) —
+      deliberately not automatic-on-save, same pattern as "AI Fill
+      Specifications"/"AI Suggest Price", so it never silently burns
+      AI-key quota unasked.
+  - **`enhance-product-photo`** (clean up a photo the owner already took):
+      takes the shop's own uploaded photo and asks Gemini to produce an
+      e-commerce-style cleanup (neutral background, better lighting,
+      clutter removed) of that *same* photographed item — explicitly
+      scoped to never source a *different* product's photo from
+      elsewhere (Amazon/Flipkart/etc.), which would be a real copyright
+      problem for a commercial catalog, not just a quality one.
+  - **Live-tested before shipping, found a real limitation**: confirmed
+    `gemini-2.5-flash-image` is a real, reachable model via
+    `generateContent()` on a plain Gemini API key (`gemini-3.5-flash-image`
+    404s — doesn't exist on this API version yet; the Imagen models via
+    `generateImages()` are Vertex-AI-only and reject a plain API key
+    outright). **However every key in this store's 9-key pool returned 429
+    quota-exceeded on this specific model** — image generation appears to
+    sit on a separate, much stricter free-tier quota than the text/vision
+    models already working elsewhere in this app. Both tools' code is
+    correct and fails gracefully (never blocks saving the product); could
+    not be verified end-to-end with an actual successful image today. Flag
+    for the owner: worth checking Google AI Studio's billing/quota page
+    for this specific model if this feature needs to work today rather
+    than whenever quota resets.
+  - Verified: `tsc --noEmit`, full test suite (26/26), static audit
+    (16/16), production build — all clean.
       never lost) — audited and closed 2026-09-09.** The architecture
       (`photoStorage.ts`, `r2Client.ts`, the `r2-storage` Edge Function)
       already existed and was well-built — this pass was a real audit of

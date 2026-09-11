@@ -107,6 +107,12 @@ export interface Product {
   // this exact value auto-fill the product into the POS cart.
   barcode?: string;
   photo: string;
+  // Phase 7: true when `photo` was AI-generated (not a real photo of the
+  // exact physical unit) via ai-product-photo — every display site should
+  // show an "AI photo" badge whenever this is true, rather than presenting
+  // it as an actual photo of the item. Cleared automatically the moment the
+  // owner uploads/scans a real photo over it.
+  photoIsAiGenerated?: boolean;
   // Phase 6 — "AI Photo Scan: support 1 or 2 photos (front/back)". `photo`
   // above stays the single primary/first image (unchanged — every existing
   // display call site that only knows about `photo` keeps working exactly

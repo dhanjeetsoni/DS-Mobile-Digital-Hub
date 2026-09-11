@@ -103,14 +103,23 @@ export async function cleanupStaleOutOfStockPhotos(
   if (!isCloudConfigured || !storeId) return [];
   const cutoffMs = Date.now() - OUT_OF_STOCK_PHOTO_CLEANUP_DAYS * 24 * 60 * 60 * 1000;
   const stale = products.filter((p) => {
-    if (p.stock > 0 || !p.outOfStockSince || !isStorageUrl(p.photo)) return false;
+    if (p.stock > 0 || !p.outOfStockSince) return false;
+    const hasAnyRealPhoto = isStorageUrl(p.photo) || (p.photos || []).some((url) => isStorageUrl(url));
+    if (!hasAnyRealPhoto) return false;
     const since = new Date(p.outOfStockSince).getTime();
     return Number.isFinite(since) && since <= cutoffMs;
   });
   const cleanedIds: string[] = [];
   for (const p of stale) {
     try {
-      await deleteProductPhotoByUrl(p.photo);
+      // Phase 7 audit fix: this used to only ever delete p.photo — for a
+      // product with a second/"back" photo (Phase 6's photos[] array),
+      // that second file was never cleaned up here, left orphaned in R2
+      // forever after the product's main photo was already cleared.
+      const urls = new Set([p.photo, ...(p.photos || [])].filter((u) => isStorageUrl(u)));
+      for (const url of urls) {
+        await deleteProductPhotoByUrl(url);
+      }
       cleanedIds.push(p.id);
     } catch {
       // best-effort — try this one again on the next daily pass
@@ -126,23 +135,45 @@ export async function cleanupStaleOutOfStockPhotos(
 // App.tsx's connectivity-sync effect) — never blocks the UI, never runs
 // more than one upload at a time, and gives up quietly on any single photo
 // that fails so one bad image can't stall the rest.
+//
+// Phase 7 durability audit fix (2026-09-09): this used to only ever check
+// `product.photo` (the front/primary slot). A product's *second* ("back")
+// photo lives in `product.photos[1]` (Phase 6's multi-photo addition) and
+// could independently still be a data: URL — e.g. if only the front
+// photo's upload succeeded at save time, or on a client version from
+// before photos[] existed. That back photo was never being picked up by
+// this backfill at all, so it could stay stuck as a fragile local
+// data-URL inside the synced blob indefinitely — the exact "not actually
+// durable" gap this whole item is about. Now checks every slot in
+// `photos` (falling back to just `[photo]` for products that predate the
+// array), not only slot 0.
 let backfillRunning = false;
 export async function backfillLegacyProductPhotos(
   storeId: string | undefined,
   db: Database,
-  onProductPhotoMigrated: (productId: string, url: string) => void
+  onProductPhotoMigrated: (productId: string, slotIndex: number, url: string) => void
 ): Promise<void> {
   if (!isCloudConfigured || !storeId || backfillRunning) return;
-  const pending = (db.products || []).filter((p) => p.photo && p.photo.startsWith("data:"));
+  type PendingSlot = { productId: string; slotIndex: number; dataUrl: string };
+  const pending: PendingSlot[] = [];
+  for (const p of db.products || []) {
+    const slots = p.photos && p.photos.length ? p.photos : [p.photo];
+    slots.forEach((url, slotIndex) => {
+      if (url && url.startsWith("data:")) pending.push({ productId: p.id, slotIndex, dataUrl: url });
+    });
+  }
   if (!pending.length) return;
   backfillRunning = true;
   try {
-    for (const product of pending) {
+    for (const slot of pending) {
       try {
-        const res = await fetch(product.photo);
+        const res = await fetch(slot.dataUrl);
         const blob = await res.blob();
-        const url = await uploadProductPhotoBlob(storeId, product.id, blob);
-        onProductPhotoMigrated(product.id, url);
+        // Distinct filename per slot so a front+back pair uploaded in the
+        // same backfill pass never collides on the same R2 object key.
+        const filenameSuffix = slot.slotIndex === 0 ? slot.productId : `${slot.productId}-back`;
+        const url = await uploadProductPhotoBlob(storeId, filenameSuffix, blob);
+        onProductPhotoMigrated(slot.productId, slot.slotIndex, url);
       } catch {
         // leave this one as data: URL — will retry on the next backfill pass
       }

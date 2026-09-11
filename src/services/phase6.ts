@@ -9,7 +9,6 @@ export interface PriceSuggestion {
   rationale: string;
   sources: { title: string; url: string }[];
 }
-
 export interface StaffPerformanceRow {
   profile_id: string;
   staff_name: string;
@@ -48,6 +47,37 @@ export interface ReturnApprovalRequest {
   review_note: string | null;
 }
 
+export interface StaffAccessPolicy {
+  staff_profile_id: string;
+  daily_start: string | null;
+  daily_end: string | null;
+  session_minutes: number | null;
+  allowed_sections: string[];
+  allowed_data: Record<string, boolean>;
+  updated_at: string;
+}
+
+// Phase 6: owner-side read of every staff member's policy in one round
+// trip, for pre-filling the Time-Window & Sections editor in
+// StaffAccessView. get_my_staff_access_policy() only reads the CALLER's
+// own policy (by design — it's what a signed-in staff member's own app
+// uses to self-enforce); RLS separately grants owner/manager full SELECT
+// on staff_access_policies for their own store's rows (see
+// "staff_access_owner_manager" policy), so a direct table read is both
+// simpler than adding a new RPC and already covered by existing RLS.
+export async function listStaffAccessPolicies(storeId: string): Promise<StaffAccessPolicy[]> {
+  const { data, error } = await supabase
+    .from("staff_access_policies")
+    .select("staff_profile_id,daily_start,daily_end,session_minutes,allowed_sections,allowed_data,updated_at")
+    .eq("store_id", storeId);
+  if (error) throw error;
+  return (data || []).map((row: any) => ({
+    ...row,
+    allowed_sections: Array.isArray(row.allowed_sections) ? row.allowed_sections : [],
+    allowed_data: row.allowed_data && typeof row.allowed_data === "object" ? row.allowed_data : {},
+  }));
+}
+
 export async function suggestProductPrice(input: {
   brand?: string;
   productName: string;
@@ -70,6 +100,33 @@ export async function suggestProductPrice(input: {
       if (error) throw error;
       if (!data?.recommendation) throw new Error("AI price suggestion did not return a valid recommendation.");
       return data.recommendation as PriceSuggestion;
+    } catch (err) {
+      lastError = err;
+      if (attempt === 2) break;
+      await new Promise((res) => setTimeout(res, 500 * Math.pow(2, attempt)));
+    }
+  }
+  throw lastError;
+}
+
+// Phase 7: "AI sources/generates good-quality product photos automatically".
+// Deliberately labelled a generic AI-generated representative photo, not
+// claimed as an exact photo of the physical unit — callers should set
+// Product.photoIsAiGenerated = true on the result so the UI can badge it.
+// Same retry reasoning as suggestProductPrice above.
+export async function generateProductPhoto(input: {
+  brand?: string;
+  productName: string;
+  category?: string;
+  color?: string;
+}): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      const { data, error } = await supabase.functions.invoke("ai-product-photo", { body: input });
+      if (error) throw error;
+      if (!data?.success || !data?.imageDataUrl) throw new Error(data?.error || "AI photo generate nahi ho payi.");
+      return data.imageDataUrl as string;
     } catch (err) {
       lastError = err;
       if (attempt === 2) break;
@@ -118,6 +175,41 @@ export async function listReturnApprovalRequests(storeId: string, status: "pendi
   });
   if (error) throw error;
   return (data || []) as ReturnApprovalRequest[];
+}
+
+// Phase 6: refund/return requires owner approval before it completes.
+// request_return_approval already existed server-side (SECURITY DEFINER,
+// hard-rejects any caller whose role isn't 'staff') but had no client
+// wrapper -- nothing could actually call it. record_return itself already
+// refuses staff directly ('staff return requires owner approval'), so
+// without this, a staff member trying to process a return today just hits
+// that raw Postgres error with no graceful path.
+export async function requestReturnApproval(input: {
+  storeId: string;
+  saleId: string | null;
+  returnNo: string;
+  customerId: string | null;
+  returnType: string;
+  reason: string;
+  refundMethod: string;
+  notes: string;
+  items: unknown[];
+  idempotencyKey: string;
+}): Promise<string> {
+  const { data, error } = await supabase.rpc("request_return_approval", {
+    p_store_id: input.storeId,
+    p_sale_id: input.saleId,
+    p_return_no: input.returnNo,
+    p_customer_id: input.customerId,
+    p_return_type: input.returnType,
+    p_reason: input.reason,
+    p_refund_method: input.refundMethod,
+    p_notes: input.notes,
+    p_items: input.items,
+    p_idempotency_key: input.idempotencyKey,
+  });
+  if (error) throw error;
+  return data as string;
 }
 
 export async function approveReturn(requestId: string, approve: boolean, note = "") {
@@ -234,33 +326,28 @@ export async function setStaffAccessConfig(profileId: string, input: {
   });
 }
 
-// NOTE (merged 2026-09-07, build-break fixed 2026-09-07): @tauri-apps/
-// plugin-biometric is not an installed dependency yet (checked: not in
-// package.json, and it's a native Tauri plugin — adding it for real needs
-// a Cargo.toml/Rust-side change under src-tauri, not just `npm install`,
-// plus nothing in the UI calls these two functions yet). The original
-// `@ts-expect-error` only silenced TypeScript's module-resolution error —
-// it does NOT stop Vite/Rollup from statically seeing a literal
-// `import("@tauri-apps/plugin-biometric")` string, trying to resolve and
-// bundle it at build time, and failing the production build outright
-// (confirmed: `tsc --noEmit` passed clean while `npm run build` hard-
-// failed on exactly this). Routing the specifier through a variable +
-// `@vite-ignore` stops Rollup from attempting static resolution/bundling,
-// while keeping the exact same runtime behavior as before: still throws
-// (or degrades, for biometricCheck) at runtime until the plugin is
-// genuinely installed with its native half wired up.
-const BIOMETRIC_PLUGIN_SPECIFIER = "@tauri-apps/plugin-biometric";
+// 2026-09-09: @tauri-apps/plugin-biometric is now a real installed
+// dependency (npm install done, Cargo.toml has a mobile-only target
+// dependency on tauri-plugin-biometric, lib.rs registers it under
+// #[cfg(mobile)], capabilities/default.json grants "biometric:default",
+// and the CI workflow injects the USE_BIOMETRIC/USE_FINGERPRINT Android
+// manifest permissions the plugin's own bundled manifest doesn't declare
+// — verified against the plugin's actual published source, not assumed).
+// A plain static import is safe on Windows too: the JS bindings package
+// bundles fine everywhere (it's pure JS), and on desktop, where the Rust
+// plugin is never registered, a call simply fails at the Tauri IPC layer
+// — which biometricCheck()'s catch below already turns into a clean
+// "not available" instead of an uncaught error.
+import { checkStatus, authenticate } from "@tauri-apps/plugin-biometric";
 
 export async function biometricCheck() {
   try {
-    const mod = await import(/* @vite-ignore */ BIOMETRIC_PLUGIN_SPECIFIER);
-    return await mod.checkStatus();
+    return await checkStatus();
   } catch {
     return { isAvailable: false, biometryType: 0 };
   }
 }
 
 export async function authenticateBiometric(reason = "Unlock DS Mobile & Digital Hub") {
-  const mod = await import(/* @vite-ignore */ BIOMETRIC_PLUGIN_SPECIFIER);
-  await mod.authenticate(reason, { allowDeviceCredential: true });
+  await authenticate(reason, { allowDeviceCredential: true });
 }

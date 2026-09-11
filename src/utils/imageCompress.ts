@@ -29,6 +29,21 @@ const DEFAULTS: Required<CompressOptions> = {
 const MIN_QUALITY = 0.5; // below this, text starts smearing — shrink dimension instead of dropping further
 const MIN_DIMENSION = 480; // never go below this even for a huge/noisy original — stays readable
 
+// Phase 6 (AI Photo Scan accuracy): a SEPARATE, higher-resolution preset
+// used only for the copy of the photo sent to the AI OCR scanner — never
+// for the permanent stored product photo (that stays on DEFAULTS above,
+// tuned for small/fast sync). Packaging text — a 27-model compatibility
+// list, a small-print IMEI, a faint MRP sticker — is exactly the kind of
+// detail that gets lost first when an image is shrunk to ~1280px/220KB for
+// storage. Gemini's vision input comfortably handles a few MB, so there's
+// no real cost to sending it a noticeably sharper copy of the same photo
+// the shop already took, even though only the smaller one ever gets saved.
+const SCAN_DEFAULTS: Required<CompressOptions> = {
+  maxDimension: 2048,
+  quality: 0.92,
+  maxBytes: 1_800 * 1024, // ~1.8MB — well within Gemini's inline-image limits, sharp enough for small print
+};
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -161,7 +176,24 @@ export async function compressImageToDataUrl(
   }
 }
 
-// Returns a compressed JPEG Blob, ready to hand to Supabase Storage's
+// Same pipeline as compressImageToDataUrl, but at SCAN_DEFAULTS'
+// higher resolution/quality — use this for whatever gets sent to the AI
+// OCR/vision scanner. Keep using compressImageToDataUrl (the smaller
+// preset) for anything shown as an on-screen preview or saved as the
+// permanent photo, so this never accidentally makes synced state bigger.
+export async function compressImageForScan(
+  file: File | Blob,
+  opts: CompressOptions = {}
+): Promise<string> {
+  try {
+    const { canvas, quality } = await compressToCanvas(file, { ...SCAN_DEFAULTS, ...opts });
+    return canvas.toDataURL("image/jpeg", quality);
+  } catch (err) {
+    throw friendlyDecodeError(file, err);
+  }
+}
+
+
 // upload(). This is the permanent-photo path: the Blob goes to the
 // `product-photos` bucket and only the short resulting URL is ever stored
 // in the synced JSON state, instead of the multi-KB base64 string itself.

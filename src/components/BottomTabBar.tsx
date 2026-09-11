@@ -13,6 +13,13 @@ interface BottomTabBarProps {
    * (Sales Breakdown & P&L) is owner-only, so it's dropped from the bar
    * entirely for staff rather than relying solely on onNavigate's gate. */
   isStaffIdentity?: boolean;
+  /** Phase 6: same per-staff-member section policy as Sidebar's identically-
+   * named prop — see its comment for the fallback behaviour when null. Only
+   * "Sell"/"Inventory" are filterable here (mapped via each tab's `page`,
+   * which matches Sidebar's section `key` naming); "Home" stays a fixed
+   * anchor tab regardless of policy, and "Reports" is already hard-gated by
+   * ownerOnly above. */
+  allowedSections?: string[] | null;
 }
 
 // Phase 4.1 — bottom tab bar for Android/narrow-window layouts. Shown only
@@ -29,8 +36,13 @@ const TABS: { key: string; page: string; label: string; icon: React.ComponentTyp
   { key: "reports", page: "saleshistory", label: "Reports", icon: TrendingUp, ownerOnly: true },
 ];
 
-export default function BottomTabBar({ currentPage, onNavigate, onOpenMore, isStaffIdentity = false }: BottomTabBarProps) {
-  const visibleTabs = TABS.filter((tab) => !tab.ownerOnly || !isStaffIdentity);
+export default function BottomTabBar({ currentPage, onNavigate, onOpenMore, isStaffIdentity = false, allowedSections = null }: BottomTabBarProps) {
+  const hasPolicy = isStaffIdentity && Array.isArray(allowedSections) && allowedSections.length > 0;
+  const visibleTabs = TABS.filter((tab) => {
+    if (tab.ownerOnly && isStaffIdentity) return false;
+    if (hasPolicy && (tab.page === "sell" || tab.page === "products") && !allowedSections!.includes(tab.page)) return false;
+    return true;
+  });
   return (
     <nav className="bottom-tab-bar" aria-label="Primary navigation">
       {visibleTabs.map((tab) => {

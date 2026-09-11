@@ -3,7 +3,7 @@ import { Camera, Sparkles, Upload, AlertCircle, RefreshCw, Plus, PackageSearch, 
 import { Database, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { identifyProductPhoto, ProductPhotoResult } from "../utils/aiOcr";
-import { compressImageToDataUrl } from "../utils/imageCompress";
+import { compressImageToDataUrl, compressImageForScan } from "../utils/imageCompress";
 import { naturalMatch } from "../utils/naturalSearch";
 
 interface PhotoStockFinderViewProps {
@@ -68,7 +68,12 @@ export const PhotoStockFinderView: React.FC<PhotoStockFinderViewProps> = ({
       try {
         const dataUrl = await compressImageToDataUrl(file);
         setSelectedImage(dataUrl);
-        await runIdentify(dataUrl);
+        // Phase 6 (AI accuracy): same higher-resolution copy used for the
+        // Add Product scan — a brand/model printed on packaging is exactly
+        // the kind of small text that benefits from more detail than the
+        // smaller preview copy carries.
+        const scanDataUrl = await compressImageForScan(file).catch(() => dataUrl);
+        await runIdentify(scanDataUrl);
       } catch (err: any) {
         setIsProcessing(false);
         setErrorMsg(err?.message || "Photo process nahi ho payi. Dobara try karein.");
@@ -76,20 +81,42 @@ export const PhotoStockFinderView: React.FC<PhotoStockFinderViewProps> = ({
     })();
   };
 
-  // Search the shop's own live catalog — the AI never supplies price/stock,
-  // only keywords. This is the same "match against real inventory" pattern
-  // ModelSearchView uses for glass/cover compatibility search.
-  const searchTerms = (result?.searchKeywords.length ? result.searchKeywords : manualQuery.split(/\s+/))
-    .map((t) => t.toLowerCase().trim())
+  // Phase 6 (matching improve) — bug fix: this used to prefer
+  // result.searchKeywords whenever a scan had ever happened, even after
+  // the person went on to edit the (fully editable) search box by hand —
+  // so typing a different query after a photo scan silently kept
+  // searching by the old, stale AI keywords instead of what was actually
+  // typed. manualQuery is the single always-current source of truth (a
+  // scan's keywords only ever *seed* it, right when runIdentify sets it);
+  // tokenizing manualQuery itself here is always correct, scan or no scan.
+  const searchTerms = manualQuery
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t) => t.trim())
     .filter(Boolean);
 
+  // Phase 6 (matching improve) — relevance ranking: previously this was an
+  // unordered filter (any single keyword substring anywhere = a match),
+  // so a broad AI guess like "cover" could surface every cover in stock in
+  // arbitrary catalog order with no way to tell which one the photo
+  // actually was. Score each candidate by how many distinct search terms
+  // it actually contains (plus a small bonus for the natural-language
+  // color-synonym match already used elsewhere in the app) and sort
+  // best-first — a product matching 3 of 3 keywords now always outranks
+  // one matching only 1 of 3, instead of both being tied for "some" match.
   const matches: Product[] = manualQuery.trim()
-    ? db.products.filter((p) => {
-        const haystack = [p.name, p.brand, p.category, p.sku, p.notes, ...(p.compatibleModels || [])]
-          .join(" ")
-          .toLowerCase();
-        return searchTerms.some((t) => haystack.includes(t)) || naturalMatch(haystack, manualQuery);
-      })
+    ? db.products
+        .map((p) => {
+          const haystack = [p.name, p.brand, p.category, p.sku, p.notes, ...(p.compatibleModels || [])]
+            .join(" ")
+            .toLowerCase();
+          const matchedTermCount = searchTerms.filter((t) => haystack.includes(t)).length;
+          const naturalBonus = naturalMatch(haystack, manualQuery) ? 0.5 : 0;
+          return { product: p, score: matchedTermCount + naturalBonus };
+        })
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map((r) => r.product)
     : [];
 
   return (

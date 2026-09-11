@@ -5,6 +5,7 @@ import { inr } from "../utils/indianCurrency";
 import { todayStr, nowTimeStr, uid, addStockBatch, consumeFIFO } from "../utils/fifoEngine";
 import { supabase, isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation } from "../services/repository";
+import { requestReturnApproval, listReturnApprovalRequests, approveReturn, ReturnApprovalRequest } from "../services/phase6";
 
 interface ReturnsExchangesViewProps {
   db: Database;
@@ -16,6 +17,14 @@ interface ReturnsExchangesViewProps {
   // correctly keeps using the real db.products, unchanged.
   catalogProducts?: Product[];
   storeId?: string;
+  // Phase 6: refund/return requires owner approval before it completes.
+  // record_return itself already refuses staff server-side; this decides
+  // which RPC handleProcessReturn calls in the first place, so a staff
+  // return correctly goes through request_return_approval from the start
+  // instead of hitting that rejection and (as it used to) getting silently
+  // treated like a transient sync failure — completing locally anyway
+  // while the server-side record never actually existed.
+  isStaff?: boolean;
   onUpdate: () => void;
   toast: (msg: string, type?: "green" | "red" | "amber") => void;
 }
@@ -42,10 +51,11 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
   db,
   catalogProducts,
   storeId,
+  isStaff = false,
   onUpdate,
   toast,
 }) => {
-  const [activeTab, setActiveTab] = useState<"history" | "newReturn" | "newExchange" | "newWarranty">("history");
+  const [activeTab, setActiveTab] = useState<"history" | "newReturn" | "newExchange" | "newWarranty" | "approvals">("history");
   const [searchInvoiceNo, setSearchInvoiceNo] = useState("");
   const [foundSale, setFoundSale] = useState<Sale | null>(null);
 
@@ -193,6 +203,41 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
   };
 
   const [isSavingReturn, setIsSavingReturn] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState<ReturnApprovalRequest[]>([]);
+  const [approvalsLoading, setApprovalsLoading] = useState(false);
+  const [approvalBusyId, setApprovalBusyId] = useState<string | null>(null);
+
+  const loadPendingApprovals = async () => {
+    if (isStaff || !storeId || !isCloudConfigured) return;
+    setApprovalsLoading(true);
+    try {
+      const rows = await listReturnApprovalRequests(storeId, "pending");
+      setPendingApprovals(rows);
+    } catch (err: any) {
+      toast(err?.message || "Pending approvals load nahi ho paye.", "red");
+    } finally {
+      setApprovalsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadPendingApprovals();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeId, isStaff]);
+
+  const handleApproval = async (requestId: string, approve: boolean) => {
+    setApprovalBusyId(requestId);
+    try {
+      await approveReturn(requestId, approve);
+      toast(approve ? "Return approve ho gaya — stock update ho gaya." : "Return reject kar diya gaya.", approve ? "green" : "amber");
+      setPendingApprovals((prev) => prev.filter((r) => r.id !== requestId));
+      onUpdate();
+    } catch (err: any) {
+      toast(err?.message || "Approval process nahi ho paya, dobara try karein.", "red");
+    } finally {
+      setApprovalBusyId(null);
+    }
+  };
 
   const handleProcessReturn = async () => {
     if (!foundSale) return;
@@ -232,6 +277,47 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
     setIsSavingReturn(true);
     try {
       const idempotencyKey = crypto.randomUUID();
+
+      // Phase 6: staff can never complete a return directly — record_return
+      // itself already refuses them server-side ('staff return requires
+      // owner approval'). Branching here, before any RPC call, means a
+      // staff member's return correctly waits for the owner to approve it
+      // instead of the old behaviour: hit that rejection, treat it as a
+      // harmless sync hiccup, and complete the return in the local ledger
+      // anyway (stock restocked, record created) even though nothing like
+      // that ever happened server-side.
+      if (isStaff) {
+        if (!isCloudConfigured || !storeId) {
+          toast("Return ke liye internet chahiye — owner approval ke bina staff return complete nahi kar sakte.", "red");
+          return;
+        }
+        try {
+          await requestReturnApproval({
+            storeId,
+            saleId: isSaleUuid(foundSale.id) ? foundSale.id : null,
+            returnNo,
+            customerId: isSaleUuid(foundSale.customerId) ? foundSale.customerId : null,
+            returnType: returnItems.length === foundSale.items.length ? "full" : "partial",
+            reason: returnReason,
+            refundMethod,
+            notes: returnNotes,
+            idempotencyKey,
+            items: returnItems.map((it) => ({
+              product_id: isSaleUuid(it.productId) ? it.productId : null,
+              quantity: it.qty,
+              unit_price: it.price,
+              purchase_price: it.purchasePrice,
+              refund_amount: it.refund,
+            })),
+          });
+          toast(`${returnNo} owner ko approval ke liye bhej diya gaya — approve hote hi stock update hoga.`, "green");
+          setFoundSale(null);
+          setSelectedReturnItems({});
+        } catch (err: any) {
+          toast(err?.message || "Return request bhejne mein dikkat hui, dobara try karein.", "red");
+        }
+        return;
+      }
 
       // Cloud side: writes the returns rows + re-opens FIFO stock atomically
       // in Postgres (mirrors StockAdjustView/PurchasesView). Falls back to
@@ -671,6 +757,15 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
           >
             📋 Return Records ({db.returns.length + db.exchanges.length})
           </button>
+          {!isStaff && (
+            <button
+              className={`btn sm ${activeTab === "approvals" ? "primary" : ""}`}
+              onClick={() => { setActiveTab("approvals"); void loadPendingApprovals(); }}
+              style={pendingApprovals.length > 0 ? { borderColor: "var(--amber)" } : undefined}
+            >
+              <Clock size={13} /> Pending Approvals {pendingApprovals.length > 0 ? `(${pendingApprovals.length})` : ""}
+            </button>
+          )}
           <button
             className={`btn sm ${activeTab === "newReturn" ? "primary" : ""}`}
             onClick={() => {
@@ -702,6 +797,65 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Pending Return Approvals (owner/manager only) */}
+      {activeTab === "approvals" && !isStaff && (
+        <div className="card">
+          <p style={{ fontSize: "12px", color: "var(--ink-soft)", marginTop: 0 }}>
+            Staff ne submit kiye gaye returns yahan approval ka wait kar rahe hain — approve karne par hi stock
+            wapas add hota hai aur refund record banta hai.
+          </p>
+          {approvalsLoading && pendingApprovals.length === 0 ? (
+            <div className="empty">Loading...</div>
+          ) : pendingApprovals.length === 0 ? (
+            <div className="empty">Koi pending return approval nahi hai.</div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Return No.</th>
+                    <th>Requested By</th>
+                    <th>Reason</th>
+                    <th>Refund Method</th>
+                    <th>Items</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingApprovals.map((req) => (
+                    <tr key={req.id}>
+                      <td style={{ fontWeight: 700 }}>{req.return_no}</td>
+                      <td>{req.requester_name || "Staff"}</td>
+                      <td>{req.reason || "—"}</td>
+                      <td>{req.refund_method || "—"}</td>
+                      <td>{Array.isArray(req.items) ? req.items.length : 0} item(s)</td>
+                      <td>
+                        <div style={{ display: "flex", gap: "6px" }}>
+                          <button
+                            className="btn sm primary"
+                            disabled={approvalBusyId === req.id}
+                            onClick={() => void handleApproval(req.id, true)}
+                          >
+                            <CheckCircle2 size={13} /> Approve
+                          </button>
+                          <button
+                            className="btn sm"
+                            disabled={approvalBusyId === req.id}
+                            onClick={() => void handleApproval(req.id, false)}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* New Return Flow */}
       {activeTab === "newReturn" && (

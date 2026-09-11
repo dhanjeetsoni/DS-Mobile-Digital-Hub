@@ -755,7 +755,7 @@ actual code, per this document's own ground rule — not assumed or guessed._
       follow-up, not done here to keep this item scoped to the actual
       capture-and-report mechanism.
 
-### 🟡 Phase 6: AI & advanced feature enhancements
+### ✅ Phase 6: AI & advanced feature enhancements — all 15 items done, plus 1 bonus finding recorded below
 - [x] **AI Photo Scan: 1 or 2 photos (front/back), auto-fill from either,
       product view shows all photos provided — done 2026-09-07.**
       `types.ts`: `Product.photos?: string[]` added alongside the existing
@@ -769,10 +769,51 @@ actual code, per this document's own ground rule — not assumed or guessed._
       (shared by the product table, mobile card, Low Stock view, and both
       modals) now takes an optional `photos` prop and becomes a small
       prev/next gallery on click when more than one photo exists — wired at
-      every existing call site. "Improve accuracy" was not separately
-      addressed (no concrete accuracy problem identified to fix; the
-      2-photo/merge capability is the accuracy improvement here — more
-      surface area for the AI to read from).
+      every existing call site. **"Improve accuracy" was not separately
+      addressed in this specific pass** (no concrete accuracy problem had
+      been identified yet at the time — the 2-photo/merge capability was
+      the accuracy improvement here, more surface area for the AI to read
+      from). **Addressed concretely in the very next entry below
+      (2026-09-09)**, once the specific accuracy problem (storage-grade
+      compression degrading small print before the AI ever sees it) was
+      identified.
+- [x] **AI Photo Scan accuracy: send a separately higher-quality copy of
+      the photo to the AI OCR scanner than what gets saved as the
+      permanent product photo — done 2026-09-09.** The permanent-photo
+      compression preset (`imageCompress.ts` `DEFAULTS`: ~1280px longest
+      side, ~220KB JPEG cap) is tuned for small/fast sync, and until now
+      that exact same compressed copy was also what got sent to Gemini for
+      OCR — the identified failure mode: a 27-model compatibility list, a
+      small IMEI, a faint MRP sticker are the first detail lost when an
+      image is shrunk that far.
+  - New `compressImageForScan()` (`imageCompress.ts`) — same
+    decode/orientation-correction/compress pipeline as the existing
+    `compressImageToDataUrl()`, but at a new `SCAN_DEFAULTS` preset
+    (2048px longest side, ~1.8MB JPEG cap, quality 0.92) used ONLY for the
+    copy handed to the AI scanner. The smaller preset is untouched and
+    still what gets shown as an on-screen preview and saved as the
+    permanent stored photo — this doesn't make synced state any bigger.
+  - Wired into every "select a photo -> AI scans it immediately" path:
+    `AddProductModal`'s front + back photo pickers, `EditProductModal`'s
+    back-photo picker, and `PhotoStockFinderView`'s identify flow. Each
+    falls back to the already-compressed smaller copy if the
+    higher-quality pass fails for any reason (defensive, not expected to
+    actually trigger).
+  - **Known, accepted limitation, not fixed here**: the 3 "Re-scan with
+    AI" buttons (`AddProductModal.rescanCurrentPhoto`,
+    `EditProductModal.handleRescan`, `PhotoStockFinderView`'s
+    re-identify button) re-scan whatever photo is *already stored/shown*
+    — by that point only the smaller, already-compressed copy exists in
+    memory or Storage; the original higher-resolution file was never kept
+    anywhere to re-derive a fresh high-quality copy from. Fixing that
+    would mean holding onto the raw `File` object for the modal's
+    lifetime (or re-fetching+re-uploading a fresh high-res copy on every
+    re-scan) — a bigger architectural change than this item's actual ask
+    (send a better photo for the scan, which now happens on every *first*
+    scan, the common case). Flagging rather than silently leaving it
+    undocumented.
+  - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
+    clean.
 - [x] **AI-based selling price/MRP suggestion when adding a product — done
       2026-09-07, two independent sessions converged on this at nearly the
       same time; merged into one.** Standalone Edge Function
@@ -831,7 +872,42 @@ actual code, per this document's own ground rule — not assumed or guessed._
       pass, given how much this specific file has churned between sessions
       recently — safer to redeploy it once, deliberately, after confirming
       git is the intended final state and nothing else is mid-edit.
-- [ ] Improve Photo Stock Finder matching
+- [x] **Improve Photo Stock Finder matching — done 2026-09-09.** Found and
+      fixed two real bugs while implementing this, not just a vague
+      "improve":
+  1. **Stale stock displayed/matched on**: `PhotoStockFinderView` was
+     receiving `catalogDb` (Phase 1's live-relational-catalog merge —
+     photo/MRP/warranty/etc.), but `catalogOf()` never touches `.stock`
+     (that's `stockOf()`'s job, kept separate on purpose — see Phase 1).
+     This screen was one of the ones missed when other screens were
+     switched over. Fixed at the `App.tsx` call site: stock is now also
+     overlaid via `stockOf()` before the products reach this view, same
+     live number the rest of the app shows.
+  2. **Editing the search box after a photo scan silently did nothing**:
+     `searchTerms` preferred `result.searchKeywords` (the AI's keywords
+     from whenever the photo was scanned) over the live `manualQuery`
+     text WHENEVER a scan had ever happened — so typing a different query
+     into the (visibly editable) search box after a scan kept matching
+     against the old, stale AI keywords instead of what was actually
+     typed. `manualQuery` is the one always-current source of truth (a
+     scan's keywords only ever *seed* it once, right when the scan
+     finishes) — now always tokenizes `manualQuery` itself, correct
+     whether or not a scan ever happened.
+  3. **Added relevance ranking** — matching was an unordered filter (ANY
+     single keyword substring anywhere in a product = a match), so a
+     broad AI guess like "cover" could surface every cover in stock in
+     arbitrary catalog order with no way to tell which one the photo
+     actually was closest to. Each candidate is now scored by how many
+     distinct search terms it actually contains (plus a small bonus when
+     the existing Hindi/English color-synonym `naturalMatch()` also
+     fires) and sorted best-match-first.
+  - Also gave this screen the same higher-quality AI-scan photo fix as
+    the entry above (send the higher-resolution copy to `identifyProductPhoto`,
+    keep the smaller compressed copy for the on-screen preview) — a
+    brand/model printed on packaging is exactly the kind of small text
+    that benefits from it here too.
+  - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
+    clean.
 - [x] Staff performance tracking (sales leaderboard/summary per staff) — new
       `get_staff_performance` RPC (migration `phase6_staff_performance_rpc`,
       owner/manager-only, re-checked server-side via `auth.uid()` even
@@ -878,13 +954,196 @@ actual code, per this document's own ground rule — not assumed or guessed._
     next_reminder_at bump) rather than just re-implementing it differently.
   - Verified: `tsc --noEmit`, full test suite (26/26), static audit
     (16/16), production build — all clean.
-- [ ] Biometric (fingerprint) unlock alongside PIN
-- [ ] Remote session kill (owner force-logs-out a device from Windows)
-- [ ] Product price change history log
-- [ ] Customizable receipt branding (shop logo/name/address)
-- [ ] Owner-configurable staff access window (time range, duration, which
-      sections/data are visible)
-- [ ] Refund/return requires owner approval before it completes
+- [x] **Remote session kill (owner force-logs-out a device from Windows) —
+      completed 2026-09-07.** The design drafted below was correct; finished
+      wiring it end-to-end:
+  - Live-DB audit found the backend (`profiles.force_logout_at`,
+    `admin_force_logout_profile()` RPC, `phase6.ts`'s `forceLogoutStaff()`)
+    was already there from an earlier session, but genuinely could not have
+    worked: Phase 2's column-level SELECT allow-list on `profiles` (written
+    before `force_logout_at` existed) silently excluded it too, alongside
+    the real secrets (`pin_hash` etc.) it was meant to protect — no client
+    could ever read the kill signal. Fixed with
+    `grant select (force_logout_at) on public.profiles to authenticated`.
+  - `getCurrentProfile()` didn't fetch the column even once it became
+    readable — added to its select list.
+  - Added the "Force Logout" button to StaffAccessView (same
+    busyId/confirm/toast pattern as the existing Clear PIN/Delete
+    actions), worded to make clear this only kicks the current session —
+    account/access stays untouched, they can log back in immediately with
+    the same Login ID/Password.
+  - Wired the actual kick into App.tsx by reusing the existing
+    `staff-access-<id>` realtime channel (the one that already instantly
+    kills a session when the owner disables access) — added a
+    `force_logout_at` check to its UPDATE handler, with a per-login
+    baseline ref so an old/stale timestamp from a *previous* kill can never
+    re-trigger on the *next* legitimate login.
+  - Added a new `"kicked"` staffDeniedReason + matching Hinglish message,
+    distinct from the existing "disabled"/"expired" screens — this is a
+    kick, not a ban, and the message says so.
+  - Verified: `tsc --noEmit` and `vite build` both clean;
+    `has_column_privilege` confirmed the grant fix actually took effect
+    (`force_logout_at` was `false`/unreadable before, `true` after); the
+    one existing staff account's `force_logout_at` is `null` (clean slate,
+    won't spuriously fire on their next login).
+  - Not yet done (needs a second physical/browser session to verify,
+    flagging honestly rather than checking it off blind): an actual live
+    two-device test — owner clicks Force Logout while a staff device is
+    genuinely logged in and mid-session, confirming the kick really lands
+    within a few seconds. Everything up to that final live click has been
+    verified as correctly wired; next session (or the owner) should do that
+    one real-world test before fully trusting it under pressure.
+- [x] **Biometric (fingerprint/Face) unlock alongside PIN — 2026-09-09.
+      Another session's local (never pushed to GitHub — confirmed via
+      `git log`, only the old dynamic-import stub was live) claims about
+      this were not trusted; rebuilt and independently re-verified from
+      scratch.** Confirmed via web search + reading the plugin's actual
+      published source (not assumed): `@tauri-apps/plugin-biometric` is
+      the correct official Tauri v2 plugin; its own bundled
+      AndroidManifest.xml (read directly from the docs.rs source mirror)
+      declares a `BiometricActivity` but genuinely no
+      `USE_BIOMETRIC` `<uses-permission>` — and Android's own docs confirm
+      that permission must still be manifest-declared for
+      BiometricPrompt/BiometricManager to report real hardware, even
+      though it needs no runtime dialog, so manual injection is a real
+      requirement, not a guess carried over from the other session.
+  - `npm install @tauri-apps/plugin-biometric` (real dependency now, was
+    never installed before)
+  - `Cargo.toml`: `tauri-plugin-biometric` as an Android/iOS-only
+    `[target...dependencies]` entry; `lib.rs`: registered under
+    `#[cfg(mobile)]` only (same pattern as the existing `#[cfg(desktop)]`
+    updater/process registration); `capabilities/default.json`:
+    `biometric:default`
+  - New `scripts/ci-wire-android-biometric-permission.mjs` (same
+    idempotent marker-comment pattern as the existing camera/Bluetooth
+    permission scripts) wired into the GitHub Actions workflow, injecting
+    `USE_BIOMETRIC` + the legacy `USE_FINGERPRINT` (API 24-27 —
+    minSdkVersion is 24)
+  - `phase6.ts`: replaced the `@vite-ignore` dynamic-import stub with a
+    real static import — this exact stub was the thing that broke
+    `npm run build` before (noted in the file's own prior comment); build
+    is now clean with the real import
+  - `pinAuth.ts`: `isBiometricEnabled`/`setBiometricEnabled` — per-profile
+    AND per-device (plain `localStorage`, deliberately never synced to the
+    server — a fingerprint enrolled on one phone means nothing on
+    another), layered strictly on top of the existing PIN, never a
+    replacement for it
+  - `App.tsx`: "Use Fingerprint / Face" button on the `personalPin` gate
+    screen (shown only when this profile has it enabled for this device
+    AND a live `checkStatus()` call confirms hardware right now — not
+    trusted from whenever it was last toggled on), reusing the exact same
+    "correct PIN" success branch `handleGateOwnerSubmit` already takes. A
+    failed/cancelled biometric attempt is never treated as a wrong-PIN
+    attempt — no lockout counter increment, no Telegram alert — since the
+    OS's own prompt already enforces its own retry policy and the PIN
+    field remains available either way
+  - Settings → "My PIN" card: enable/disable toggle, gated on a PIN
+    already being set and hardware being available; requires one real
+    successful biometric prompt before turning ON (never trusts the
+    hardware-available flag alone as proof the person can actually
+    authenticate — no finger enrolled, faulty sensor, etc.)
+  - Verified: `tsc --noEmit` clean, `npm run build` clean, `vitest run`
+    26/26 clean.
+  - **Honestly flagged, not glossed over**: the actual Rust/Android
+    compile cannot run in this sandbox — real verification (does the CI
+    workflow's new permission-injection step run cleanly, does the APK
+    actually build with the new native dependency, does a real device's
+    fingerprint prompt genuinely fire) is the next GitHub Actions build
+    and a real-device test, same caveat class as Remote Session Kill's
+    remaining live-test item above.
+- [x] **Product price change history log — found already built by a
+      parallel session; verified correct against live data, no changes
+      needed.** `product_price_history` table (one row per changed field:
+      `field`/`old_value`/`new_value`, covers cost_price/selling_price/mrp/
+      confidential_price) + `record_product_price_history()` AFTER UPDATE
+      trigger on `products` + `get_product_price_history(store_id,
+      product_id, limit)` RPC (owner/manager-gated). Tested live: changed a
+      real product's selling_price 80→85→80, both changes appeared via the
+      RPC in the right order. **My own mistake caught and reverted in the
+      same session**: I didn't check for this existing work first and wrote
+      a second, incompatible trigger+table migration (wide-format columns
+      that didn't match the table that already existed) — it would have
+      thrown on every future price edit (a failed trigger rolls back the
+      whole UPDATE). Caught before it was ever deployed to the live DB
+      config permanently — dropped my trigger/function/policy immediately,
+      confirmed only the original (correct) trigger remains. **Still open**:
+      no frontend UI reads `get_product_price_history` anywhere yet
+      (EditProductModal has no "Price History" button) — the log is being
+      captured but an owner can't see it in-app yet, only via direct DB
+      query. Next session should add that button/view.
+- [x] **Customizable receipt branding (shop logo/name/address) — done.**
+      shopName/address/phone/gstin/upiId/invoiceTerms/invoiceFooter were
+      already fully wired end-to-end (Settings inputs -> `db.settings` ->
+      `InvoiceViewerModal` render) before this session touched it — only
+      gap was `logo`: the invoice viewer already rendered
+      `db.settings.logo` if present, but nothing in Settings could ever set
+      it. Added an Upload/Remove logo control (small preview, compressed to
+      ~240px/40KB via `compressImageToDataUrl` since — unlike per-product
+      photos — this one field re-syncs on every unrelated settings save).
+      `tsc --noEmit` clean.
+- [x] **Owner-configurable staff access window (time range, duration, which
+      sections/data are visible) — client wiring done 2026-09-09.** A
+      progress report received for this item beforehand turned out to be
+      inaccurate on the client side (claimed `staffAuth.ts` functions that
+      didn't exist, and that `getCurrentProfile`/`listStaffAccounts`/
+      `staffSignIn` already selected new columns, which they didn't) —
+      caught by the usual deep-verify-before-building step. The DB side was
+      real, but not the raw `profiles.daily_window_*` columns mentioned —
+      live inspection found those are orphaned (zero functions/triggers
+      reference them). The actual backend is a separate, better-designed
+      `staff_access_policies` table (`daily_start`/`daily_end`/
+      `session_minutes`/`allowed_sections`/`allowed_data`, via
+      `get_my_staff_access_policy`/`upsert_staff_access_policy` RPCs) — built
+      client wiring on top of that real system instead:
+      - `staffAuth.ts`: new `isOutsideDailyWindow()` (handles an overnight
+        window, e.g. a 22:00-06:00 night shift, by wrapping past midnight
+        instead of treating start>end as broken) — verified standalone
+        against 13 cases (both boundaries of a normal window, the overnight
+        case, no-window-set). `staffSignIn` now fetches the caller's policy
+        right after auth and fails sign-in with a new `"outsideWindow"`
+        status if outside it; `CachedStaffSession` extended with
+        `dailyStart`/`dailyEnd`/`allowedSections` so the same check keeps
+        working fully offline for an already-signed-in session.
+      - `App.tsx`: the existing 5s periodic access-expiry check now also
+        force-logs-out an active session that crosses outside its daily
+        window; new `"outsideWindow"` denial-screen reason/message.
+      - `Sidebar.tsx` + `BottomTabBar.tsx`: new `allowedSections` prop,
+        filtering nav items to a per-staff-member policy when one is set —
+        falls back to the original hardcoded "sell + photoFinder" default
+        when none is, so an existing staff account with no policy set is
+        unaffected.
+      - `StaffAccessView.tsx`: new "Time Window & Sections" policy editor
+        per staff member (2 time inputs + a checklist built directly from
+        Sidebar's own exported nav-item lists, so it can't drift out of
+        sync with what Sidebar actually knows how to filter).
+      - `phase6.ts`: new `listStaffAccessPolicies()` for the owner-side bulk
+        read (RLS already grants owner/manager full access to this table —
+        no new RPC needed just to read it).
+      - Verified: `npm install && npx tsc --noEmit && npx vitest run
+        (26/26) && npm run build && node scripts/static-audit.mjs (16/16)`
+        all clean, plus the 13 standalone `isOutsideDailyWindow` cases.
+        **Not verified**: an actual authenticated
+        `upsert_staff_access_policy`/`get_my_staff_access_policy` round
+        trip against a real signed-in session — the RPC's SQL definition
+        was reviewed directly instead (careful/correct on inspection), but
+        a real device test of the full save → sign-in → enforce loop is
+        still worth doing.
+      - `session_minutes` (auto-logout after N minutes idle) and
+        `allowed_data` (data-level, not just section-level, permissions)
+        already exist on the same policy table/RPCs but were **not** wired
+        into any UI or enforcement here — out of scope for what was asked
+        (a time *window* and section *visibility*), left for a future pass
+        if wanted.
+- [x] **Refund/return requires owner approval before it completes — already
+      fully built (client + server), plan checkbox was just stale.**
+      Independently re-verified: `record_return`'s SQL body itself raises
+      `'staff return requires owner approval'` for any role other than
+      owner/manager (real server-side enforcement, not just a client-side
+      gate that a staff device could bypass), and `ReturnsExchangesView.tsx`
+      branches staff down a `requestReturnApproval()` path before ever
+      calling `record_return` directly. `request_return_approval`,
+      `list_return_approval_requests`, and `approve_return_approval` RPCs
+      all exist and are wired to a "Pending Approvals" tab in the same view.
 - **Also found while auditing this phase, not one of the 15 listed items but
   worth recording**: a proper Audit Log feature (`AuditLogView.tsx` +
   `fetchAuditLogs`, wired to the Sidebar) already exists and is genuinely
@@ -895,64 +1154,306 @@ actual code, per this document's own ground rule — not assumed or guessed._
   reading `log_table_audit()`'s definition directly).
 
 ### ⬜ Phase 7: Amazon/Flipkart-style product experience
-- [ ] App opens directly into the **Stock/Inventory section** by default
-      (not the dashboard)
-- [ ] Product list redesigned as e-commerce style cards (photo-forward,
-      like Amazon/Flipkart)
-- [ ] AI auto-fills full specifications for a product when added (extends
-      Phase 6's photo-scan work)
+- [x] **App opens directly into the Stock/Inventory section by default (not
+      the dashboard) — done 2026-09-09.** `App.tsx`'s `initialRoutePage`
+      fallback changed from `"dashboard"` to `"products"` — an explicit
+      `?page=...` deep link (bookmark, Setup Wizard's own navigation, etc.)
+      still always wins over the default. Checked this doesn't collide with
+      the existing owner-only-page guard (`products` isn't owner-only, so
+      it's safe as a default before the owner passcode is entered) and that
+      no other code path force-resets to `"dashboard"` on every load — the
+      two other `setCurrentPage("dashboard")` call sites are a genuine
+      security guard (redirects away from an owner-only page reached via
+      deep link while logged out of owner mode) and the Setup Wizard's own
+      "Dismiss" button, neither of which fires unconditionally on load.
+      Verified: `npm install && npx tsc --noEmit && npx vitest run (26/26)
+      && npm run build && node scripts/static-audit.mjs (16/16)` all clean.
+- [x] **Product list redesigned as e-commerce style cards (photo-forward,
+      like Amazon/Flipkart) — done 2026-09-09.** Card grid is now the
+      *default* product-list view at every screen width — not just a
+      mobile fallback like Phase 4's original single-column
+      `.product-mobile-list` (removed, superseded by this). Each card:
+      square photo with a discount-% badge overlay and an "Out of Stock"
+      overlay, 2-line-clamped name, brand/category subtitle, selling price
+      + struck-through MRP, stock/warranty badges, owner-only Edit/Delete.
+      A Grid/Table toggle keeps the dense spreadsheet table (all 13
+      columns) available as an explicit opt-in — under 900px Grid always
+      wins regardless of the toggle (a 13-column table has no usable form
+      on a phone either way; the toggle button itself hides there too).
+      Responsive via CSS grid `auto-fill` (no JS viewport-width state,
+      same toggle-by-CSS-breakpoint technique used elsewhere in this
+      file). Verified: `tsc --noEmit` clean, vitest 26/26, static-audit
+      16/16, production build clean. **Not device-tested.**
+- [x] **AI auto-fills full specifications for a product when added (extends
+      Phase 6's photo-scan work) — done 2026-09-09.** New standalone
+      `ai-product-specs` edge function (same key-pool/failover/rate-limit
+      pattern as `ai-gateway`, deployed separately like `ai-price-advisor`
+      to avoid re-pasting the whole 1400-line gateway file) reasons from
+      general knowledge of the named product/category — explicitly
+      caveated in the prompt as not live/authoritative data, same honesty
+      requirement as the price advisor. Added `Product.specifications?`
+      (label/value pairs, optional so every existing product keeps loading
+      without a migration), `getProductSpecifications()` client call, and
+      an "AI Fill Specifications" section in Add Product with editable
+      rows (add/edit/remove before saving). Verified with a fresh clone +
+      `npm ci` + `tsc --noEmit` + `npm run build`, all clean, and confirmed
+      no other session had touched these files in between (local pre-edit
+      blob hashes matched GitHub's SHAs) before committing. **Now shown on
+      the product detail page** (see the entry right below) — the AI-filled
+      specifications table renders there whenever a product has any.
 - [x] **AI sources/generates good-quality product photos automatically —
-      done 2026-09-08, scoped down from the literal ask for a real legal
-      reason, explained to the owner before building anything.** Cannot
-      and did not build a Flipkart/Amazon photo scraper: copying another
-      retailer's copyrighted product photography into this shop's own
-      commercial catalog (shown to customers via invoices, WhatsApp, etc.)
-      is a real copyright problem regardless of how the feature is framed.
-      Built instead — owner picked this option when offered the choice:
-      **AI photo enhancement** of the shop's OWN uploaded photo. New
-      standalone Edge Function `enhance-product-photo` (deployed live)
-      sends the shop's photo + a deliberately conservative prompt ("same
-      product, same angle — only clean the background/lighting, never
-      invent detail") to a Gemini image-generation-capable model, and
-      returns a new e-commerce-style version (clean white background,
-      centered, studio lighting). Wired into both Add and Edit Product as
-      an "AI Enhance Photo" button — shows an explicit before/after
-      side-by-side with **Apply / Keep Original** buttons, same
-      review-before-apply pattern as the Phase 6 price suggestion; never
-      auto-replaces the real photo.
-      **Honest caveat — do not skip this**: the image-generation model name
-      (`GEMINI_MODEL_IMAGE`, defaulted to `gemini-3-pro-image`) could not be
-      confirmed against a live call in this pass — no way to test an actual
-      authenticated image-enhance request from this environment. It's
-      env-configurable specifically because of this uncertainty; if the
-      default is wrong for this account, every call fails with a clear "AI
-      enhance failed, try original photo" and nothing else breaks (the
-      original photo is never touched by this feature either way). **Please
-      test the "AI Enhance Photo" button for real on one product** and
-      report back — if it errors, the fix is almost certainly just
-      correcting `GEMINI_MODEL_IMAGE` to whatever image-gen model name is
-      actually enabled on the account's Gemini API key(s).
-- [ ] All product photos permanently stored on Cloudflare R2 (durable,
-      never lost)
-- [ ] Dedicated **product detail page** per product (tap a product →
-      full page), showing MRP (struck through), discount %, and selling
-      price, e-commerce style
-- [ ] "Confidential Price" button available directly on this page —
-      **reuse the existing flow** (`confidentialPrice.ts` + the
-      `telegram-connect` Edge Function): staff tap it, owner gets an
-      Approve/Deny prompt on Telegram, price reveals for 5 minutes on
-      approval, all in realtime already. This page just needs to surface
-      the button, not rebuild the approval system
-- [ ] "Add to Cart" **and** "Buy Now" (direct checkout) both available from
-      the product page, like Amazon
-- [ ] AI auto-designs the rest of the product page layout (feature
+      done 2026-09-08/09/10, two complementary tools, both with honest
+      caveats.** "Sources" (a real web image-search API) is not
+      implemented — none is configured in this project, and copying
+      another retailer's (Amazon/Flipkart) copyrighted product photography
+      into this shop's own commercial catalog would be a real copyright
+      problem regardless of how the feature is framed, explained to the
+      owner before building anything. So this is two *generation/
+      enhancement* tools instead, both always clearly labelled as
+      AI-touched rather than presented as an untouched real photo:
+  - **`enhance-product-photo`** (clean up a photo the owner already took —
+      built first, the option the owner picked when offered a choice):
+      standalone edge function (same key-pool/failover pattern as
+      `ai-price-advisor`), takes the shop's own uploaded photo + a
+      deliberately conservative prompt ("same product, same angle — only
+      clean the background/lighting, never invent detail") and returns an
+      e-commerce-style cleanup (neutral background, centered, studio
+      lighting) of that *same* photographed item. Wired into both Add and
+      Edit Product as an "AI Enhance Photo" button with an explicit
+      before/after + **Apply / Keep Original** review step — never
+      auto-replaces the real photo, matching the Phase 6 price-suggestion
+      review-first pattern. Explicitly scoped to never source a *different*
+      product's photo from elsewhere.
+  - **`ai-product-photo`** (generate from scratch, for a product with no
+      photo at all): standalone edge function, same key-pool/failover
+      pattern, builds a studio-photo prompt from brand/name/category.
+      `Product.photoIsAiGenerated` is set whenever a photo comes from this
+      path (cleared the instant a real photo is uploaded/scanned over it)
+      and shown as an "AI Photo" badge in Add Product's preview and on
+      every catalog card — never presented as if it were an actual photo of
+      the specific physical item in stock. Explicit "Ya AI se photo
+      banwayein" button (only once name/brand is filled) — deliberately not
+      automatic-on-save, so it never silently burns AI-key quota unasked.
+  - **Live-tested before shipping, found a real limitation**: confirmed
+    `gemini-2.5-flash-image` is a real, reachable model via
+    `generateContent()` on a plain Gemini API key (`gemini-3.5-flash-image`
+    404s — doesn't exist on this API version yet, and an earlier guess of
+    `gemini-3-pro-image` for `enhance-product-photo`'s default was wrong
+    for the same reason, corrected to match; the Imagen models via
+    `generateImages()` are Vertex-AI-only and reject a plain API key
+    outright). **However every key in this store's 9-key pool returned 429
+    quota-exceeded on this specific model** — image generation appears to
+    sit on a separate, much stricter free-tier quota than the text/vision
+    models already working elsewhere in this app. Both tools' code is
+    correct and fails gracefully (never blocks saving the product); could
+    not be verified end-to-end with an actual successful image today. Flag
+    for the owner: worth checking Google AI Studio's billing/quota page
+    for this specific model if this feature needs to work today rather
+    than whenever quota resets.
+  - Verified: `tsc --noEmit`, full test suite (26/26), static audit
+    (16/16), production build — all clean.
+- [x] **All product photos permanently stored on Cloudflare R2 (durable,
+      never lost) — audited and closed 2026-09-09.** The architecture
+      (`photoStorage.ts`, `r2Client.ts`, the `r2-storage` Edge Function)
+      already existed and was well-built — this pass was a real audit of
+      it, not a from-scratch build, and found + fixed 2 genuine gaps.
+  - **Live-verified R2 is actually configured and reachable** — not just
+    "code looks right": called the deployed `r2-storage` function directly
+    for a made-up file path and got a real `404 File not found` from
+    Cloudflare's own API (not the function's own `503 "R2 not configured"`
+    fallback), which only happens if `CF_ACCOUNT_ID`/access keys are set
+    **and** correctly SigV4-signed **and** R2 actually received and
+    processed the request. Confirms the one manual setup step in
+    `STEP7.1-CLOUDFLARE-SETUP.md` was genuinely completed, live, right now.
+  - **Real gap found and fixed**: `backfillLegacyProductPhotos()` (the
+    safety net that uploads any photo still stuck as a local `data:` URL
+    to R2 whenever the app comes online) only ever checked
+    `product.photo` — the *primary* photo slot. A product's *second*
+    ("back") photo lives in `product.photos[1]` (Phase 6's multi-photo
+    addition) and could independently still be a `data:` URL (e.g. if
+    only the front photo's upload succeeded at save time) without this
+    backfill ever picking it up — it would stay stuck as a fragile local
+    blob inside the synced JSON state indefinitely. This was the one
+    actual "not really durable" gap in the whole system. Fixed: now walks
+    every slot in `photos[]` (falling back to `[photo]` for
+    pre-multi-photo products), uploads whichever ones are still local,
+    and the App.tsx callback was updated to correctly write back into
+    either `product.photo` (slot 0, kept in sync for every existing
+    single-photo read site) or `product.photos[slotIndex]`.
+  - **Secondary gap found and fixed** (storage-bloat, not data-loss, but
+    same area): neither `EditProductModal`'s old-photo cleanup-on-replace
+    nor `cleanupStaleOutOfStockPhotos` (the 90-days-out-of-stock cleanup)
+    handled the second/back photo — only ever the front one. A repeatedly
+    replaced back photo, or an out-of-stock product with 2 photos, would
+    silently orphan files in R2 forever. Both now handle every URL in
+    `photos[]`.
+  - Confirmed already correct and didn't need changes: upload path never
+    actually loses a photo on failure (falls back to the data: URL
+    in-memory, picked up by the backfill above later — verified by
+    reading the actual fallback code path, not just the comments);
+    delete-on-replace/cleanup are both best-effort and never block or
+    fail a save; the 90-day out-of-stock cleanup only ever touches the
+    photo file, never the product record.
+  - Verified: `npm install` (picked up a separately-added dependency that
+    was blocking typecheck, `@tauri-apps/plugin-biometric` — declared in
+    package.json/Cargo.toml by a parallel Phase 6 session but not yet
+    installed), `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+    production build clean. **Not device-tested** (same caveat as
+    elsewhere in this plan — the R2 connectivity itself is live-verified
+    above, but a real end-to-end photo upload from an actual Android
+    device/camera hasn't been watched happen).
+- [x] **Dedicated product detail page per product (tap a product -> full
+      page), showing MRP (struck through), discount %, and selling price,
+      e-commerce style — done 2026-09-09.** New `ProductDetailView.tsx`,
+      rendered as a genuine full-page takeover (App.tsx's
+      `renderCurrentPage()` returns it directly, in place of whatever
+      `currentPage`/tab was active) rather than a modal — matches how
+      Amazon/Flipkart replace the listing with the product's own screen on
+      tap, not a popup over it.
+  - Reuses the exact same `computeDiscountPercent()`/`inr()` utilities the
+    card grid above already uses for its own struck-through-MRP + discount
+    badge, so the number shown here can never drift from what the card
+    showed before tapping it.
+  - Photo gallery (prev/next + thumbnail strip when a product has 2
+    photos, from Phase 6's front/back photo support), stock/warranty
+    badges, compatible-models chip list, screen size, notes, the AI
+    specifications table from the entry above (now actually has somewhere
+    to render), SKU/barcode, and owner-only Edit/Delete actions (Edit
+    closes this page and opens the existing `EditProductModal`, so there's
+    only ever one edit flow, not two).
+  - Wired from the Product Catalog & Inventory grid: tapping a card's text
+    area (name/price/stock, not the photo itself — the photo already has
+    its own working zoom-on-tap via `ProductThumb`, left untouched) opens
+    this page; the owner's existing Edit/Delete buttons inside that same
+    card call `e.stopPropagation()` so they still work independently
+    instead of also triggering the detail page underneath them.
+  - `onAddToCart` is wired but only actually rendered on screens that pass
+    it (currently none do yet, since this was reached from the Inventory
+    management grid, not the Sell/POS catalog) — the prop exists so a
+    future "open detail from POS" tap point can light it up for free.
+  - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
+    clean. **Not device-tested** (same standing caveat as the rest of this
+    phase's UI work).
+- [x] **"Confidential Price" button available directly on the product
+      detail page — done 2026-09-09.** Pure surface-the-existing-flow, per
+      the request — the approval system itself (`confidentialPrice.ts` +
+      `telegram-connect` Edge Function's Telegram approve/deny +
+      `ConfidentialPriceModal`'s realtime subscription for the 5-minute
+      reveal) was NOT touched or rebuilt in any way.
+  - `ProductDetailView` gained one new optional prop
+    (`onConfidentialPrice`) and a 🔒 button next to the price block,
+    shown only for staff (`!isOwner`) — the owner already knows the
+    confidential price, matching the exact same convention the existing
+    Sell/POS catalog's own 🔒 button already follows.
+  - App.tsx wires it to the same global `confidentialPriceProduct` state
+    that already renders `ConfidentialPriceModal` at the bottom of the
+    tree — tapping the button calls the exact same
+    `setConfidentialPriceProduct(product)` the POS catalog's button calls,
+    so it's the identical request -> Telegram Approve/Deny -> realtime
+    5-minute reveal flow, from a second entry point. Zero new backend
+    code, zero changes to the modal itself.
+  - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
+    clean.
+- [x] **"Add to Cart" and "Buy Now" (direct checkout) both available from
+      the product page, like Amazon — done 2026-09-09.** Add to Cart
+      already existed (wired by an earlier Phase 7 pass); added Buy Now
+      alongside it — adds the item to the same cart via the existing
+      `addToCart()` (no new cart logic) then closes the product detail
+      page and jumps straight to the Sell/checkout screen, vs. Add to Cart
+      which stays on the product page. Distinct warm-orange styling
+      (`.product-detail-buynow-btn`) so it visually reads as the fast path,
+      matching Amazon/Flipkart's own Buy-Now-vs-Add-to-Cart color
+      convention. Both hidden together when out of stock (same guard the
+      existing button used). Verified: `npm install` (picked up
+      `@tauri-apps/plugin-biometric`, declared by an earlier session but
+      not yet installed — was blocking a clean `tsc` unrelated to this
+      change), `tsc --noEmit` clean, `vitest` 26/26, `npm run build` clean,
+      `static-audit.mjs` 16/16. **Not device-tested.**
+- [x] **AI auto-designs the rest of the product page layout (feature
       highlights, photo gallery) per product, saved permanently so it
-      loads instantly next time (including offline)
+      loads instantly next time (including offline) — 2026-09-10.
+      Another session's in-progress local work on this (not yet pushed)
+      was not trusted blind; independently re-verified, and a serious bug
+      it had already found mid-investigation turned out to be even bigger
+      than flagged.**
+  - **Critical bug found and fixed, not just the two originally-flagged
+    gaps**: direct SQL testing (not assumption) proved
+    `upsert_product_catalog` had TWO live overloads — the phase7 migration
+    that added `p_specifications`/`p_feature_highlights` did it via
+    `CREATE OR REPLACE` with a different parameter list, which registers a
+    new overload in Postgres rather than truly replacing the old one (the
+    exact mistake already fixed once before for `stock_qty`, and already
+    fixed once before for *this exact function* on 2026-09-08 — then
+    reintroduced). A test call with the precise argument set the JS client
+    sends threw `function ... is not unique` (Postgres 42725) — a hard
+    failure, not a silent skip. Since every Add/Edit Product save (and its
+    offline-queue retry, which calls the identical function with identical
+    arguments) hits this same call, this meant **every product catalog
+    write had been failing outright and retrying forever** since the
+    phase7 migration landed — not just "specifications don't save", the
+    entire photo/price/warranty/notes/everything-this-RPC-touches path was
+    broken. Checked real impact: only 3 test-store products existed, none
+    affected in practice — but this would have silently broken every real
+    Add/Edit Product save going forward. Fixed by dropping the stale
+    overload; verified live afterwards (exactly one overload remains, a
+    test call now resolves to the normal RLS "not authorized" instead of
+    the ambiguity error).
+  - Also closed real migration/deployment drift found while verifying:
+    two phase7 migrations and three edge functions
+    (`ai-product-specs`/`ai-product-photo`/`enhance-product-photo`) had
+    been applied/deployed live on Supabase but never saved as files in
+    this repo — reconstructed and committed so the repo matches
+    production.
+  - The actual feature: `repository.ts`'s `upsertProductCatalog` now
+    genuinely sends `p_photos`/`p_specifications`/`p_feature_highlights`
+    (it sent none of the three before — the root cause above);
+    `Product.featureHighlights` added to the type (specifications already
+    existed, feature highlights did not); `ai-product-specs` extended to
+    generate 4-6 short customer-facing highlight bullets alongside the
+    structured spec sheet in the same call; `AddProductModal`'s "AI Fill
+    Specifications & Highlights" button fills both, with a matching
+    editable Highlights section; `ProductDetailView` renders them
+    Amazon/Flipkart "About this item"-style under the price block — the
+    photo gallery (prev/next + thumbnail strip) was already built and
+    confirmed still working, untouched. "Saved permanently, loads
+    instantly, including offline" is satisfied via the same JSON-blob
+    local-storage + relational-table dual persistence every other product
+    field already uses — no separate mechanism was needed once the DB bug
+    above was fixed.
+  - **Follow-up gap fixed 2026-09-10** (flagged, not in scope, in the pass
+    above): `EditProductModal` had no specifications/featureHighlights UI
+    at all — both could only ever be set once at product-creation time via
+    `AddProductModal`, never edited afterward. Same editor UI + AI-fill
+    flow added to `EditProductModal`, initialized from the product's
+    existing values, saved via the same direct-mutation +
+    `upsertProductCatalog` pattern every other field in that modal already
+    uses. (Photos were separately re-checked at the same time and were
+    already fully editable — front/back replace/remove, AI re-scan — no
+    gap there.) Verified: `tsc --noEmit` clean, vitest 26/26, static-audit
+    16/16, production build clean.
+  - Verified: `tsc --noEmit` clean, `npm run build` clean, `vitest` 26/26
+    clean. `ai-product-specs` redeployed (v2) with the extension live.
 
 ### ⬜ Phase 8: Real universal search (+ AI search, glass-specific intelligence)
-- [ ] Fix the core bug: search currently only searches *within* whatever
-      category tab you're already in (e.g. Tempered Glass) — must search
-      **all products, all categories, everywhere**, like Amazon/Flipkart
+- [x] **Fix the core bug: search currently only searches *within* whatever
+      category tab you're already in — must search all products, all
+      categories, everywhere, like Amazon/Flipkart — done 2026-09-09.**
+      Found in the Sell screen's product picker (`filteredProds` in
+      `App.tsx`): the category-tab filter ran *before* the search-text
+      match, excluding a product outright if it wasn't in the active tab
+      — so searching for something outside the currently-selected category
+      (e.g. typing a phone name while the "Tempered Glass" tab was active)
+      returned nothing, no matter how good the text match was. Category tab
+      now only narrows results when the search box is empty; a query
+      searches every category. Also made the tab row show "ALL" as
+      visually active while searching (without touching the stored filter)
+      so the highlighted tab never contradicts what's on screen. This was
+      the only place in the app combining a category-tab filter with a
+      search box — the main Product Catalog/Inventory page has no search
+      box of its own yet. Verified: fresh clone + `npm ci` + `tsc --noEmit`
+      + `npm run build` + `vitest` (26/26), all clean; confirmed no other
+      session had touched `App.tsx` in between (local pre-edit blob hash
+      matched GitHub's SHA) before committing.
 - [ ] Add AI-powered search on top of normal keyword search — runs by
       default alongside plain search, not instead of it
 - [ ] Search by phone **model number** must surface matching glass/cases

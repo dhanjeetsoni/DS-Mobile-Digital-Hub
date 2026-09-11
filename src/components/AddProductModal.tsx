@@ -2,14 +2,15 @@ import React, { useRef, useState } from "react";
 import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcode, ShieldCheck, Search } from "lucide-react";
 import { Database, Product, StockBatch } from "../types";
 import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
-import { processAccessoryOcr, lookupScreenSizeRange, getPriceSuggestion } from "../utils/aiOcr";
-import { compressImageToDataUrl } from "../utils/imageCompress";
+import { processAccessoryOcr, lookupScreenSizeRange, getPriceSuggestion, getProductSpecifications } from "../utils/aiOcr";
+import { compressImageToDataUrl, compressImageForScan } from "../utils/imageCompress";
 import { uploadProductPhotoOrFallback, isStorageUrl } from "../services/photoStorage";
 import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
 import { enhanceProductPhoto } from "../services/photoEnhance";
+import { generateProductPhoto } from "../services/phase6";
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -70,6 +71,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const photoPathIdRef = useRef<string>(uid("tmp"));
 
   const [photo, setPhoto] = useState<string>("");
+  const [photoIsAiGenerated, setPhotoIsAiGenerated] = useState(false);
   // True once `photo` holds a real Storage URL rather than a data: URL
   // fallback. Purely informational (small hint in the UI); Save works
   // either way.
@@ -88,6 +90,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [enhancedPhoto, setEnhancedPhoto] = useState<string>("");
   const [enhanceState, setEnhanceState] = useState<{ loading: boolean; error: string }>({ loading: false, error: "" });
   const [isScanning, setIsScanning] = useState(false);
+  const [isGeneratingPhoto, setIsGeneratingPhoto] = useState(false);
   const [scanError, setScanError] = useState("");
   const [aiApplied, setAiApplied] = useState(false);
 
@@ -114,6 +117,12 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   // same as screenSizeInches".
   const [screenSizeMaxInches, setScreenSizeMaxInches] = useState<number>(0);
   const [notes, setNotes] = useState("");
+  const [specifications, setSpecifications] = useState<{ label: string; value: string }[]>([]);
+  // Phase 7 (2026-09-10): "AI auto-designs the rest of the product page
+  // layout (feature highlights...)" — short customer-facing bullets shown
+  // on the product detail page, separate from the structured spec sheet.
+  const [featureHighlights, setFeatureHighlights] = useState<string[]>([]);
+  const [specsLoading, setSpecsLoading] = useState(false);
   const isScreenAccessory = category === "Tempered Glass" || category === "Curved Glass" || category === "Back Covers";
 
   // These are always left blank for the shop to fill in — never guessed by AI.
@@ -168,6 +177,66 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     if (priceSuggestion.mrp) setMrp(priceSuggestion.mrp);
     setPriceSuggestion(null);
     toast("AI suggestion apply ho gaya — check karke Save karein", "green");
+  }
+
+  // Phase 7: "AI sources/generates good-quality product photos
+  // automatically". Explicit button, not automatic-on-save — same
+  // established pattern as "AI Fill Specifications"/"AI Suggest Price" in
+  // this file, so a photo is never silently generated (and never silently
+  // burns AI-key quota) without the owner asking for it.
+  const [aiPhotoError, setAiPhotoError] = useState("");
+  async function handleGenerateAiPhoto() {
+    if (!name.trim() && !brand.trim()) {
+      toast("Pehle product name ya brand bharein", "amber");
+      return;
+    }
+    setIsGeneratingPhoto(true);
+    setAiPhotoError("");
+    try {
+      const imageDataUrl = await generateProductPhoto({
+        brand: brand.trim() || undefined,
+        productName: name.trim() || category,
+        category: category || undefined,
+      });
+      setPhoto(imageDataUrl);
+      setPhotoIsAiGenerated(true);
+      toast("AI photo ban gayi — chahen to apni photo se replace kar sakte hain", "green");
+    } catch (err: any) {
+      const msg = err?.message || "AI photo generate nahi ho paayi";
+      setAiPhotoError(msg);
+      toast(msg, "amber");
+    } finally {
+      setIsGeneratingPhoto(false);
+    }
+  }
+
+  // Phase 7: AI auto-fills full specifications for a product when added.
+  async function handleSuggestSpecifications() {
+    if (!name.trim() || !category.trim()) {
+      toast("Pehle product name aur category bharein", "amber");
+      return;
+    }
+    setSpecsLoading(true);
+    try {
+      const result = await getProductSpecifications({
+        brand: brand.trim() || undefined,
+        productName: name.trim(),
+        category: category.trim(),
+        compatibleModels: compatibleModels.length ? compatibleModels : undefined,
+      });
+      setSpecifications(result.specifications);
+      setFeatureHighlights(result.featureHighlights);
+      toast(
+        result.confidence === "low"
+          ? "Specifications aur highlights bhar diye — kam confidence hai, check kar lein"
+          : "AI ne specifications aur highlights bhar diye — check kar lein",
+        "green",
+      );
+    } catch (err: any) {
+      toast(err?.message || "AI specifications abhi available nahi hain", "amber");
+    } finally {
+      setSpecsLoading(false);
+    }
   }
   const tryAutoFillPriceFromBrand = (brandValue: string, categoryValue: string) => {
     const brandKey = brandValue.trim().toLowerCase();
@@ -227,6 +296,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     setScreenSizeMaxInches(0);
     setSizeManuallyEdited(false);
     setNotes("");
+    setSpecifications([]);
+    setFeatureHighlights([]);
     setPurchasePrice(0);
     setConfidentialPrice(0);
     setSellingPrice(0);
@@ -281,13 +352,22 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     try {
       const dataUrl = await compressImageToDataUrl(file);
       setPhoto(dataUrl); // optimistic preview while upload runs
+      setPhotoIsAiGenerated(false); // a real photo just replaced any AI-generated placeholder
       const uploadPromise = uploadProductPhotoOrFallback(storeId, photoPathIdRef.current, file)
         .then(({ url, uploaded }) => {
           setPhoto(url);
           setPhotoIsUploaded(uploaded);
         })
         .catch(() => {});
-      await runScan(dataUrl);
+      // Phase 6 (AI accuracy): the AI scanner gets a separately-compressed,
+      // higher-resolution copy of the SAME photo — small print (IMEI, a
+      // long compatible-models list, a faint MRP sticker) reads far more
+      // reliably at this size than the ~1280px/220KB copy tuned for the
+      // permanent stored photo. Falls back to the already-compressed
+      // preview copy if the higher-quality pass fails for any reason
+      // (e.g. an unusual format only the first pass managed to decode).
+      const scanDataUrl = await compressImageForScan(file).catch(() => dataUrl);
+      await runScan(scanDataUrl);
       await uploadPromise;
     } catch (err: any) {
       toast(err?.message || "Photo process nahi ho payi, dobara try karein", "red");
@@ -309,7 +389,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
           setPhoto2IsUploaded(uploaded);
         })
         .catch(() => {});
-      await runScan(dataUrl, "merge-gaps");
+      const scanDataUrl2 = await compressImageForScan(file).catch(() => dataUrl);
+      await runScan(scanDataUrl2, "merge-gaps");
       await uploadPromise;
     } catch (err: any) {
       toast(err?.message || "Back photo process nahi ho payi, dobara try karein", "red");
@@ -538,6 +619,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       sku: genSku(category === "Tempered Glass" || category === "Curved Glass" ? "GLS" : category === "Back Covers" ? "CVR" : "ACC"),
       barcode: barcode.trim() || undefined,
       photo,
+      photoIsAiGenerated: photoIsAiGenerated || undefined,
       photos: [photo, photo2].filter(Boolean),
       purchasePrice: purchasePrice || null,
       pendingCost: !purchasePrice,
@@ -551,6 +633,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       requireCustomerDetails: warrantyEnabled ? true : requireCustomerDetails,
       supplier: supplier.trim(),
       notes: notes.trim(),
+      specifications: specifications.length ? specifications : undefined,
+      featureHighlights: featureHighlights.length ? featureHighlights : undefined,
       compatibleModels,
       screenSizeInches: isScreenAccessory && screenSizeInches ? screenSizeInches : undefined,
       // Step 3.4b: only save a max when it's a real, distinct range (and
@@ -637,7 +721,18 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               onClick={() => fileInputRef.current?.click()}
             >
               {photo ? (
-                <img src={photo} alt="Product" style={{ width: "100%", maxHeight: "260px", objectFit: "contain", borderRadius: "8px" }} />
+                <div style={{ position: "relative" }}>
+                  <img src={photo} alt="Product" style={{ width: "100%", maxHeight: "260px", objectFit: "contain", borderRadius: "8px" }} />
+                  {photoIsAiGenerated && (
+                    <span
+                      className="badge"
+                      style={{ position: "absolute", top: "6px", left: "6px", background: "var(--glow)", color: "#fff" }}
+                      title="Ye AI-generated representative photo hai, exact item ki nahi"
+                    >
+                      <Sparkles size={11} style={{ marginRight: "3px" }} /> AI Photo
+                    </span>
+                  )}
+                </div>
               ) : (
                 <div style={{ padding: "26px 10px" }}>
                   <Upload size={34} style={{ color: "var(--ink-soft)", marginBottom: "8px" }} />
@@ -647,6 +742,20 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                   <button type="button" className="btn primary sm" style={{ marginTop: "12px" }}>
                     <Upload size={14} /> Select / Capture Photo
                   </button>
+                  {(name.trim() || brand.trim()) && (
+                    <button
+                      type="button"
+                      className="btn sm"
+                      style={{ marginTop: "8px" }}
+                      disabled={isGeneratingPhoto}
+                      onClick={(e) => { e.stopPropagation(); void handleGenerateAiPhoto(); }}
+                    >
+                      <Sparkles size={13} /> {isGeneratingPhoto ? "AI photo ban rahi hai…" : "Ya AI se photo banwayein"}
+                    </button>
+                  )}
+                  {aiPhotoError && (
+                    <div className="hint" style={{ color: "var(--red)", marginTop: "6px" }}>{aiPhotoError}</div>
+                  )}
                 </div>
               )}
               <input
@@ -1055,6 +1164,97 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 700, fontSize: "13px" }}>Specifications</div>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={handleSuggestSpecifications}
+                    disabled={specsLoading}
+                    style={{ display: "flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <Sparkles size={13} /> {specsLoading ? "Sochte hain…" : "AI Fill Specifications & Highlights"}
+                  </button>
+                </div>
+                <div className="hint" style={{ marginTop: "2px" }}>
+                  Product ka full spec-sheet (Display, RAM, Camera, Battery, waghera ya accessory ke liye Material/Compatibility) —
+                  AI apni general knowledge se bharta hai, ye live/confirmed data nahi hai, isliye check kar lein.
+                </div>
+                {specifications.length > 0 && (
+                  <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    {specifications.map((spec, i) => (
+                      <div key={i} style={{ display: "flex", gap: "8px", fontSize: "12px" }}>
+                        <input
+                          value={spec.label}
+                          onChange={(e) => setSpecifications((prev) => prev.map((s, si) => (si === i ? { ...s, label: e.target.value } : s)))}
+                          style={{ flex: "0 0 120px", fontSize: "12px" }}
+                          placeholder="Label"
+                        />
+                        <input
+                          value={spec.value}
+                          onChange={(e) => setSpecifications((prev) => prev.map((s, si) => (si === i ? { ...s, value: e.target.value } : s)))}
+                          style={{ flex: 1, fontSize: "12px" }}
+                          placeholder="Value"
+                        />
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() => setSpecifications((prev) => prev.filter((_, si) => si !== i))}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn sm"
+                  style={{ marginTop: "6px" }}
+                  onClick={() => setSpecifications((prev) => [...prev, { label: "", value: "" }])}
+                >
+                  <Plus size={12} /> Spec add karein
+                </button>
+              </div>
+
+              <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
+                <div style={{ fontWeight: 700, fontSize: "13px" }}>Feature Highlights</div>
+                <div className="hint" style={{ marginTop: "2px" }}>
+                  Product detail page par dikhne wale chhote, punchy points (jaise Amazon/Flipkart ke "About this item" bullets) —
+                  "AI Fill Specifications" button in dono ko ek saath bharta hai.
+                </div>
+                {featureHighlights.length > 0 && (
+                  <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    {featureHighlights.map((h, i) => (
+                      <div key={i} style={{ display: "flex", gap: "8px", fontSize: "12px" }}>
+                        <input
+                          value={h}
+                          onChange={(e) => setFeatureHighlights((prev) => prev.map((x, xi) => (xi === i ? e.target.value : x)))}
+                          style={{ flex: 1, fontSize: "12px" }}
+                          placeholder="e.g. 6.7-inch AMOLED display"
+                        />
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() => setFeatureHighlights((prev) => prev.filter((_, xi) => xi !== i))}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn sm"
+                  style={{ marginTop: "6px" }}
+                  onClick={() => setFeatureHighlights((prev) => [...prev, ""])}
+                >
+                  <Plus size={12} /> Highlight add karein
+                </button>
               </div>
 
               <div className="field">

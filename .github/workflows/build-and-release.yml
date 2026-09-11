@@ -226,6 +226,13 @@ jobs:
         # (there was no dialog — the app was never even allowed to ask).
         run: node scripts/ci-wire-android-camera-permissions.mjs src-tauri/gen/android/app/src/main/AndroidManifest.xml
 
+      - name: Wire Biometric permission into AndroidManifest.xml (fingerprint/Face unlock, idempotent, always run)
+        # @tauri-apps/plugin-biometric's own bundled manifest declares no
+        # USE_BIOMETRIC permission (verified directly against its published
+        # source) — without this step, checkStatus() always reports
+        # isAvailable: false on a real device regardless of hardware.
+        run: node scripts/ci-wire-android-biometric-permission.mjs src-tauri/gen/android/app/src/main/AndroidManifest.xml
+
       - name: Write keystore.properties (if the release keystore secret is set)
         shell: bash
         run: |

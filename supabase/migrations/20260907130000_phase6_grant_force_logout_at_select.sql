@@ -1,0 +1,12 @@
+-- Phase 6 — Remote Session Kill: frontend wiring.
+--
+-- The backend for this (profiles.force_logout_at column +
+-- admin_force_logout_profile() RPC) was already live from an earlier
+-- session, but a live-DB audit (2026-09-07) found it was completely
+-- non-functional: Phase 2's column-level SELECT allow-list on `profiles`
+-- (see 20260906130100_phase2_fix_pin_column_grants_v2.sql) was written
+-- before force_logout_at existed, so it was silently excluded — no client
+-- could ever read it, meaning a kill signal had nowhere to be detected.
+-- Safe to expose: it's just a timestamp, not a secret (unlike the pin_*
+-- columns, which correctly stay locked down).
+grant select (force_logout_at) on public.profiles to authenticated;

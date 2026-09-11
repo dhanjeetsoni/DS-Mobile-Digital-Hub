@@ -30,6 +30,16 @@ pub fn run() {
             .plugin(tauri_plugin_process::init());
     }
 
+    // Biometric (fingerprint/Face) unlock — Phase 6. Mobile-only, matching
+    // the Cargo.toml dependency above (which itself is target-gated to
+    // android/ios) — never registered on desktop, where the PIN alone
+    // remains the only unlock method (Windows Hello is explicitly out of
+    // scope for this feature per the plan).
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_biometric::init());
+    }
+
     builder
         .run(tauri::generate_context!())
         .expect("error while running DS Mobile & Digital Hub");

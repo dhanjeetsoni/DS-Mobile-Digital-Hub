@@ -8,6 +8,7 @@
 // under RLS — no function round-trip needed.
 
 import { supabase, isCloudConfigured } from "./supabaseClient";
+import { getMyStaffAccessPolicy } from "./phase6";
 
 export interface StaffProfile {
   id: string;
@@ -176,6 +177,41 @@ export function isAccessWindowExpired(profile: Pick<StaffProfile, "access_mode" 
   return new Date(profile.access_expires_at).getTime() <= Date.now();
 }
 
+/**
+ * Phase 6: recurring daily time-of-day window, separate from (and
+ * stackable with) the existing one-shot access_mode/access_expires_at
+ * countdown above — e.g. a staff member can have "no_restriction" overall
+ * (no expiry) but still only be allowed to use the app between 09:00 and
+ * 18:00 every day. Backed by staff_access_policies.daily_start/daily_end
+ * (see phase6.ts's getMyStaffAccessPolicy/upsertStaffAccessPolicy), "HH:MM"
+ * or "HH:MM:SS" strings compared against the device's own local clock —
+ * same fully-offline-capable design as isAccessWindowExpired.
+ *
+ * Handles an overnight window (e.g. start=22:00, end=06:00 for a night
+ * shift) by wrapping past midnight instead of treating it as an
+ * impossible/inverted range.
+ */
+export function isOutsideDailyWindow(dailyStart: string | null, dailyEnd: string | null, now: Date = new Date()): boolean {
+  if (!dailyStart || !dailyEnd) return false;
+  const toMinutes = (t: string) => {
+    const [h, m] = t.split(":").map((x) => parseInt(x, 10));
+    if (Number.isNaN(h) || Number.isNaN(m)) return null;
+    return h * 60 + m;
+  };
+  const startMin = toMinutes(dailyStart);
+  const endMin = toMinutes(dailyEnd);
+  if (startMin === null || endMin === null) return false;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  if (startMin === endMin) return false; // same-value guard mirrors the RPC's own validation
+  if (startMin < endMin) {
+    // Normal same-day window, e.g. 09:00-18:00.
+    return nowMin < startMin || nowMin >= endMin;
+  }
+  // Overnight window, e.g. 22:00-06:00: "outside" is the daytime gap
+  // between end and start, not the (larger, wrapping) in-window range.
+  return nowMin >= endMin && nowMin < startMin;
+}
+
 const STAFF_SESSION_CACHE_KEY = "dsmdh_staff_session_v2";
 
 export interface CachedStaffSession {
@@ -184,6 +220,11 @@ export interface CachedStaffSession {
   accessMode: StaffProfile["access_mode"];
   accessExpiresAt: string | null;
   visibilityFrom: string | null;
+  /** Phase 6: recurring daily time-of-day window — see isOutsideDailyWindow(). */
+  dailyStart?: string | null;
+  dailyEnd?: string | null;
+  /** Phase 6: which sidebar sections this staff member may see (see Sidebar.tsx's allowedSections prop). */
+  allowedSections?: string[] | null;
 }
 
 /**
@@ -216,6 +257,7 @@ export type StaffSignInResult =
   | { status: "ok"; profile: any }
   | { status: "disabled" }
   | { status: "expired" }
+  | { status: "outsideWindow" }
   | { status: "error"; message: string };
 
 /** Staff: sign in with the owner-issued Login ID + password. */
@@ -259,6 +301,35 @@ export async function staffSignIn(loginId: string, password: string): Promise<St
     await supabase.auth.signOut();
     return { status: "expired" };
   }
+
+  // Phase 6: recurring daily time-of-day window (separate from the
+  // access_expires_at countdown just checked above). Best-effort fetch —
+  // a policy read failure must never block an otherwise-valid sign-in;
+  // it just means this staff member gets no daily-window/section
+  // restriction for this session (same fail-open posture the rest of the
+  // policy wiring takes, since the alternative — hard-blocking sign-in
+  // over a policy-table read hiccup — would be a worse outcome for a
+  // shopkeeper's business than an unenforced restriction until their next
+  // successful sign-in).
+  let dailyStart: string | null = null;
+  let dailyEnd: string | null = null;
+  let allowedSections: string[] | null = null;
+  try {
+    const policyResult: any = await getMyStaffAccessPolicy();
+    const policy = policyResult?.policy;
+    if (policy) {
+      dailyStart = policy.daily_start || null;
+      dailyEnd = policy.daily_end || null;
+      allowedSections = Array.isArray(policy.allowed_sections) ? policy.allowed_sections : null;
+    }
+  } catch {
+    // fail-open, see comment above
+  }
+  if (isOutsideDailyWindow(dailyStart, dailyEnd)) {
+    await supabase.auth.signOut();
+    return { status: "outsideWindow" };
+  }
+
   // Step 1.7: stamp "Last active" for the Owner's Live Access Control table.
   // Best-effort — never block/fail the actual sign-in over this.
   supabase.rpc("touch_staff_last_active").then(() => {}, () => {});
@@ -268,6 +339,9 @@ export async function staffSignIn(loginId: string, password: string): Promise<St
     accessMode: profile.access_mode,
     accessExpiresAt: profile.access_expires_at,
     visibilityFrom: profile.visibility_from,
+    dailyStart,
+    dailyEnd,
+    allowedSections,
   });
-  return { status: "ok", profile };
+  return { status: "ok", profile: { ...profile, dailyStart, dailyEnd, allowedSections } };
 }

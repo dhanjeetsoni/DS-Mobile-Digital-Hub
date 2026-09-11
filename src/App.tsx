@@ -49,6 +49,7 @@ import { OwnerReportsView } from "./components/OwnerReportsView";
 import { WindowsAppModal } from "./components/WindowsAppModal";
 import { LowStockAlertsView } from "./components/LowStockAlertsView";
 import { AuditLogView } from "./components/AuditLogView";
+import { ProductDetailView } from "./components/ProductDetailView";
 import { StaffPerformanceView } from "./components/StaffPerformanceView";
 import { LoyaltyRewardsView } from "./components/LoyaltyRewardsView";
 import { DownloadAreaView } from "./components/DownloadAreaView";
@@ -66,8 +67,9 @@ import { SetupWizardView } from "./components/SetupWizardView";
 import { ConfidentialPriceModal } from "./components/ConfidentialPriceModal";
 import { ConnectionStatusBadge } from "./components/ConnectionStatusBadge";
 import { AddGiftModal } from "./components/AddGiftModal";
-import { staffSignIn, isAccessWindowExpired, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
-import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured } from "./services/pinAuth";
+import { staffSignIn, isAccessWindowExpired, isOutsideDailyWindow, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
+import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured, isBiometricEnabled, setBiometricEnabled } from "./services/pinAuth";
+import { biometricCheck, authenticateBiometric, getMyStaffAccessPolicy } from "./services/phase6";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
 import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
@@ -80,6 +82,7 @@ import { getRepairDiagnosis } from "./services/aiOps";
 import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./services/whatsapp";
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
 import { celebrate } from "./utils/celebrate";
+import { compressImageToDataUrl, estimateDataUrlBytes, formatBytes } from "./utils/imageCompress";
 import {
   Search,
   Plus,
@@ -101,6 +104,7 @@ import {
   Monitor,
   Users,
   Lock,
+  Fingerprint,
   LogIn,
   Pencil,
   ShieldAlert,
@@ -109,6 +113,8 @@ import {
   Barcode,
   Gift,
   Menu,
+  LayoutGrid,
+  Table as TableIcon,
 } from "lucide-react";
 
 const LS_KEY = "dsmdh_db_v2";
@@ -202,7 +208,15 @@ export default function App() {
   const [ownerMode, setOwnerMode] = useState(false);
   const initialRoutePage = (() => {
     const page = new URLSearchParams(window.location.search).get("page");
-    return page || "dashboard";
+    // Phase 7: the app now opens straight into Stock/Inventory by default
+    // instead of the Dashboard — an explicit ?page=... deep link (e.g. a
+    // bookmark, or the Setup Wizard's own navigation) still always wins.
+    // "products" is not an owner-only page (see Sidebar.tsx's
+    // SECONDARY_NAV_ITEMS entry), so this is safe as a default before the
+    // owner passcode has necessarily been entered this session — the
+    // existing owner-only-page guard a little further down only kicks in
+    // for pages that actually need it.
+    return page || "products";
   })();
   const [currentPage, setCurrentPage] = useState(initialRoutePage);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -302,6 +316,21 @@ export default function App() {
   // Phase 2: self-service "My PIN" form state (used by owner/manager in
   // Settings, and by anyone via the account menu — see myPinForm usage).
   const [myPinForm, setMyPinForm] = useState({ current: "", next: "", confirm: "", busy: false, msg: "" });
+  // Phase 7: Product Catalog view mode — "grid" (default, Amazon/Flipkart-
+  // style photo-forward cards) or "table" (dense spreadsheet view, opt-in).
+  const [productViewMode, setProductViewMode] = useState<"grid" | "table">("grid");
+  // Phase 7: dedicated product detail page — set to a product id to show
+  // a full-page takeover (App.tsx renders ProductDetailView instead of the
+  // normal page body while this is set) instead of a modal, matching how
+  // e-commerce apps open a full product page on tap rather than a popup.
+  const [viewingProductId, setViewingProductId] = useState<string | null>(null);
+  // Phase 6: shop logo upload (Settings -> receipt branding). Kept as a
+  // small compressed data URL directly in db.settings.logo (already read
+  // by InvoiceViewerModal everywhere it prints a receipt/invoice — the
+  // rendering side was already fully wired, only this upload control was
+  // missing). Compressed hard (240px/40KB) since, unlike product photos,
+  // this one small image re-syncs on every unrelated settings save.
+  const [logoUploadBusy, setLogoUploadBusy] = useState(false);
   // Phase 5 — Daily Sales Digest (Telegram) on/off. null = not loaded yet
   // (fetched lazily the first time the Settings page is opened by an
   // owner/manager, since it's an extra round trip nobody needs on every
@@ -343,7 +372,7 @@ export default function App() {
   const [staffLoginPassword, setStaffLoginPassword] = useState("");
   const [staffLoginBusy, setStaffLoginBusy] = useState(false);
   const [staffLoginError, setStaffLoginError] = useState("");
-  const [staffDeniedReason, setStaffDeniedReason] = useState<"disabled" | "expired" | null>(null);
+  const [staffDeniedReason, setStaffDeniedReason] = useState<"disabled" | "expired" | "kicked" | "outsideWindow" | null>(null);
   const [gateShakeError, setGateShakeError] = useState(false);
   const [gateBusy, setGateBusy] = useState(false);
   const [gateAttempts, setGateAttempts] = useState<{ count: number; lockUntil: number }>(() => {
@@ -447,6 +476,11 @@ export default function App() {
         setGateStage("staffDenied");
         return;
       }
+      if (result.status === "outsideWindow") {
+        setStaffDeniedReason("outsideWindow");
+        setGateStage("staffDenied");
+        return;
+      }
       setStaffLoginError(result.message);
     } finally {
       setStaffLoginBusy(false);
@@ -510,6 +544,69 @@ export default function App() {
     } else {
       persistGateAttempts({ count: nextCount, lockUntil: 0 });
       showToast(`Incorrect passcode. ${3 - nextCount} attempt(s) left.`, "red");
+    }
+  };
+
+  // Phase 6: Biometric unlock — an alternate, faster path to the exact same
+  // "correct PIN" success branch above, never a separate/weaker check. Only
+  // ever offered when (a) this profile has actually turned it on for this
+  // device (isBiometricEnabled) and (b) the device itself confirms it has
+  // usable hardware right now (checkStatus, re-checked every time this
+  // screen is shown rather than trusted from whenever it was last toggled
+  // on — hardware/enrollment can change between sessions).
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (gateStage === "personalPin" && cloudProfile?.id && isBiometricEnabled(cloudProfile.id)) {
+      biometricCheck().then((status) => {
+        if (!cancelled) setBiometricAvailable(Boolean(status?.isAvailable));
+      });
+    } else {
+      setBiometricAvailable(false);
+    }
+    return () => { cancelled = true; };
+  }, [gateStage, cloudProfile?.id]);
+
+  // Phase 6: separate availability check for the Settings "My PIN" card's
+  // enable/disable toggle — deliberately independent of the gate-screen
+  // effect above (that one only ever checks when biometric is ALREADY on,
+  // to decide whether to show the unlock button; this one needs to know
+  // whether hardware exists in the first place, to decide whether to offer
+  // turning it on at all).
+  const [settingsBiometricAvailable, setSettingsBiometricAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (cloudProfile?.id) {
+      biometricCheck().then((status) => {
+        if (!cancelled) setSettingsBiometricAvailable(Boolean(status?.isAvailable));
+      });
+    } else {
+      setSettingsBiometricAvailable(false);
+    }
+    return () => { cancelled = true; };
+  }, [cloudProfile?.id]);
+
+  const handleBiometricUnlock = async () => {
+    if (!cloudProfile?.id) return;
+    try {
+      await authenticateBiometric(`Unlock as ${cloudProfile.staff_name || cloudProfile.full_name || "yourself"}`);
+      // Success is a hard native OS guarantee (fingerprint/Face match) —
+      // exactly the same "unlocked" outcome as a correct typed PIN, so it
+      // reuses the identical branch handleGateOwnerSubmit's `correct` path
+      // takes above: reset attempts, restore owner mode if applicable,
+      // unlock the gate.
+      persistGateAttempts({ count: 0, lockUntil: 0 });
+      if (cloudProfile.role === "owner" || cloudProfile.role === "manager") setOwnerMode(true);
+      setGateUnlocked(true);
+      setGatePassInput("");
+      showToast(`Welcome back, ${cloudProfile.staff_name || cloudProfile.full_name || "back"}!`, "green");
+    } catch {
+      // Cancelled by the person, or a genuine failed match — never treat
+      // this as a wrong-PIN attempt (no lockout counter, no Telegram
+      // alert): the OS's own biometric prompt already enforces its own
+      // retry/lockout policy before ever calling back here, and the PIN
+      // field right below remains available as a fallback either way.
+      showToast("Fingerprint match nahi hua — PIN se try karein.", "amber");
     }
   };
 
@@ -953,7 +1050,7 @@ export default function App() {
   // immediately when a staff session starts.
   useEffect(() => {
     if (!gateUnlocked || cloudProfile?.role !== "staff") return;
-    const forceStaffLogout = async (reason: "disabled" | "expired") => {
+    const forceStaffLogout = async (reason: "disabled" | "expired" | "outsideWindow") => {
       clearCachedStaffSession();
       await supabase.auth.signOut().catch(() => {});
       setCloudUser(null);
@@ -962,13 +1059,26 @@ export default function App() {
       setStaffDeniedReason(reason);
       setGateStage("staffDenied");
       setGateUnlocked(false);
-      showToast(reason === "expired" ? "Aapka access time khatam ho gaya." : "Owner ne aapka access band kar diya.", "amber");
+      showToast(
+        reason === "expired" ? "Aapka access time khatam ho gaya." :
+        reason === "outsideWindow" ? "Aapka aaj ka allowed time khatam ho gaya." :
+        "Owner ne aapka access band kar diya.",
+        "amber"
+      );
     };
     const check = () => {
       const cached = readCachedStaffSession();
       if (!cached) return;
       if (cached.accessMode !== "no_restriction" && cached.accessExpiresAt && new Date(cached.accessExpiresAt).getTime() <= Date.now()) {
         forceStaffLogout("expired");
+        return;
+      }
+      // Phase 6: recurring daily time-of-day window — same fully-offline
+      // clock-only check as the access_expires_at one above, so a staff
+      // member's session ends mid-day even with no internet, right when
+      // their allowed window (e.g. 09:00-18:00) closes.
+      if (isOutsideDailyWindow(cached.dailyStart ?? null, cached.dailyEnd ?? null)) {
+        forceStaffLogout("outsideWindow");
       }
     };
     check();
@@ -980,6 +1090,23 @@ export default function App() {
   // is online, an owner turning access OFF (or changing the window) reaches
   // an already-logged-in staff device immediately instead of waiting for
   // their next 5s local-clock check or their next app open.
+  // Phase 6 — Remote Session Kill: owner taps "Force Logout" on a staff
+  // device from Windows/Owner app (see admin_force_logout_profile(), wired
+  // in StaffAccessView below). That RPC only writes profiles.force_logout_at
+  // = now(); this baseline + realtime check is what actually turns that
+  // into an instant, "even mid-sale" sign-out on the targeted device —
+  // otherwise the timestamp would just sit there unread.
+  // Baseline captured once per login: whatever force_logout_at already was
+  // at sign-in time is "old news" (a kill from a previous session, already
+  // acted on) — only a value that changes AFTER this baseline is a fresh,
+  // live kill signal for the session currently running on this device.
+  const forceLogoutBaselineRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (gateUnlocked && cloudProfile?.role === "staff") {
+      forceLogoutBaselineRef.current = cloudProfile?.force_logout_at ?? null;
+    }
+  }, [gateUnlocked, cloudProfile?.role, cloudProfile?.id]);
+
   useEffect(() => {
     if (!gateUnlocked || cloudProfile?.role !== "staff" || !cloudProfile?.id) return;
     const forceKickDeleted = () => {
@@ -1003,6 +1130,18 @@ export default function App() {
         (payload: any) => {
           const row = payload.new;
           if (!row) return;
+          if (row.force_logout_at && row.force_logout_at !== forceLogoutBaselineRef.current) {
+            clearCachedStaffSession();
+            supabase.auth.signOut().catch(() => {});
+            setCloudUser(null);
+            setCloudProfile(null);
+            setOwnerMode(false);
+            setStaffDeniedReason("kicked");
+            setGateStage("staffDenied");
+            setGateUnlocked(false);
+            showToast("Owner ne aapko is device se turant logout kar diya.", "amber");
+            return;
+          }
           if (!row.access_enabled) {
             clearCachedStaffSession();
             supabase.auth.signOut().catch(() => {});
@@ -1077,12 +1216,15 @@ export default function App() {
   // see services/photoStorage.ts.
   useEffect(() => {
     if (!cloudUser || !cloudProfile?.store_id) return;
-    backfillLegacyProductPhotos(cloudProfile.store_id, db, (productId, url) => {
+    backfillLegacyProductPhotos(cloudProfile.store_id, db, (productId, slotIndex, url) => {
       const product = db.products.find((p) => p.id === productId);
-      if (product) {
-        product.photo = url;
-        saveState({ ...db });
-      }
+      if (!product) return;
+      const photos = product.photos && product.photos.length ? [...product.photos] : [product.photo];
+      while (photos.length <= slotIndex) photos.push("");
+      photos[slotIndex] = url;
+      product.photos = photos.filter(Boolean);
+      if (slotIndex === 0) product.photo = url; // keep the legacy single-photo field in sync — every existing read site still uses it
+      saveState({ ...db });
     });
     // Deliberately not re-running on every db change — that would fight
     // with in-progress uploads. It re-checks on reconnect/store change,
@@ -2139,6 +2281,58 @@ export default function App() {
 
   // Render main page
   const renderCurrentPage = () => {
+    // Phase 7: dedicated product detail page — a genuine full-page
+    // takeover (not a modal), rendered instead of whatever `currentPage`
+    // is currently selected, exactly like tapping a product on an
+    // e-commerce app replaces the listing with its own screen.
+    if (viewingProductId) {
+      const viewedProduct = catalogProducts.find((p) => p.id === viewingProductId);
+      if (viewedProduct) {
+        return (
+          <ProductDetailView
+            product={viewedProduct}
+            stock={stockOf(viewedProduct)}
+            isOwner={ownerMode}
+            onBack={() => setViewingProductId(null)}
+            onEdit={
+              ownerMode
+                ? () => {
+                    setEditingProduct(viewedProduct);
+                    setIsEditProductOpen(true);
+                    setViewingProductId(null);
+                  }
+                : undefined
+            }
+            onDelete={ownerMode ? () => void handleDeleteProduct(viewedProduct) : undefined}
+            onAddToCart={
+              stockOf(viewedProduct) > 0
+                ? () => {
+                    addToCart(viewedProduct);
+                    showToast(`Added ${viewedProduct.name} to cart!`, "green");
+                  }
+                : undefined
+            }
+            onBuyNow={
+              stockOf(viewedProduct) > 0
+                ? () => {
+                    // Phase 7 "Buy Now" — Amazon-style direct checkout:
+                    // add the item then jump straight to the Sell/checkout
+                    // screen with it already in the cart, instead of
+                    // staying on this page like plain Add to Cart does.
+                    addToCart(viewedProduct);
+                    setViewingProductId(null);
+                    setCurrentPage("sell");
+                  }
+                : undefined
+            }
+            onConfidentialPrice={() => setConfidentialPriceProduct(viewedProduct)}
+          />
+        );
+      }
+      // Product no longer exists (deleted from another device, etc.) —
+      // fall through to the normal page instead of showing a dead end.
+      setViewingProductId(null);
+    }
     switch (currentPage) {
       case "dashboard": {
         const todaySales = visibleSales.filter((s) => s.date === todayStr());
@@ -2494,23 +2688,29 @@ export default function App() {
 
         const filteredProds = catalogProducts.filter((p) => {
           if (stockOf(p) <= 0) return false;
+          // Phase 8: "search currently only searches within whatever
+          // category tab you're already in" -- the category filter used to
+          // run FIRST and exclude a product before the search match below
+          // was even checked, so searching for something outside the
+          // active tab returned nothing at all. Now the category tab only
+          // narrows results when the search box is empty; typing a query
+          // searches across every category, like Amazon/Flipkart.
+          if (sellSearchQuery) {
+            return (
+              naturalMatch(p.name, sellSearchQuery) ||
+              naturalMatch(p.brand, sellSearchQuery) ||
+              naturalMatch(p.category, sellSearchQuery) ||
+              p.sku.toLowerCase().includes(sellSearchQuery.toLowerCase()) ||
+              (p.barcode || "").toLowerCase().includes(sellSearchQuery.toLowerCase()) ||
+              (p.units || []).some((u) => u.imei1.includes(sellSearchQuery.toLowerCase()))
+            );
+          }
           if (sellCategoryFilter !== "ALL") {
             if (sellCategoryFilter === "Cyber & Xerox") {
               if (p.category !== "Cyber & Xerox" && p.category !== "Services") return false;
             } else if (p.category !== sellCategoryFilter) {
               return false;
             }
-          }
-          if (sellSearchQuery) {
-            const q = sellSearchQuery.toLowerCase();
-            return (
-              naturalMatch(p.name, sellSearchQuery) ||
-              naturalMatch(p.brand, sellSearchQuery) ||
-              naturalMatch(p.category, sellSearchQuery) ||
-              p.sku.toLowerCase().includes(q) ||
-              (p.barcode || "").toLowerCase().includes(q) ||
-              (p.units || []).some((u) => u.imei1.includes(q))
-            );
           }
           return true;
         });
@@ -2529,7 +2729,15 @@ export default function App() {
 
               {/* 1-Tap Category Filter Chips */}
               <div className="hscroll-fade" style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "8px", marginBottom: "8px" }}>
-                {CATEGORY_TABS.map((cat) => (
+                {CATEGORY_TABS.map((cat) => {
+                  // While actively searching, results span every category
+                  // (see filteredProds above) -- show "ALL" as the visually
+                  // active tab instead of whichever one was picked before,
+                  // so the highlighted tab never contradicts what's on
+                  // screen. The real sellCategoryFilter is left untouched,
+                  // so clearing the search restores the previous tab.
+                  const displayedFilter = sellSearchQuery ? "ALL" : sellCategoryFilter;
+                  return (
                   <button
                     key={cat.id}
                     onClick={() => setSellCategoryFilter(cat.id)}
@@ -2541,14 +2749,15 @@ export default function App() {
                       border: "1px solid",
                       cursor: "pointer",
                       whiteSpace: "nowrap",
-                      background: sellCategoryFilter === cat.id ? "var(--accent)" : "var(--paper)",
-                      color: sellCategoryFilter === cat.id ? "#ffffff" : "var(--ink)",
-                      borderColor: sellCategoryFilter === cat.id ? "var(--accent)" : "var(--line)",
+                      background: displayedFilter === cat.id ? "var(--accent)" : "var(--paper)",
+                      color: displayedFilter === cat.id ? "#ffffff" : "var(--ink)",
+                      borderColor: displayedFilter === cat.id ? "var(--accent)" : "var(--line)",
                     }}
                   >
                     {cat.label}
                   </button>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="searchbar">
@@ -2915,7 +3124,21 @@ export default function App() {
             <div className="section">
               <div className="section-head">
                 <h2>Product Catalog &amp; Inventory ({db.products.length})</h2>
-                <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <div className="view-toggle">
+                    <button
+                      className={`btn sm ${productViewMode === "grid" ? "primary" : ""}`}
+                      onClick={() => setProductViewMode("grid")}
+                    >
+                      <LayoutGrid size={14} /> Grid
+                    </button>
+                    <button
+                      className={`btn sm ${productViewMode === "table" ? "primary" : ""} table-view-toggle-btn`}
+                      onClick={() => setProductViewMode("table")}
+                    >
+                      <TableIcon size={14} /> Table
+                    </button>
+                  </div>
                   {ownerMode ? (
                     <>
                       <button className="btn primary sm" onClick={() => setIsAddProductOpen(true)}>
@@ -2933,7 +3156,74 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="table-wrap product-desktop-table">
+              {/* Phase 7 — Amazon/Flipkart-style photo-forward card grid,
+                  now the DEFAULT product-list experience (not just a
+                  mobile fallback like Phase 4's original .product-mobile-list
+                  single-column cards, which this supersedes visually while
+                  keeping the same underlying data/actions). "Table" stays
+                  available as an explicit choice for anyone who wants the
+                  dense spreadsheet-style view (SKU/barcode/cost/etc all at
+                  once) — see .table-view-toggle-btn / product-desktop-table
+                  in index.css for why Table forces back to Grid under
+                  900px regardless of this toggle (a 13-column table has no
+                  usable form on a phone screen either way). */}
+              <div className={`product-card-grid ${productViewMode === "table" ? "product-card-grid-hidden-for-table" : ""}`}>
+                {catalogProducts.map((p) => {
+                  const pct = p.category !== "Cyber Cafe" ? computeDiscountPercent(p.mrp, p.sellingPrice) : null;
+                  const low = stockOf(p) <= p.minStock;
+                  const out = stockOf(p) <= 0;
+                  return (
+                    <div key={p.id} className="product-card">
+                      <div className="product-card-photo">
+                        <ProductThumb photo={p.photo} photos={p.photos} name={p.name} />
+                        {pct !== null && pct > 0 && <span className="product-card-discount-badge">{pct}% OFF</span>}
+                        {out && <span className="product-card-oos-badge">Out of Stock</span>}
+                        {p.photoIsAiGenerated && (
+                          <span
+                            className="product-card-discount-badge"
+                            style={{ left: "auto", right: "6px", background: "var(--glow)" }}
+                            title="AI-generated representative photo, exact item ki nahi"
+                          >
+                            AI Photo
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className="product-card-body"
+                        style={{ cursor: "pointer" }}
+                        onClick={() => setViewingProductId(p.id)}
+                        title="Tap to view full details"
+                      >
+                        <div className="product-card-name" title={p.name}>{p.name}</div>
+                        <div className="product-card-sub">{[p.brand, p.category].filter(Boolean).join(" · ")}</div>
+                        <div className="product-card-price-row">
+                          <span className="product-card-price">{inr(p.sellingPrice)}</span>
+                          {p.mrp ? <span className="product-card-mrp">{inr(p.mrp)}</span> : null}
+                        </div>
+                        <div className="product-card-meta">
+                          <span className={`badge ${low ? "danger" : "ok"}`}>Stock: {stockOf(p)}</span>
+                          {p.warrantyEnabled && <span className="hint">{p.warrantyMonths}m warranty</span>}
+                        </div>
+                        {ownerMode && (
+                          <div className="product-card-actions">
+                            <button className="btn sm" onClick={(e) => { e.stopPropagation(); setEditingProduct(p); setIsEditProductOpen(true); }}>
+                              <Pencil size={12} /> Edit
+                            </button>
+                            <button className="btn sm danger" onClick={(e) => { e.stopPropagation(); void handleDeleteProduct(p); }} title="Product permanently delete karo (photo bhi cloud se hat jayegi)">
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {catalogProducts.length === 0 && (
+                  <div className="empty" style={{ gridColumn: "1 / -1" }}>Koi product nahi mila.</div>
+                )}
+              </div>
+
+              <div className={`table-wrap product-desktop-table ${productViewMode === "grid" ? "product-table-hidden-for-grid" : ""}`}>
                 <table>
                   <thead>
                     <tr>
@@ -3003,50 +3293,6 @@ export default function App() {
                     ))}
                   </tbody>
                 </table>
-              </div>
-
-              {/* Phase 4 — Product Catalog mobile pass. The table above has
-                  up to 13 columns; even with horizontal scroll that's
-                  genuinely unusable on a ~360-400px phone (this was one of
-                  the most-reported "kuch dikhta hi nahi" complaints).
-                  Same photo/price/stock data, rendered as touch-friendly
-                  stacked cards instead — shown only under 900px via CSS
-                  (.product-mobile-list), same toggle technique as
-                  .mobile-cart-bar elsewhere in this file. */}
-              <div className="product-mobile-list">
-                {catalogProducts.map((p) => {
-                  const pct = p.category !== "Cyber Cafe" ? computeDiscountPercent(p.mrp, p.sellingPrice) : null;
-                  const low = stockOf(p) <= p.minStock;
-                  return (
-                    <div key={p.id} className="product-mobile-card">
-                      <div className="product-mobile-photo"><ProductThumb photo={p.photo} photos={p.photos} name={p.name} /></div>
-                      <div className="product-mobile-info">
-                        <div className="product-mobile-name">{p.name}</div>
-                        <div className="product-mobile-sub">{[p.brand, p.category].filter(Boolean).join(" · ")}</div>
-                        <div className="product-mobile-price-row">
-                          <span className="product-mobile-price">{inr(p.sellingPrice)}</span>
-                          {p.mrp ? <span className="product-mobile-mrp">{inr(p.mrp)}</span> : null}
-                          {pct !== null && <span className="badge ok">{pct}% off</span>}
-                        </div>
-                        <div className="product-mobile-meta">
-                          <span className={`badge ${low ? "danger" : "ok"}`}>Stock: {stockOf(p)}</span>
-                          <span className="hint">{p.warrantyEnabled ? `${p.warrantyMonths}m warranty` : "No warranty"}</span>
-                          <span className="hint">SKU: {p.sku}</span>
-                        </div>
-                        {ownerMode && (
-                          <div className="product-mobile-actions">
-                            <button className="btn sm" onClick={() => { setEditingProduct(p); setIsEditProductOpen(true); }}>
-                              <Pencil size={12} /> Edit Price
-                            </button>
-                            <button className="btn sm danger" onClick={() => void handleDeleteProduct(p)} title="Product permanently delete karo (photo bhi cloud se hat jayegi)">
-                              <Trash2 size={12} /> Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
             </div>
           </div>
@@ -3408,7 +3654,7 @@ export default function App() {
       case "photoFinder":
         return (
           <PhotoStockFinderView
-            db={catalogDb}
+            db={{ ...catalogDb, products: catalogDb.products.map((p) => ({ ...p, stock: stockOf(p) })) }}
             onAddToCart={(p) => {
               addToCart(p);
               showToast(`Added ${p.name} to cart!`, "green");
@@ -3423,6 +3669,7 @@ export default function App() {
             db={db}
             catalogProducts={catalogProducts}
             storeId={cloudProfile?.store_id}
+            isStaff={cloudProfile?.role === "staff"}
             onUpdate={() => saveState({ ...db })}
             toast={showToast}
           />
@@ -3714,6 +3961,61 @@ export default function App() {
                     onChange={(e) => setDb({ ...db, settings: { ...db.settings, address: e.target.value } })}
                   />
                 </div>
+                <div className="field full">
+                  <label>Shop Logo (bills/receipts par dikhega)</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div
+                      style={{
+                        width: 56, height: 56, borderRadius: 10, overflow: "hidden",
+                        background: "var(--paper)", display: "flex", alignItems: "center", justifyContent: "center",
+                        border: "1px solid var(--line)", flexShrink: 0,
+                      }}
+                    >
+                      {db.settings.logo ? (
+                        <img src={db.settings.logo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                      ) : (
+                        <span style={{ fontSize: 11, color: "var(--ink-soft)" }}>No logo</span>
+                      )}
+                    </div>
+                    <label className="btn sm" style={{ cursor: "pointer" }}>
+                      {logoUploadBusy ? <Loader2 size={13} className="spin" /> : <Upload size={13} />}
+                      {logoUploadBusy ? "Uploading…" : "Upload Logo"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        disabled={logoUploadBusy}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (!file) return;
+                          setLogoUploadBusy(true);
+                          try {
+                            const dataUrl = await compressImageToDataUrl(file, { maxDimension: 240, quality: 0.75, maxBytes: 40 * 1024 });
+                            setDb({ ...db, settings: { ...db.settings, logo: dataUrl } });
+                            showToast(`Logo lag gaya (${formatBytes(estimateDataUrlBytes(dataUrl))}) — Save Settings dabana na bhoolein`, "green");
+                          } catch (err) {
+                            showToast(err instanceof Error ? err.message : "Logo upload fail hua.", "red");
+                          } finally {
+                            setLogoUploadBusy(false);
+                          }
+                        }}
+                      />
+                    </label>
+                    {db.settings.logo && (
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => setDb({ ...db, settings: { ...db.settings, logo: "" } })}
+                      >
+                        <Trash2 size={13} /> Remove
+                      </button>
+                    )}
+                  </div>
+                  <div className="hint" style={{ marginTop: "4px" }}>
+                    Chhota, saaf logo best rehta hai (jaise square icon). Ye har invoice/receipt ke top par dikhega.
+                  </div>
+                </div>
                 <div className="field">
                   <label>UPI ID (For Instant QR Code on Bills)</label>
                   <input
@@ -3770,6 +4072,36 @@ export default function App() {
                           {myPinForm.msg && <span className="hint" style={{ marginLeft: 10 }}>{myPinForm.msg}</span>}
                         </div>
                       </form>
+                    )}
+                    {cloudProfile?.id && hasPinConfigured(cloudProfile.id) && settingsBiometricAvailable && (
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontWeight: 600, fontSize: 13 }}>
+                        <input
+                          type="checkbox"
+                          checked={isBiometricEnabled(cloudProfile.id)}
+                          onChange={async (e) => {
+                            const enabling = e.target.checked;
+                            if (enabling) {
+                              // Require one successful native prompt before
+                              // turning this on — never trust the OS-level
+                              // "hardware available" check alone as proof
+                              // the person can actually authenticate (no
+                              // finger enrolled, sensor faulty, etc).
+                              try {
+                                await authenticateBiometric("Enable fingerprint/Face unlock for DS Mobile & Digital Hub");
+                              } catch {
+                                showToast("Fingerprint verify nahi ho paya — enable nahi kiya.", "red");
+                                return;
+                              }
+                            }
+                            setBiometricEnabled(cloudProfile.id, enabling);
+                            showToast(enabling ? "Fingerprint/Face unlock is device ke liye ON kar diya." : "Fingerprint/Face unlock OFF kar diya.", "green");
+                            // Force a re-render so the checkbox reflects the
+                            // just-written localStorage value immediately.
+                            setMyPinForm((f) => ({ ...f }));
+                          }}
+                        />
+                        <Fingerprint size={14} /> Fingerprint / Face se bhi unlock karne do (is device par)
+                      </label>
                     )}
                   </div>
                 </div>
@@ -3983,6 +4315,16 @@ export default function App() {
                     {gateBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {gateBusy ? "Sending alert…" : "Unlock"}
                   </button>
                 </div>
+                {gateStage === "personalPin" && biometricAvailable && (
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ width: "100%", justifyContent: "center", marginTop: 10 }}
+                    onClick={handleBiometricUnlock}
+                  >
+                    <Fingerprint size={15} /> Use Fingerprint / Face
+                  </button>
+                )}
               </form>
             )}
 
@@ -4072,13 +4414,17 @@ export default function App() {
             <div className="gate-auth-head">
               <div className="warn-badge"><ShieldAlert size={22} /></div>
               <div>
-                <h3>{staffDeniedReason === "expired" ? "Access Time Khatam Ho Gaya" : "Access Disabled"}</h3>
+                <h3>{staffDeniedReason === "expired" ? "Access Time Khatam Ho Gaya" : staffDeniedReason === "kicked" ? "Logout Kar Diya Gaya" : staffDeniedReason === "outsideWindow" ? "Abhi Login Ka Time Nahi Hai" : "Access Disabled"}</h3>
                 <p>Contact Shop Owner for Access</p>
               </div>
             </div>
             <div className="notice" style={{ marginTop: 8 }}>
               {staffDeniedReason === "expired"
                 ? "Owner ne aapko jitna time diya tha wo poora ho chuka hai. Dobara access ke liye shop owner se baat karo."
+                : staffDeniedReason === "kicked"
+                ? "Owner ne aapko is device se turant logout kar diya hai. Dobara login karne ke liye shop owner se baat karo."
+                : staffDeniedReason === "outsideWindow"
+                ? "Owner ne aapke liye ek fix daily time set kiya hai jab app use kar sakte ho — abhi wo waqt nahi hai. Sahi time par dobara try karo."
                 : "Owner ne aapka access is waqt band kar rakha hai. Dobara access ke liye shop owner se baat karo."}
             </div>
             <button
@@ -4136,6 +4482,12 @@ export default function App() {
   // option at all, not just be blocked after attempting it; every place
   // that hides or refuses an owner-only control checks this same value.
   const isStaffIdentity = cloudProfile?.role === "staff";
+  // Phase 6: fed from the localStorage cache staffSignIn() writes at login
+  // time (see CachedStaffSession) — read here rather than threaded through
+  // state, since a successful staff sign-in triggers a full page reload
+  // (see handleStaffLoginSubmit's comment on why), so this is naturally
+  // re-derived fresh on every app boot exactly when it's needed.
+  const staffAllowedSections = isStaffIdentity ? (readCachedStaffSession()?.allowedSections ?? null) : null;
 
   return (
     <div id="app">
@@ -4169,10 +4521,12 @@ export default function App() {
         isMobileOpen={isMobileNavOpen}
         onCloseMobile={() => setIsMobileNavOpen(false)}
         isStaffIdentity={isStaffIdentity}
+        allowedSections={staffAllowedSections}
       />
       <BottomTabBar
         currentPage={currentPage}
         isStaffIdentity={isStaffIdentity}
+        allowedSections={staffAllowedSections}
         onNavigate={(page) => {
           // Same owner-passcode gate as <Sidebar>'s onNavigate above (kept
           // duplicated rather than refactored into a shared function, to

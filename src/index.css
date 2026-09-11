@@ -886,6 +886,222 @@ html[data-font-style="mono"] {
   font-weight: 700;
 }
 
+/* Phase 7 — dedicated product detail page (tap a product -> full page,
+   e-commerce style: MRP struck through, discount %, selling price). */
+.product-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 380px) 1fr;
+  gap: 28px;
+  align-items: start;
+}
+.product-detail-gallery {
+  position: sticky;
+  top: 16px;
+}
+.product-detail-main-photo {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.product-detail-main-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.product-detail-no-photo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.product-detail-gallery-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.product-detail-gallery-nav.left { left: 10px; }
+.product-detail-gallery-nav.right { right: 10px; }
+.product-detail-thumb-strip {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-x: auto;
+}
+.product-detail-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  border: 2px solid var(--line);
+  overflow: hidden;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.product-detail-thumb.active {
+  border-color: var(--accent);
+}
+.product-detail-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.product-detail-sub {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.product-detail-name {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 4px 0 14px;
+  line-height: 1.3;
+}
+.product-detail-price-block {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.product-detail-price {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--accent);
+}
+.product-detail-mrp {
+  font-size: 16px;
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+.product-detail-discount-badge {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--green);
+  padding: 3px 9px;
+  border-radius: 6px;
+}
+.product-detail-stock-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.product-detail-section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.product-detail-section h3 {
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+  margin: 0 0 8px;
+}
+.product-detail-section p {
+  margin: 0;
+  font-size: 13.5px;
+  white-space: pre-wrap;
+}
+.product-detail-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.product-detail-chip {
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.product-detail-specs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.product-detail-specs-table td {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.product-detail-specs-table td:first-child {
+  color: var(--ink-soft);
+  width: 40%;
+  font-weight: 600;
+}
+.product-detail-highlights-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.product-detail-highlights-list li {
+  line-height: 1.4;
+}
+.product-detail-meta-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+.product-detail-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 22px;
+}
+/* Phase 7: Amazon-style Buy Now — a distinct warm accent so it visually
+   reads as "the fast path" next to the plain Add to Cart button, same
+   convention Amazon/Flipkart use (orange Buy Now vs yellow/neutral Add to
+   Cart) even though this app's own .btn.primary is blue elsewhere. */
+.product-detail-buynow-btn {
+  background: linear-gradient(135deg, #f97316, #ea580c) !important;
+  border-color: transparent !important;
+}
+.product-detail-buynow-btn:hover {
+  background: linear-gradient(135deg, #ea580c, #c2410c) !important;
+}
+@media (max-width: 900px) {
+  .product-detail-layout {
+    grid-template-columns: 1fr;
+  }
+  .product-detail-gallery {
+    position: static;
+  }
+  .product-detail-name {
+    font-size: 19px;
+  }
+  .product-detail-price {
+    font-size: 24px;
+  }
+}
+
 .product-card-body {
   padding: 10px;
   display: flex;

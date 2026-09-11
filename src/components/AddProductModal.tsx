@@ -9,6 +9,8 @@ import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay"
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
+import { enhanceProductPhoto } from "../services/photoEnhance";
+import { generateProductPhoto } from "../services/phase6";
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -69,6 +71,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const photoPathIdRef = useRef<string>(uid("tmp"));
 
   const [photo, setPhoto] = useState<string>("");
+  const [photoIsAiGenerated, setPhotoIsAiGenerated] = useState(false);
   // True once `photo` holds a real Storage URL rather than a data: URL
   // fallback. Purely informational (small hint in the UI); Save works
   // either way.
@@ -78,7 +81,16 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const photoPathIdRef2 = useRef<string>(uid("tmp"));
   const [photo2, setPhoto2] = useState<string>("");
   const [photo2IsUploaded, setPhoto2IsUploaded] = useState(false);
+  // Phase 7 — "AI sources/generates good-quality product photos": AI
+  // *enhancement* of the shop's OWN photo (clean background, centered,
+  // studio lighting), never a copied third-party image. Review-before-
+  // apply, same pattern as the AI price suggestion — the enhanced result
+  // is held here until the owner explicitly accepts it; `photo` itself is
+  // never touched until then.
+  const [enhancedPhoto, setEnhancedPhoto] = useState<string>("");
+  const [enhanceState, setEnhanceState] = useState<{ loading: boolean; error: string }>({ loading: false, error: "" });
   const [isScanning, setIsScanning] = useState(false);
+  const [isGeneratingPhoto, setIsGeneratingPhoto] = useState(false);
   const [scanError, setScanError] = useState("");
   const [aiApplied, setAiApplied] = useState(false);
 
@@ -106,6 +118,10 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [screenSizeMaxInches, setScreenSizeMaxInches] = useState<number>(0);
   const [notes, setNotes] = useState("");
   const [specifications, setSpecifications] = useState<{ label: string; value: string }[]>([]);
+  // Phase 7 (2026-09-10): "AI auto-designs the rest of the product page
+  // layout (feature highlights...)" — short customer-facing bullets shown
+  // on the product detail page, separate from the structured spec sheet.
+  const [featureHighlights, setFeatureHighlights] = useState<string[]>([]);
   const [specsLoading, setSpecsLoading] = useState(false);
   const isScreenAccessory = category === "Tempered Glass" || category === "Curved Glass" || category === "Back Covers";
 
@@ -163,6 +179,37 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     toast("AI suggestion apply ho gaya — check karke Save karein", "green");
   }
 
+  // Phase 7: "AI sources/generates good-quality product photos
+  // automatically". Explicit button, not automatic-on-save — same
+  // established pattern as "AI Fill Specifications"/"AI Suggest Price" in
+  // this file, so a photo is never silently generated (and never silently
+  // burns AI-key quota) without the owner asking for it.
+  const [aiPhotoError, setAiPhotoError] = useState("");
+  async function handleGenerateAiPhoto() {
+    if (!name.trim() && !brand.trim()) {
+      toast("Pehle product name ya brand bharein", "amber");
+      return;
+    }
+    setIsGeneratingPhoto(true);
+    setAiPhotoError("");
+    try {
+      const imageDataUrl = await generateProductPhoto({
+        brand: brand.trim() || undefined,
+        productName: name.trim() || category,
+        category: category || undefined,
+      });
+      setPhoto(imageDataUrl);
+      setPhotoIsAiGenerated(true);
+      toast("AI photo ban gayi — chahen to apni photo se replace kar sakte hain", "green");
+    } catch (err: any) {
+      const msg = err?.message || "AI photo generate nahi ho paayi";
+      setAiPhotoError(msg);
+      toast(msg, "amber");
+    } finally {
+      setIsGeneratingPhoto(false);
+    }
+  }
+
   // Phase 7: AI auto-fills full specifications for a product when added.
   async function handleSuggestSpecifications() {
     if (!name.trim() || !category.trim()) {
@@ -178,10 +225,11 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
         compatibleModels: compatibleModels.length ? compatibleModels : undefined,
       });
       setSpecifications(result.specifications);
+      setFeatureHighlights(result.featureHighlights);
       toast(
         result.confidence === "low"
-          ? "Specifications bhar diye — kam confidence hai, check kar lein"
-          : "AI ne specifications bhar diye — check kar lein",
+          ? "Specifications aur highlights bhar diye — kam confidence hai, check kar lein"
+          : "AI ne specifications aur highlights bhar diye — check kar lein",
         "green",
       );
     } catch (err: any) {
@@ -234,6 +282,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     setPhoto2("");
     setPhoto2IsUploaded(false);
     photoPathIdRef2.current = uid("tmp");
+    setEnhancedPhoto("");
+    setEnhanceState({ loading: false, error: "" });
     setScanError("");
     setAiApplied(false);
     setName("");
@@ -247,6 +297,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     setSizeManuallyEdited(false);
     setNotes("");
     setSpecifications([]);
+    setFeatureHighlights([]);
     setPurchasePrice(0);
     setConfidentialPrice(0);
     setSellingPrice(0);
@@ -301,6 +352,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     try {
       const dataUrl = await compressImageToDataUrl(file);
       setPhoto(dataUrl); // optimistic preview while upload runs
+      setPhotoIsAiGenerated(false); // a real photo just replaced any AI-generated placeholder
       const uploadPromise = uploadProductPhotoOrFallback(storeId, photoPathIdRef.current, file)
         .then(({ url, uploaded }) => {
           setPhoto(url);
@@ -370,6 +422,51 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       await runScan(imgData);
     } catch (err: any) {
       toast(err?.message || "Photo load nahi ho payi, dobara try karein", "red");
+    }
+  };
+
+  // Phase 7 — AI photo enhancement (clean background, centered, studio
+  // lighting) of the shop's OWN photo. Produces a candidate the owner
+  // reviews side-by-side before it ever touches the real `photo` state.
+  const handleEnhancePhoto = async () => {
+    if (!photo) return;
+    setEnhanceState({ loading: true, error: "" });
+    setEnhancedPhoto("");
+    try {
+      let imgData = photo;
+      if (isStorageUrl(photo)) {
+        const res = await fetch(photo);
+        const blob = await res.blob();
+        imgData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Saved photo load nahi ho payi"));
+          reader.readAsDataURL(blob);
+        });
+      }
+      const result = await enhanceProductPhoto(imgData);
+      setEnhancedPhoto(result);
+      setEnhanceState({ loading: false, error: "" });
+    } catch (err) {
+      setEnhanceState({ loading: false, error: err instanceof Error ? err.message : "AI enhance fail ho gaya." });
+    }
+  };
+
+  const applyEnhancedPhoto = async () => {
+    if (!enhancedPhoto) return;
+    setPhoto(enhancedPhoto);
+    setPhotoIsUploaded(false);
+    setEnhancedPhoto("");
+    try {
+      const blob = await (await fetch(enhancedPhoto)).blob();
+      const file = new File([blob], "enhanced.png", { type: blob.type || "image/png" });
+      const { url, uploaded } = await uploadProductPhotoOrFallback(storeId, photoPathIdRef.current, file);
+      setPhoto(url);
+      setPhotoIsUploaded(uploaded);
+    } catch {
+      // Enhanced photo stays as a data: URL locally — Save still works,
+      // just without a Storage upload; matches how a normal photo pick
+      // degrades if the upload step fails.
     }
   };
 
@@ -522,6 +619,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       sku: genSku(category === "Tempered Glass" || category === "Curved Glass" ? "GLS" : category === "Back Covers" ? "CVR" : "ACC"),
       barcode: barcode.trim() || undefined,
       photo,
+      photoIsAiGenerated: photoIsAiGenerated || undefined,
       photos: [photo, photo2].filter(Boolean),
       purchasePrice: purchasePrice || null,
       pendingCost: !purchasePrice,
@@ -536,6 +634,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       supplier: supplier.trim(),
       notes: notes.trim(),
       specifications: specifications.length ? specifications : undefined,
+      featureHighlights: featureHighlights.length ? featureHighlights : undefined,
       compatibleModels,
       screenSizeInches: isScreenAccessory && screenSizeInches ? screenSizeInches : undefined,
       // Step 3.4b: only save a max when it's a real, distinct range (and
@@ -622,7 +721,18 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               onClick={() => fileInputRef.current?.click()}
             >
               {photo ? (
-                <img src={photo} alt="Product" style={{ width: "100%", maxHeight: "260px", objectFit: "contain", borderRadius: "8px" }} />
+                <div style={{ position: "relative" }}>
+                  <img src={photo} alt="Product" style={{ width: "100%", maxHeight: "260px", objectFit: "contain", borderRadius: "8px" }} />
+                  {photoIsAiGenerated && (
+                    <span
+                      className="badge"
+                      style={{ position: "absolute", top: "6px", left: "6px", background: "var(--glow)", color: "#fff" }}
+                      title="Ye AI-generated representative photo hai, exact item ki nahi"
+                    >
+                      <Sparkles size={11} style={{ marginRight: "3px" }} /> AI Photo
+                    </span>
+                  )}
+                </div>
               ) : (
                 <div style={{ padding: "26px 10px" }}>
                   <Upload size={34} style={{ color: "var(--ink-soft)", marginBottom: "8px" }} />
@@ -632,6 +742,20 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                   <button type="button" className="btn primary sm" style={{ marginTop: "12px" }}>
                     <Upload size={14} /> Select / Capture Photo
                   </button>
+                  {(name.trim() || brand.trim()) && (
+                    <button
+                      type="button"
+                      className="btn sm"
+                      style={{ marginTop: "8px" }}
+                      disabled={isGeneratingPhoto}
+                      onClick={(e) => { e.stopPropagation(); void handleGenerateAiPhoto(); }}
+                    >
+                      <Sparkles size={13} /> {isGeneratingPhoto ? "AI photo ban rahi hai…" : "Ya AI se photo banwayein"}
+                    </button>
+                  )}
+                  {aiPhotoError && (
+                    <div className="hint" style={{ color: "var(--red)", marginTop: "6px" }}>{aiPhotoError}</div>
+                  )}
                 </div>
               )}
               <input
@@ -648,6 +772,41 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               <button type="button" className="btn sm" style={{ width: "100%", marginTop: "10px" }} onClick={() => { setSizeManuallyEdited(false); void rescanCurrentPhoto(); }}>
                 <RefreshCw size={13} /> Re-scan with AI
               </button>
+            )}
+
+            {/* Phase 7 — AI photo enhancement (clean background, centered,
+                studio lighting) of the shop's OWN photo. Never auto-applies —
+                shows a before/after so the owner reviews before accepting. */}
+            {photo && !isScanning && !enhancedPhoto && (
+              <button type="button" className="btn sm" style={{ width: "100%", marginTop: "6px" }} disabled={enhanceState.loading} onClick={handleEnhancePhoto}>
+                <Sparkles size={13} /> {enhanceState.loading ? "AI photo saaf kar raha hai..." : "AI Enhance Photo (professional look)"}
+              </button>
+            )}
+            {enhanceState.error && (
+              <div className="hint" style={{ marginTop: "4px", color: "var(--red)" }}>{enhanceState.error}</div>
+            )}
+            {enhancedPhoto && (
+              <div style={{ marginTop: "10px", border: "1px solid var(--line)", borderRadius: "10px", padding: "10px", background: "var(--card)" }}>
+                <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "6px" }}>AI Enhanced Preview — compare karein:</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                  <div>
+                    <div className="hint" style={{ textAlign: "center" }}>Original</div>
+                    <img src={photo} alt="Original" style={{ width: "100%", maxHeight: "140px", objectFit: "contain", borderRadius: "6px" }} />
+                  </div>
+                  <div>
+                    <div className="hint" style={{ textAlign: "center" }}>AI Enhanced</div>
+                    <img src={enhancedPhoto} alt="AI Enhanced" style={{ width: "100%", maxHeight: "140px", objectFit: "contain", borderRadius: "6px", border: "2px solid var(--glow)" }} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                  <button type="button" className="btn primary sm" style={{ flex: 1 }} onClick={applyEnhancedPhoto}>
+                    <CheckCircle2 size={13} /> Enhanced Wala Use Karein
+                  </button>
+                  <button type="button" className="btn sm" style={{ flex: 1 }} onClick={() => setEnhancedPhoto("")}>
+                    Original Rakhein
+                  </button>
+                </div>
+              </div>
             )}
 
             {isScanning && (
@@ -1017,7 +1176,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                     disabled={specsLoading}
                     style={{ display: "flex", alignItems: "center", gap: "4px" }}
                   >
-                    <Sparkles size={13} /> {specsLoading ? "Sochte hain…" : "AI Fill Specifications"}
+                    <Sparkles size={13} /> {specsLoading ? "Sochte hain…" : "AI Fill Specifications & Highlights"}
                   </button>
                 </div>
                 <div className="hint" style={{ marginTop: "2px" }}>
@@ -1058,6 +1217,43 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                   onClick={() => setSpecifications((prev) => [...prev, { label: "", value: "" }])}
                 >
                   <Plus size={12} /> Spec add karein
+                </button>
+              </div>
+
+              <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
+                <div style={{ fontWeight: 700, fontSize: "13px" }}>Feature Highlights</div>
+                <div className="hint" style={{ marginTop: "2px" }}>
+                  Product detail page par dikhne wale chhote, punchy points (jaise Amazon/Flipkart ke "About this item" bullets) —
+                  "AI Fill Specifications" button in dono ko ek saath bharta hai.
+                </div>
+                {featureHighlights.length > 0 && (
+                  <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    {featureHighlights.map((h, i) => (
+                      <div key={i} style={{ display: "flex", gap: "8px", fontSize: "12px" }}>
+                        <input
+                          value={h}
+                          onChange={(e) => setFeatureHighlights((prev) => prev.map((x, xi) => (xi === i ? e.target.value : x)))}
+                          style={{ flex: 1, fontSize: "12px" }}
+                          placeholder="e.g. 6.7-inch AMOLED display"
+                        />
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() => setFeatureHighlights((prev) => prev.filter((_, xi) => xi !== i))}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn sm"
+                  style={{ marginTop: "6px" }}
+                  onClick={() => setFeatureHighlights((prev) => [...prev, ""])}
+                >
+                  <Plus size={12} /> Highlight add karein
                 </button>
               </div>
 

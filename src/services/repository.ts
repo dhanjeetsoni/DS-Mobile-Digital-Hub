@@ -297,6 +297,26 @@ export async function upsertProductCatalog(storeId: string, product: any): Promi
     // existing product — so this can never clobber a stock count that's
     // changed since via a sale/adjustment on another device.
     p_stock_qty: product.stock ?? 0,
+    // 2026-09-09 CRITICAL FIX: this call used to omit p_photos/
+    // p_specifications/p_feature_highlights entirely. That wasn't just
+    // "those three fields never synced" — omitting them meant this exact
+    // call matched TWO different overloads of upsert_product_catalog
+    // equally (the old 26-param one and the new 28/29-param one both had
+    // every remaining parameter covered by a DEFAULT), which Postgres
+    // resolves as a hard error: "function ... is not unique". Verified
+    // directly against the live database. Net effect: EVERY Add/Edit
+    // Product catalog write had been failing outright since the newer
+    // overload was created — not silently skipping the new fields, the
+    // whole call errored, every time, including every offline-queue retry
+    // (same ambiguous call, retried forever, never able to succeed). Fixed
+    // at the DB layer by dropping the stale overload (only one exists now)
+    // — sending these three fields here is required for real going
+    // forward, not just for their own sake.
+    p_photos: Array.isArray(product.photos) && product.photos.length > 0
+      ? product.photos
+      : (product.photo ? [product.photo] : []),
+    p_specifications: product.specifications ?? null,
+    p_feature_highlights: product.featureHighlights ?? null,
   });
   if (error) throw error;
   return data as string;

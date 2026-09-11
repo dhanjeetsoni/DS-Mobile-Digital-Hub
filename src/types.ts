@@ -107,6 +107,12 @@ export interface Product {
   // this exact value auto-fill the product into the POS cart.
   barcode?: string;
   photo: string;
+  // Phase 7: true when `photo` was AI-generated (not a real photo of the
+  // exact physical unit) via ai-product-photo — every display site should
+  // show an "AI photo" badge whenever this is true, rather than presenting
+  // it as an actual photo of the item. Cleared automatically the moment the
+  // owner uploads/scans a real photo over it.
+  photoIsAiGenerated?: boolean;
   // Phase 6 — "AI Photo Scan: support 1 or 2 photos (front/back)". `photo`
   // above stays the single primary/first image (unchanged — every existing
   // display call site that only knows about `photo` keeps working exactly
@@ -147,6 +153,13 @@ export interface Product {
   // Compatibility/etc for an accessory) — optional so every pre-existing
   // product (with no specifications) keeps loading without a migration.
   specifications?: { label: string; value: string }[];
+  // Phase 7: "AI auto-designs the rest of the product page layout (feature
+  // highlights, photo gallery)". Short punchy bullet points for the
+  // product detail page (distinct from `specifications`'s structured
+  // label/value spec sheet — these are marketing-style highlights, e.g.
+  // "6.7-inch AMOLED display", "5000mAh long-lasting battery"). Optional,
+  // same backward-compatible reasoning as specifications above.
+  featureHighlights?: string[];
   compatibleModels: string[];
   // Screen size in inches this accessory (Tempered Glass / Curved Glass /
   // Back Cover) fits. Used as a fallback match when a customer's exact

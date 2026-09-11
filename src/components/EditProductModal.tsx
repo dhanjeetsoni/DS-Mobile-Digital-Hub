@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Lock, Barcode, ShieldCheck, Upload, Sparkles, RefreshCw, AlertCircle, Trash2 } from "lucide-react";
+import { CheckCircle2, Lock, Barcode, ShieldCheck, Upload, Sparkles, RefreshCw, AlertCircle, Trash2, Plus, X } from "lucide-react";
 import { Database, Product } from "../types";
 import { genBarcode } from "../utils/fifoEngine";
 import { compressImageToDataUrl, compressImageForScan } from "../utils/imageCompress";
-import { processAccessoryOcr } from "../utils/aiOcr";
+import { processAccessoryOcr, getProductSpecifications } from "../utils/aiOcr";
 import { ProductThumb } from "./ProductThumb";
 import { uploadProductPhotoOrFallback, deleteProductPhotoByUrl, isStorageUrl } from "../services/photoStorage";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
@@ -50,6 +50,12 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   const [warrantyEnabled, setWarrantyEnabled] = useState(false);
   const [warrantyMonths, setWarrantyMonths] = useState<number>(6);
   const [requireCustomerDetails, setRequireCustomerDetails] = useState(false);
+  // Phase 7 gap fix (2026-09-09): specifications/highlights could only ever
+  // be set when a product was first added (AddProductModal) — there was no
+  // way to edit them afterwards. Same fields, same AI-fill flow, now here too.
+  const [specifications, setSpecifications] = useState<{ label: string; value: string }[]>([]);
+  const [featureHighlights, setFeatureHighlights] = useState<string[]>([]);
+  const [specsLoading, setSpecsLoading] = useState(false);
 
   const [photo, setPhoto] = useState<string>("");
   // Phase 6 — optional second/"back" photo, same pattern as AddProductModal.
@@ -82,6 +88,8 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       setWarrantyEnabled(!!product.warrantyEnabled);
       setWarrantyMonths(product.warrantyMonths || 6);
       setRequireCustomerDetails(!!product.requireCustomerDetails);
+      setSpecifications(product.specifications || []);
+      setFeatureHighlights(product.featureHighlights || []);
       setPhoto(product.photo || "");
       originalPhotoRef.current = product.photo || "";
       setPhoto2((product.photos && product.photos[1]) || "");
@@ -225,6 +233,36 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     );
   }
 
+  // Phase 7 gap fix (2026-09-09): same AI specifications+highlights fill as
+  // AddProductModal, now usable for an existing product too.
+  async function handleSuggestSpecifications() {
+    if (!name.trim() || !category.trim()) {
+      toast("Pehle product name aur category bharein", "amber");
+      return;
+    }
+    setSpecsLoading(true);
+    try {
+      const result = await getProductSpecifications({
+        brand: brand.trim() || undefined,
+        productName: name.trim(),
+        category: category.trim(),
+        compatibleModels: product?.compatibleModels?.length ? product.compatibleModels : undefined,
+      });
+      setSpecifications(result.specifications);
+      setFeatureHighlights(result.featureHighlights);
+      toast(
+        result.confidence === "low"
+          ? "Specifications aur highlights bhar diye — kam confidence hai, check kar lein"
+          : "AI ne specifications aur highlights bhar diye — check kar lein",
+        "green",
+      );
+    } catch (err: any) {
+      toast(err?.message || "AI specifications abhi available nahi hain", "amber");
+    } finally {
+      setSpecsLoading(false);
+    }
+  }
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -267,6 +305,8 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     product.warrantyEnabled = warrantyEnabled;
     product.warrantyMonths = warrantyEnabled ? warrantyMonths : 0;
     product.requireCustomerDetails = warrantyEnabled ? true : requireCustomerDetails;
+    product.specifications = specifications.length ? specifications : undefined;
+    product.featureHighlights = featureHighlights.length ? featureHighlights : undefined;
     product.photo = photo;
     product.photos = [photo, photo2].filter(Boolean);
 
@@ -400,6 +440,89 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             <div className="field">
               <label>Category</label>
               <input value={category} onChange={(e) => setCategory(e.target.value)} />
+            </div>
+
+            <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 700, fontSize: "13px" }}>Specifications</div>
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={handleSuggestSpecifications}
+                  disabled={specsLoading}
+                  style={{ display: "flex", alignItems: "center", gap: "4px" }}
+                >
+                  <Sparkles size={13} /> {specsLoading ? "Sochte hain…" : "AI Fill Specifications & Highlights"}
+                </button>
+              </div>
+              <div className="hint" style={{ marginTop: "2px" }}>
+                Product ka full spec-sheet (Display, RAM, Camera, Battery, waghera ya accessory ke liye Material/Compatibility) —
+                AI apni general knowledge se bharta hai, ye live/confirmed data nahi hai, isliye check kar lein.
+              </div>
+              {specifications.length > 0 && (
+                <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                  {specifications.map((spec, i) => (
+                    <div key={i} style={{ display: "flex", gap: "8px", fontSize: "12px" }}>
+                      <input
+                        value={spec.label}
+                        onChange={(e) => setSpecifications((prev) => prev.map((s, si) => (si === i ? { ...s, label: e.target.value } : s)))}
+                        style={{ flex: "0 0 120px", fontSize: "12px" }}
+                        placeholder="Label"
+                      />
+                      <input
+                        value={spec.value}
+                        onChange={(e) => setSpecifications((prev) => prev.map((s, si) => (si === i ? { ...s, value: e.target.value } : s)))}
+                        style={{ flex: 1, fontSize: "12px" }}
+                        placeholder="Value"
+                      />
+                      <button type="button" className="btn sm" onClick={() => setSpecifications((prev) => prev.filter((_, si) => si !== i))}>
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                className="btn sm"
+                style={{ marginTop: "6px" }}
+                onClick={() => setSpecifications((prev) => [...prev, { label: "", value: "" }])}
+              >
+                <Plus size={12} /> Spec add karein
+              </button>
+            </div>
+
+            <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
+              <div style={{ fontWeight: 700, fontSize: "13px" }}>Feature Highlights</div>
+              <div className="hint" style={{ marginTop: "2px" }}>
+                Product detail page par dikhne wale chhote, punchy points (jaise Amazon/Flipkart ke "About this item" bullets) —
+                "AI Fill Specifications" button in dono ko ek saath bharta hai.
+              </div>
+              {featureHighlights.length > 0 && (
+                <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                  {featureHighlights.map((h, i) => (
+                    <div key={i} style={{ display: "flex", gap: "8px", fontSize: "12px" }}>
+                      <input
+                        value={h}
+                        onChange={(e) => setFeatureHighlights((prev) => prev.map((x, xi) => (xi === i ? e.target.value : x)))}
+                        style={{ flex: 1, fontSize: "12px" }}
+                        placeholder="e.g. 6.7-inch AMOLED display"
+                      />
+                      <button type="button" className="btn sm" onClick={() => setFeatureHighlights((prev) => prev.filter((_, xi) => xi !== i))}>
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                className="btn sm"
+                style={{ marginTop: "6px" }}
+                onClick={() => setFeatureHighlights((prev) => [...prev, ""])}
+              >
+                <Plus size={12} /> Highlight add karein
+              </button>
             </div>
 
             <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>

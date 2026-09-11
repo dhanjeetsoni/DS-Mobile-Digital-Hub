@@ -2688,23 +2688,29 @@ export default function App() {
 
         const filteredProds = catalogProducts.filter((p) => {
           if (stockOf(p) <= 0) return false;
+          // Phase 8: "search currently only searches within whatever
+          // category tab you're already in" -- the category filter used to
+          // run FIRST and exclude a product before the search match below
+          // was even checked, so searching for something outside the
+          // active tab returned nothing at all. Now the category tab only
+          // narrows results when the search box is empty; typing a query
+          // searches across every category, like Amazon/Flipkart.
+          if (sellSearchQuery) {
+            return (
+              naturalMatch(p.name, sellSearchQuery) ||
+              naturalMatch(p.brand, sellSearchQuery) ||
+              naturalMatch(p.category, sellSearchQuery) ||
+              p.sku.toLowerCase().includes(sellSearchQuery.toLowerCase()) ||
+              (p.barcode || "").toLowerCase().includes(sellSearchQuery.toLowerCase()) ||
+              (p.units || []).some((u) => u.imei1.includes(sellSearchQuery.toLowerCase()))
+            );
+          }
           if (sellCategoryFilter !== "ALL") {
             if (sellCategoryFilter === "Cyber & Xerox") {
               if (p.category !== "Cyber & Xerox" && p.category !== "Services") return false;
             } else if (p.category !== sellCategoryFilter) {
               return false;
             }
-          }
-          if (sellSearchQuery) {
-            const q = sellSearchQuery.toLowerCase();
-            return (
-              naturalMatch(p.name, sellSearchQuery) ||
-              naturalMatch(p.brand, sellSearchQuery) ||
-              naturalMatch(p.category, sellSearchQuery) ||
-              p.sku.toLowerCase().includes(q) ||
-              (p.barcode || "").toLowerCase().includes(q) ||
-              (p.units || []).some((u) => u.imei1.includes(q))
-            );
           }
           return true;
         });
@@ -2723,7 +2729,15 @@ export default function App() {
 
               {/* 1-Tap Category Filter Chips */}
               <div className="hscroll-fade" style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "8px", marginBottom: "8px" }}>
-                {CATEGORY_TABS.map((cat) => (
+                {CATEGORY_TABS.map((cat) => {
+                  // While actively searching, results span every category
+                  // (see filteredProds above) -- show "ALL" as the visually
+                  // active tab instead of whichever one was picked before,
+                  // so the highlighted tab never contradicts what's on
+                  // screen. The real sellCategoryFilter is left untouched,
+                  // so clearing the search restores the previous tab.
+                  const displayedFilter = sellSearchQuery ? "ALL" : sellCategoryFilter;
+                  return (
                   <button
                     key={cat.id}
                     onClick={() => setSellCategoryFilter(cat.id)}
@@ -2735,14 +2749,15 @@ export default function App() {
                       border: "1px solid",
                       cursor: "pointer",
                       whiteSpace: "nowrap",
-                      background: sellCategoryFilter === cat.id ? "var(--accent)" : "var(--paper)",
-                      color: sellCategoryFilter === cat.id ? "#ffffff" : "var(--ink)",
-                      borderColor: sellCategoryFilter === cat.id ? "var(--accent)" : "var(--line)",
+                      background: displayedFilter === cat.id ? "var(--accent)" : "var(--paper)",
+                      color: displayedFilter === cat.id ? "#ffffff" : "var(--ink)",
+                      borderColor: displayedFilter === cat.id ? "var(--accent)" : "var(--line)",
                     }}
                   >
                     {cat.label}
                   </button>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="searchbar">

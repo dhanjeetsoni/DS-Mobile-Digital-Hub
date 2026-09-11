@@ -1386,9 +1386,25 @@ actual code, per this document's own ground rule — not assumed or guessed._
     clean. `ai-product-specs` redeployed (v2) with the extension live.
 
 ### ⬜ Phase 8: Real universal search (+ AI search, glass-specific intelligence)
-- [ ] Fix the core bug: search currently only searches *within* whatever
-      category tab you're already in (e.g. Tempered Glass) — must search
-      **all products, all categories, everywhere**, like Amazon/Flipkart
+- [x] **Fix the core bug: search currently only searches *within* whatever
+      category tab you're already in — must search all products, all
+      categories, everywhere, like Amazon/Flipkart — done 2026-09-09.**
+      Found in the Sell screen's product picker (`filteredProds` in
+      `App.tsx`): the category-tab filter ran *before* the search-text
+      match, excluding a product outright if it wasn't in the active tab
+      — so searching for something outside the currently-selected category
+      (e.g. typing a phone name while the "Tempered Glass" tab was active)
+      returned nothing, no matter how good the text match was. Category tab
+      now only narrows results when the search box is empty; a query
+      searches every category. Also made the tab row show "ALL" as
+      visually active while searching (without touching the stored filter)
+      so the highlighted tab never contradicts what's on screen. This was
+      the only place in the app combining a category-tab filter with a
+      search box — the main Product Catalog/Inventory page has no search
+      box of its own yet. Verified: fresh clone + `npm ci` + `tsc --noEmit`
+      + `npm run build` + `vitest` (26/26), all clean; confirmed no other
+      session had touched `App.tsx` in between (local pre-edit blob hash
+      matched GitHub's SHA) before committing.
 - [ ] Add AI-powered search on top of normal keyword search — runs by
       default alongside plain search, not instead of it
 - [ ] Search by phone **model number** must surface matching glass/cases

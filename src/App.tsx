@@ -2719,6 +2719,7 @@ export default function App() {
           // narrows results when the search box is empty; typing a query
           // searches across every category, like Amazon/Flipkart.
           if (sellSearchQuery) {
+            const q = sellSearchQuery.toLowerCase();
             // Phase 8: AI-powered search runs alongside this instant
             // keyword match, not instead of it -- aiSearchMatchIds (from
             // the debounced effect above) is UNIONED in here, catching
@@ -2731,9 +2732,20 @@ export default function App() {
               naturalMatch(p.name, sellSearchQuery) ||
               naturalMatch(p.brand, sellSearchQuery) ||
               naturalMatch(p.category, sellSearchQuery) ||
-              p.sku.toLowerCase().includes(sellSearchQuery.toLowerCase()) ||
-              (p.barcode || "").toLowerCase().includes(sellSearchQuery.toLowerCase()) ||
-              (p.units || []).some((u) => u.imei1.includes(sellSearchQuery.toLowerCase())) ||
+              // Phase 8 fix (2026-09-09): a tempered glass/cover's own
+              // name is usually generic ("Edge to Edge Curved Glass",
+              // brand "Super X") — the actual phone models it fits live
+              // only in compatibleModels, which this search never
+              // checked before. Searching a model number like "Realme 7"
+              // would silently miss every glass/cover tagged for it
+              // unless the model happened to also be in the product's
+              // name. This was the single most-used search box in the
+              // whole app (Sell/POS), so this was the highest-value place
+              // to fix it — ModelSearchView already did this correctly.
+              (p.compatibleModels || []).some((m) => naturalMatch(m, sellSearchQuery)) ||
+              p.sku.toLowerCase().includes(q) ||
+              (p.barcode || "").toLowerCase().includes(q) ||
+              (p.units || []).some((u) => u.imei1.includes(q)) ||
               aiSearchMatchIds.includes(p.id)
             );
           }
@@ -2817,6 +2829,7 @@ export default function App() {
                         naturalMatch(p.name, sellSearchQuery) ||
                         naturalMatch(p.brand, sellSearchQuery) ||
                         naturalMatch(p.category, sellSearchQuery) ||
+                        (p.compatibleModels || []).some((m) => naturalMatch(m, sellSearchQuery)) ||
                         p.sku.toLowerCase().includes(sellSearchQuery.toLowerCase()) ||
                         (p.barcode || "").toLowerCase().includes(sellSearchQuery.toLowerCase())
                       );

@@ -1488,17 +1488,89 @@ actual code, per this document's own ground rule — not assumed or guessed._
       are separate, not-yet-built pieces of this same phase.
       Verified: `tsc --noEmit`, full test suite (26/26), static audit
       (16/16), production build all clean.
-- [ ] Search by phone **model number** must surface matching glass/cases
-      even if the product title doesn't literally contain that model
-- [ ] Clicking a matched model shows **all** compatible glass/cover models
-      for that phone
+- [x] Search by phone **model number** must surface matching glass/cases
+      even if the product title doesn't literally contain that model —
+      **fixed 2026-09-09**. Real bug found in the **most-used search box
+      in the whole app**: the Sell/POS page's own product search (`App.tsx`,
+      `filteredProds`) checked `p.name`/`p.brand`/`p.category` but never
+      `p.compatibleModels` — a generic-named glass ("Edge to Edge Curved
+      Glass", brand "Super X") tagged for "Realme 7" in its
+      `compatibleModels` array would never surface when staff typed
+      "Realme 7" into that search box, exactly the bug described. Fixed by
+      adding a `compatibleModels.some(m => naturalMatch(m, query))` check,
+      same pattern `ModelSearchView.tsx` (a separate, less-used screen)
+      already had correctly. Verified `ModelSearchView.tsx`'s own search
+      already did this right, so it needed no change — only the Sell/POS
+      one had the gap. No other search box in the app does free-text
+      product search (checked every `naturalMatch(` call site). This ran
+      independently of, and is complementary to, the general AI search
+      layer above — this fix means an EXACT model-number match in
+      `compatibleModels` is caught instantly (zero-latency, no AI call
+      needed at all); the AI layer's job is everything beyond an exact
+      match (misspellings, different wording, indirect reasoning).
+  - Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+    production build clean.
+- [x] Clicking a matched model shows **all** compatible glass/cover models
+      for that phone — **built 2026-09-09**. Found the natural home for
+      this: `ModelSearchView.tsx` (the dedicated "Quick Finder" screen)
+      already rendered each product's compatible-models list, but every
+      model name in it was plain, unclickable text joined into one
+      string — a shop assistant searching loosely (e.g. "Realme") could
+      land on a card and notice it also fits "Realme 7", but had no way
+      to actually jump to "show me everything tagged for Realme 7".
+  - Each compatible-model name is now its own clickable chip; clicking
+    one re-runs the same search scoped to that exact model, reusing the
+    existing `filteredItems` matching logic (including the
+    `compatibleModels` check confirmed already correct here) — so every
+    OTHER product (different brand/style) tagged for that model surfaces
+    too, not just the card the click came from. Added a small "Showing N
+    item(s) compatible with X" line so it's clear the search re-scoped.
+  - Deliberately scoped to `ModelSearchView.tsx` only, not the Sell/POS
+    page — Sell/POS's product grid doesn't render per-product compatible-
+    models lists at all (simpler "tap to add to cart" cards), so there
+    was no natural click target there without a larger redesign of that
+    screen; `ModelSearchView` is the actual dedicated screen for
+    model-compatibility browsing and already had everything else this
+    needed.
+  - Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+    production build clean.
 - [ ] When adding a tempered-glass product, AI auto-fetches and
       **permanently saves** the actual screen size of the phone model it's
       for (e.g. Realme 7 → 6.5")
-- [ ] When a search has no exact model match (e.g. "Realme 7 glass" and no
+- [x] **When a search has no exact model match (e.g. "Realme 7 glass" and no
       glass is tagged for that exact model), AI suggests the closest
       size-compatible glass instead, and explains why (e.g. "Realme 7 is
-      6.5\" — this glass is for 6.4\"–6.5\" screens, likely fits")
+      6.5\" — this glass is for 6.4\"–6.5\" screens, likely fits") — done
+      2026-09-10.** The underlying fallback mechanism (AI looks up the
+      typed phone's screen size via `lookupScreenSize()`, then matches
+      against every glass/cover's own `screenSizeInches`/
+      `screenSizeMaxInches` ± a 0.15" tolerance) already existed in
+      `ModelSearchView.tsx` — verified genuinely working, not just assumed
+      from the code. What was missing was the specific ask here: a
+      **per-item** "why" explanation. It only had one generic banner above
+      the whole results grid ("same size ke N items neeche dikhaye gaye
+      hain") with no per-card reasoning.
+  - Added a `sizeFallbackContext` prop to `GlassCoverResultCard`, only
+    populated when the grid is showing size-fallback results (not exact
+    matches) — carries the phone the person actually typed + its
+    AI-looked-up size.
+  - Each such card now shows its own explanation line stating that
+    specific item's real range against that phone's size — e.g. exactly
+    the example in the request, using the item's real
+    `screenSizeInches`/`screenSizeMaxInches` (single value or a genuine
+    range) rather than a made-up number.
+  - Verified: `tsc --noEmit` / `vitest` (26/26) / `npm run build` all
+    clean. Not device-tested (same standing caveat as other UI-only work
+    this session).
+  - **Adjacent item independently reconfirmed true while investigating
+    this** (the "My own addition: phone-model → screen-size reference
+    table" bullet just below, marked `[ ]` at the time) — this table
+    (`phone_screen_size_cache`, `screen_size_cache_v31` migration)
+    already exists and is already wired into exactly this flow
+    (`lookupScreenSize()` → `getScreenSizeFromSupabase()`/
+    `saveScreenSizeToSupabase()` in `aiOcr.ts`/`ai-gateway`) — read
+    directly, not assumed. Leaving that checkbox for whoever's tracking
+    it to mark, since it wasn't this entry's own assigned task.
 - [ ] **My own addition**: build this as a proper searchable **phone-model
       → screen-size** reference table in the database (not just an AI call
       every time), so once a model's size is looked up once, every future
@@ -1647,3 +1719,20 @@ unused table+RPCs (`profile_pins`, `get_own_pin_status`, `set_own_pin`,
 `verify_own_pin`, `reset_staff_pin`) if the owner decides the offline-first
 design is worth keeping the fragility. Not deciding this alone; flagging
 it for whoever picks Phase 2 back up.
+
+**Update 2026-09-09 (later same day) — Confidential Price reveal window
+changed from 5 minutes to 1 minute**, per the owner's explicit ask.
+Changed at the one authoritative source
+(`supabase/functions/telegram-connect/index.ts`'s
+`reveal_expires_at: new Date(Date.now() + 1 * 60_000)`, was `5 * 60_000`)
+plus every place that duration was mentioned in staff/owner-facing text
+(the Telegram approve confirmation + footer, the initial request message,
+`ConfidentialPriceModal`'s pre-request explainer and countdown comment,
+`confidentialPrice.ts`'s doc comment). The separate 30-minute
+*pending-request* timeout (`expire_confidential_price_requests()` — an
+unattended request auto-expiring before the Owner ever responds) is a
+different thing and was correctly left alone; only the *after-approval*
+reveal window changed. Historical entries above describing "5 minutes"
+are left as-is (accurate for what was true when they were written) rather
+than rewritten, per this file's own ground rule about not erasing past
+entries — this note is the record of the change.

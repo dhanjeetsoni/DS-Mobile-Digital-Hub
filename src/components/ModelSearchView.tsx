@@ -111,6 +111,18 @@ export const ModelSearchView: React.FC<ModelSearchViewProps> = ({
     }
   };
 
+  // Phase 8: clicking a compatible-model name (in any result card below)
+  // re-runs this same search scoped to exactly that model — reuses all the
+  // existing filteredItems matching logic, so every other product tagged
+  // for that model (different brand/style) surfaces too, not just the
+  // card the click came from.
+  const handleModelClick = (model: string) => {
+    setSearchQuery(model);
+    setAiScreenSize(0);
+    setAiLookupState("idle");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
     <div className="section">
       <div className="section-head">
@@ -147,6 +159,12 @@ export const ModelSearchView: React.FC<ModelSearchViewProps> = ({
           </button>
         )}
       </div>
+
+      {searchQuery && filteredItems.length > 0 && (
+        <div style={{ fontSize: "12.5px", color: "var(--ink-soft)", marginTop: "-4px", marginBottom: "12px" }}>
+          Showing <b>{filteredItems.length}</b> item(s) compatible with "<b>{searchQuery}</b>"
+        </div>
+      )}
 
       {/* Category Tabs */}
       <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
@@ -236,7 +254,17 @@ export const ModelSearchView: React.FC<ModelSearchViewProps> = ({
           )}
           <div className="grid cols-3" style={{ gap: "14px" }}>
           {(filteredItems.length > 0 ? filteredItems : screenSizeMatches).map((p) => (
-            <GlassCoverResultCard key={p.id} product={p} onAddToCart={onAddToCart} />
+            <GlassCoverResultCard
+              key={p.id}
+              product={p}
+              onAddToCart={onAddToCart}
+              onModelClick={handleModelClick}
+              sizeFallbackContext={
+                filteredItems.length === 0 && aiScreenSize
+                  ? { phoneQuery: searchQuery.trim(), phoneSize: aiScreenSize }
+                  : undefined
+              }
+            />
           ))}
           </div>
         </>
@@ -252,9 +280,17 @@ export const ModelSearchView: React.FC<ModelSearchViewProps> = ({
 interface GlassCoverResultCardProps {
   product: Product;
   onAddToCart: (p: Product) => void;
+  onModelClick: (model: string) => void;
+  // Phase 8: "AI suggests the closest size-compatible glass instead, and
+  // explains why". Only set when this card is being shown as a fallback
+  // (no exact model-tag match, screen-size proximity instead) — carries
+  // what the person actually typed plus the AI-looked-up size, so each
+  // card can state its own specific range against that phone's size
+  // rather than a single generic banner above the whole grid.
+  sizeFallbackContext?: { phoneQuery: string; phoneSize: number };
 }
 
-const GlassCoverResultCard: React.FC<GlassCoverResultCardProps> = ({ product: p, onAddToCart }) => {
+const GlassCoverResultCard: React.FC<GlassCoverResultCardProps> = ({ product: p, onAddToCart, onModelClick, sizeFallbackContext }) => {
   const isGlass = p.category === "Tempered Glass" || p.name.toLowerCase().includes("glass");
   const inStock = p.stock > 0;
   const models = p.compatibleModels || [];
@@ -331,10 +367,42 @@ const GlassCoverResultCard: React.FC<GlassCoverResultCardProps> = ({ product: p,
               </div>
             )}
 
-            <div style={{ fontSize: "11.5px", fontWeight: 600, color: "var(--ink)", marginTop: "4px" }}>
-              {modelsDisplay.visible.length > 0
-                ? modelsDisplay.visible.join(" • ")
-                : <span style={{ fontWeight: 400, color: "var(--ink-soft)" }}>Koi model match nahi hua.</span>}
+            {/* Phase 8: "Clicking a matched model shows all compatible
+                glass/cover models for that phone" — each model name here
+                used to be plain, unclickable text joined into one string.
+                A shop assistant searching loosely (e.g. "Realme") lands on
+                a card like this one and notices it also fits "Realme 7" —
+                clicking that name now re-runs the search scoped to exactly
+                that model, surfacing every OTHER product (different
+                brand/style) also tagged for it, not just this one card. */}
+            <div style={{ fontSize: "11.5px", fontWeight: 600, marginTop: "4px" }}>
+              {modelsDisplay.visible.length > 0 ? (
+                modelsDisplay.visible.map((m, i) => (
+                  <React.Fragment key={m}>
+                    {i > 0 && <span style={{ color: "var(--ink-soft)" }}> • </span>}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onModelClick(m); }}
+                      title={`"${m}" ke liye compatible sab items dekhein`}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        font: "inherit",
+                        fontWeight: 700,
+                        color: "var(--accent)",
+                        cursor: "pointer",
+                        textDecoration: "underline",
+                        textUnderlineOffset: "2px",
+                      }}
+                    >
+                      {m}
+                    </button>
+                  </React.Fragment>
+                ))
+              ) : (
+                <span style={{ fontWeight: 400, color: "var(--ink-soft)" }}>Koi model match nahi hua.</span>
+              )}
             </div>
 
             {modelsDisplay.canExpand && (
@@ -357,6 +425,38 @@ const GlassCoverResultCard: React.FC<GlassCoverResultCardProps> = ({ product: p,
                 Kam Dikhayein
               </button>
             )}
+          </div>
+        )}
+
+        {/* Phase 8: per-item explanation for a screen-size fallback match —
+            e.g. "Realme 7 is 6.5" — this glass is for 6.4"-6.5" screens,
+            likely fits". Only shown when this card wasn't an exact
+            model-tag match; states this item's own real range against the
+            searched phone's AI-looked-up size, not a generic blanket claim. */}
+        {sizeFallbackContext && p.screenSizeInches && (
+          <div
+            style={{
+              fontSize: "11.5px",
+              color: "var(--blue)",
+              background: "var(--blue-light)",
+              marginTop: "8px",
+              padding: "6px 8px",
+              borderRadius: "6px",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "5px",
+            }}
+          >
+            <Sparkles size={12} style={{ marginTop: "1px", flexShrink: 0 }} />
+            <span>
+              {sizeFallbackContext.phoneQuery} is {sizeFallbackContext.phoneSize}" —
+              this {isGlass ? "glass" : "cover"} is for{" "}
+              {p.screenSizeMaxInches && p.screenSizeMaxInches > p.screenSizeInches
+                ? `${p.screenSizeInches}"–${p.screenSizeMaxInches}"`
+                : `${p.screenSizeInches}"`}{" "}
+              screens, likely fits.
+            </span>
           </div>
         )}
 

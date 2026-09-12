@@ -42,7 +42,7 @@ export const ConfidentialPriceModal: React.FC<ConfidentialPriceModalProps> = ({
     };
   }, []);
 
-  // Live countdown once approved, so staff can see the 5-minute reveal
+  // Live countdown once approved, so staff can see the 1-minute reveal
   // window ticking down instead of it silently going stale.
   useEffect(() => {
     if (phase !== "approved" || !revealExpiresAt) return;
@@ -104,7 +104,7 @@ export const ConfidentialPriceModal: React.FC<ConfidentialPriceModalProps> = ({
           <>
             <p className="hint" style={{ marginBottom: "14px" }}>
               Owner ko Telegram par ek request jaayegi — <b>{requesterName}</b> is product ka Confidential Price
-              dekhna chahte hain. Owner approve karega to price sirf 5 minute ke liye dikhega, permanent nahi.
+              dekhna chahte hain. Owner approve karega to price sirf 1 minute ke liye dikhega, permanent nahi.
             </p>
             <div className="modal-actions">
               <button className="btn ghost" onClick={requestClose}>Cancel</button>

@@ -9,7 +9,6 @@
     "core:default",
     "updater:default",
     "process:default",
-    "shell:allow-open",
-    "biometric:default"
+    "shell:allow-open"
   ]
 }

@@ -36,7 +36,16 @@ import { GoogleGenAI } from "npm:@google/genai@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SECRET_KEY") || "";
-const GEMINI_MODEL_IMAGE = Deno.env.get("GEMINI_MODEL_IMAGE") || "gemini-3-pro-image";
+// 2026-09-10: corrected default per a live-tested finding from a parallel
+// session's `ai-product-photo` function (same account/API) — the guessed
+// "gemini-3-pro-image" and "gemini-3.5-flash-image" both 404 (don't exist
+// on this API version yet); "gemini-2.5-flash-image" is the real,
+// reachable model via generateContent() on a plain Gemini API key. Note:
+// that session also found every key in this store's pool returning 429
+// quota-exceeded specifically on this model (image generation sits on a
+// separate, stricter quota than text/vision) — so a "quota"/429 error here
+// is expected until that quota resets or is raised, not a config bug.
+const GEMINI_MODEL_IMAGE = Deno.env.get("GEMINI_MODEL_IMAGE") || "gemini-2.5-flash-image";
 const GEMINI_TIMEOUT_MS = Number(Deno.env.get("GEMINI_TIMEOUT_MS")) || 25_000;
 
 const supabaseAdmin = SUPABASE_URL && SERVICE_ROLE_KEY

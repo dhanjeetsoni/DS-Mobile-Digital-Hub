@@ -9,6 +9,7 @@ import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay"
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
+import { enhanceProductPhoto } from "../services/photoEnhance";
 import { generateProductPhoto } from "../services/phase6";
 
 interface AddProductModalProps {
@@ -80,6 +81,14 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const photoPathIdRef2 = useRef<string>(uid("tmp"));
   const [photo2, setPhoto2] = useState<string>("");
   const [photo2IsUploaded, setPhoto2IsUploaded] = useState(false);
+  // Phase 7 — "AI sources/generates good-quality product photos": AI
+  // *enhancement* of the shop's OWN photo (clean background, centered,
+  // studio lighting), never a copied third-party image. Review-before-
+  // apply, same pattern as the AI price suggestion — the enhanced result
+  // is held here until the owner explicitly accepts it; `photo` itself is
+  // never touched until then.
+  const [enhancedPhoto, setEnhancedPhoto] = useState<string>("");
+  const [enhanceState, setEnhanceState] = useState<{ loading: boolean; error: string }>({ loading: false, error: "" });
   const [isScanning, setIsScanning] = useState(false);
   const [isGeneratingPhoto, setIsGeneratingPhoto] = useState(false);
   const [scanError, setScanError] = useState("");
@@ -273,6 +282,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     setPhoto2("");
     setPhoto2IsUploaded(false);
     photoPathIdRef2.current = uid("tmp");
+    setEnhancedPhoto("");
+    setEnhanceState({ loading: false, error: "" });
     setScanError("");
     setAiApplied(false);
     setName("");
@@ -411,6 +422,51 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       await runScan(imgData);
     } catch (err: any) {
       toast(err?.message || "Photo load nahi ho payi, dobara try karein", "red");
+    }
+  };
+
+  // Phase 7 — AI photo enhancement (clean background, centered, studio
+  // lighting) of the shop's OWN photo. Produces a candidate the owner
+  // reviews side-by-side before it ever touches the real `photo` state.
+  const handleEnhancePhoto = async () => {
+    if (!photo) return;
+    setEnhanceState({ loading: true, error: "" });
+    setEnhancedPhoto("");
+    try {
+      let imgData = photo;
+      if (isStorageUrl(photo)) {
+        const res = await fetch(photo);
+        const blob = await res.blob();
+        imgData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Saved photo load nahi ho payi"));
+          reader.readAsDataURL(blob);
+        });
+      }
+      const result = await enhanceProductPhoto(imgData);
+      setEnhancedPhoto(result);
+      setEnhanceState({ loading: false, error: "" });
+    } catch (err) {
+      setEnhanceState({ loading: false, error: err instanceof Error ? err.message : "AI enhance fail ho gaya." });
+    }
+  };
+
+  const applyEnhancedPhoto = async () => {
+    if (!enhancedPhoto) return;
+    setPhoto(enhancedPhoto);
+    setPhotoIsUploaded(false);
+    setEnhancedPhoto("");
+    try {
+      const blob = await (await fetch(enhancedPhoto)).blob();
+      const file = new File([blob], "enhanced.png", { type: blob.type || "image/png" });
+      const { url, uploaded } = await uploadProductPhotoOrFallback(storeId, photoPathIdRef.current, file);
+      setPhoto(url);
+      setPhotoIsUploaded(uploaded);
+    } catch {
+      // Enhanced photo stays as a data: URL locally — Save still works,
+      // just without a Storage upload; matches how a normal photo pick
+      // degrades if the upload step fails.
     }
   };
 
@@ -716,6 +772,41 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               <button type="button" className="btn sm" style={{ width: "100%", marginTop: "10px" }} onClick={() => { setSizeManuallyEdited(false); void rescanCurrentPhoto(); }}>
                 <RefreshCw size={13} /> Re-scan with AI
               </button>
+            )}
+
+            {/* Phase 7 — AI photo enhancement (clean background, centered,
+                studio lighting) of the shop's OWN photo. Never auto-applies —
+                shows a before/after so the owner reviews before accepting. */}
+            {photo && !isScanning && !enhancedPhoto && (
+              <button type="button" className="btn sm" style={{ width: "100%", marginTop: "6px" }} disabled={enhanceState.loading} onClick={handleEnhancePhoto}>
+                <Sparkles size={13} /> {enhanceState.loading ? "AI photo saaf kar raha hai..." : "AI Enhance Photo (professional look)"}
+              </button>
+            )}
+            {enhanceState.error && (
+              <div className="hint" style={{ marginTop: "4px", color: "var(--red)" }}>{enhanceState.error}</div>
+            )}
+            {enhancedPhoto && (
+              <div style={{ marginTop: "10px", border: "1px solid var(--line)", borderRadius: "10px", padding: "10px", background: "var(--card)" }}>
+                <div style={{ fontWeight: 700, fontSize: "12px", marginBottom: "6px" }}>AI Enhanced Preview — compare karein:</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                  <div>
+                    <div className="hint" style={{ textAlign: "center" }}>Original</div>
+                    <img src={photo} alt="Original" style={{ width: "100%", maxHeight: "140px", objectFit: "contain", borderRadius: "6px" }} />
+                  </div>
+                  <div>
+                    <div className="hint" style={{ textAlign: "center" }}>AI Enhanced</div>
+                    <img src={enhancedPhoto} alt="AI Enhanced" style={{ width: "100%", maxHeight: "140px", objectFit: "contain", borderRadius: "6px", border: "2px solid var(--glow)" }} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                  <button type="button" className="btn primary sm" style={{ flex: 1 }} onClick={applyEnhancedPhoto}>
+                    <CheckCircle2 size={13} /> Enhanced Wala Use Karein
+                  </button>
+                  <button type="button" className="btn sm" style={{ flex: 1 }} onClick={() => setEnhancedPhoto("")}>
+                    Original Rakhein
+                  </button>
+                </div>
+              </div>
             )}
 
             {isScanning && (

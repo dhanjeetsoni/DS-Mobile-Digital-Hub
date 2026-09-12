@@ -342,11 +342,11 @@ Deno.serve(async (req) => {
               await admin.from("confidential_price_requests").update({
                 status: "approved",
                 revealed_price: price,
-                reveal_expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+                reveal_expires_at: new Date(Date.now() + 1 * 60_000).toISOString(),
                 responded_at: new Date().toISOString(),
               }).eq("id", requestId);
-              answerText = "✅ Approve kar diya — staff ko 5 minute ke liye price dikhega.";
-              footer = "\n\n✅ Approved — staff ko ab 5 minute ke liye price dikhega.";
+              answerText = "✅ Approve kar diya — staff ko 1 minute ke liye price dikhega.";
+              footer = "\n\n✅ Approved — staff ko ab 1 minute ke liye price dikhega.";
             }
           }
         }
@@ -464,7 +464,7 @@ Deno.serve(async (req) => {
       if (insertErr) throw insertErr;
 
       const categoryPart = productCategory ? `, Category-${productCategory}` : "";
-      const text = `🔒 Confidential Price Request\n\n"${productName}"${categoryPart} ka Confidential Price dekhna chahta hai: ${requesterName}\n\nApprove karne ke baad staff ko sirf yeh ek price, 5 minute ke liye dikhega — permanent nahi.`;
+      const text = `🔒 Confidential Price Request\n\n"${productName}"${categoryPart} ka Confidential Price dekhna chahta hai: ${requesterName}\n\nApprove karne ke baad staff ko sirf yeh ek price, 1 minute ke liye dikhega — permanent nahi.`;
       let result: { message_id?: number };
       try {
         result = await telegram("sendMessage", {

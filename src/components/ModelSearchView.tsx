@@ -236,7 +236,16 @@ export const ModelSearchView: React.FC<ModelSearchViewProps> = ({
           )}
           <div className="grid cols-3" style={{ gap: "14px" }}>
           {(filteredItems.length > 0 ? filteredItems : screenSizeMatches).map((p) => (
-            <GlassCoverResultCard key={p.id} product={p} onAddToCart={onAddToCart} />
+            <GlassCoverResultCard
+              key={p.id}
+              product={p}
+              onAddToCart={onAddToCart}
+              sizeFallbackContext={
+                filteredItems.length === 0 && aiScreenSize
+                  ? { phoneQuery: searchQuery.trim(), phoneSize: aiScreenSize }
+                  : undefined
+              }
+            />
           ))}
           </div>
         </>
@@ -252,9 +261,16 @@ export const ModelSearchView: React.FC<ModelSearchViewProps> = ({
 interface GlassCoverResultCardProps {
   product: Product;
   onAddToCart: (p: Product) => void;
+  // Phase 8: "AI suggests the closest size-compatible glass instead, and
+  // explains why". Only set when this card is being shown as a fallback
+  // (no exact model-tag match, screen-size proximity instead) — carries
+  // what the person actually typed plus the AI-looked-up size, so each
+  // card can state its own specific range against that phone's size
+  // rather than a single generic banner above the whole grid.
+  sizeFallbackContext?: { phoneQuery: string; phoneSize: number };
 }
 
-const GlassCoverResultCard: React.FC<GlassCoverResultCardProps> = ({ product: p, onAddToCart }) => {
+const GlassCoverResultCard: React.FC<GlassCoverResultCardProps> = ({ product: p, onAddToCart, sizeFallbackContext }) => {
   const isGlass = p.category === "Tempered Glass" || p.name.toLowerCase().includes("glass");
   const inStock = p.stock > 0;
   const models = p.compatibleModels || [];
@@ -357,6 +373,38 @@ const GlassCoverResultCard: React.FC<GlassCoverResultCardProps> = ({ product: p,
                 Kam Dikhayein
               </button>
             )}
+          </div>
+        )}
+
+        {/* Phase 8: per-item explanation for a screen-size fallback match —
+            e.g. "Realme 7 is 6.5" — this glass is for 6.4"-6.5" screens,
+            likely fits". Only shown when this card wasn't an exact
+            model-tag match; states this item's own real range against the
+            searched phone's AI-looked-up size, not a generic blanket claim. */}
+        {sizeFallbackContext && p.screenSizeInches && (
+          <div
+            style={{
+              fontSize: "11.5px",
+              color: "var(--blue)",
+              background: "var(--blue-light)",
+              marginTop: "8px",
+              padding: "6px 8px",
+              borderRadius: "6px",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "5px",
+            }}
+          >
+            <Sparkles size={12} style={{ marginTop: "1px", flexShrink: 0 }} />
+            <span>
+              {sizeFallbackContext.phoneQuery} is {sizeFallbackContext.phoneSize}" —
+              this {isGlass ? "glass" : "cover"} is for{" "}
+              {p.screenSizeMaxInches && p.screenSizeMaxInches > p.screenSizeInches
+                ? `${p.screenSizeInches}"–${p.screenSizeMaxInches}"`
+                : `${p.screenSizeInches}"`}{" "}
+              screens, likely fits.
+            </span>
           </div>
         )}
 

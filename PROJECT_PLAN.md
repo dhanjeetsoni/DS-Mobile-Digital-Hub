@@ -1756,3 +1756,18 @@ reveal window changed. Historical entries above describing "5 minutes"
 are left as-is (accurate for what was true when they were written) rather
 than rewritten, per this file's own ground rule about not erasing past
 entries — this note is the record of the change.
+
+**Deployed 2026-09-10** — the git source change above sat un-deployed for
+a while: the Edge Function deploy tool repeatedly failed with `import map
+path does not exist` (an internal tool bug, reproduced ~8 times across
+different parameter combinations — confirmed via `get_edge_function` that
+the live function genuinely still said "5 minute" after every failed
+attempt, not just a misleading error). Root cause found: the deploy call
+needs `import_map_path` passed explicitly (`"deno.json"`) alongside the
+`deno.json` file itself in `files` — every earlier attempt omitted that
+parameter. `telegram-connect` is now live at version 15 with the real
+code; re-fetched via `get_edge_function` afterward and confirmed every
+"1 minute" string is genuinely present in the live deployed source, not
+assumed from the deploy call succeeding. Worth remembering this
+`import_map_path` requirement for any future Edge Function redeploy in
+this project.

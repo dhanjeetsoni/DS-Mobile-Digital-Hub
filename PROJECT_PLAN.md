@@ -1473,8 +1473,30 @@ actual code, per this document's own ground rule — not assumed or guessed._
       product search (checked every `naturalMatch(` call site).
   - Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
     production build clean.
-- [ ] Clicking a matched model shows **all** compatible glass/cover models
-      for that phone
+- [x] Clicking a matched model shows **all** compatible glass/cover models
+      for that phone — **built 2026-09-09**. Found the natural home for
+      this: `ModelSearchView.tsx` (the dedicated "Quick Finder" screen)
+      already rendered each product's compatible-models list, but every
+      model name in it was plain, unclickable text joined into one
+      string — a shop assistant searching loosely (e.g. "Realme") could
+      land on a card and notice it also fits "Realme 7", but had no way
+      to actually jump to "show me everything tagged for Realme 7".
+  - Each compatible-model name is now its own clickable chip; clicking
+    one re-runs the same search scoped to that exact model, reusing the
+    existing `filteredItems` matching logic (including the
+    `compatibleModels` check confirmed already correct here) — so every
+    OTHER product (different brand/style) tagged for that model surfaces
+    too, not just the card the click came from. Added a small "Showing N
+    item(s) compatible with X" line so it's clear the search re-scoped.
+  - Deliberately scoped to `ModelSearchView.tsx` only, not the Sell/POS
+    page — Sell/POS's product grid doesn't render per-product compatible-
+    models lists at all (simpler "tap to add to cart" cards), so there
+    was no natural click target there without a larger redesign of that
+    screen; `ModelSearchView` is the actual dedicated screen for
+    model-compatibility browsing and already had everything else this
+    needed.
+  - Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+    production build clean.
 - [ ] When adding a tempered-glass product, AI auto-fetches and
       **permanently saves** the actual screen size of the phone model it's
       for (e.g. Realme 7 → 6.5")

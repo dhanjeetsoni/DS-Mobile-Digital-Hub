@@ -1234,22 +1234,42 @@ actual code, per this document's own ground rule — not assumed or guessed._
       the specific physical item in stock. Explicit "Ya AI se photo
       banwayein" button (only once name/brand is filled) — deliberately not
       automatic-on-save, so it never silently burns AI-key quota unasked.
-  - **Live-tested before shipping, found a real limitation**: confirmed
+  - **Live-tested before shipping, found a real limitation — and
+    confirmed definitively 2026-09-12** (a shop owner hit this live and
+    the raw Google error was leaking straight into the UI as an
+    unreadable JSON blob, screenshot showed it). Confirmed
     `gemini-2.5-flash-image` is a real, reachable model via
     `generateContent()` on a plain Gemini API key (`gemini-3.5-flash-image`
     404s — doesn't exist on this API version yet, and an earlier guess of
     `gemini-3-pro-image` for `enhance-product-photo`'s default was wrong
     for the same reason, corrected to match; the Imagen models via
     `generateImages()` are Vertex-AI-only and reject a plain API key
-    outright). **However every key in this store's 9-key pool returned 429
-    quota-exceeded on this specific model** — image generation appears to
-    sit on a separate, much stricter free-tier quota than the text/vision
-    models already working elsewhere in this app. Both tools' code is
-    correct and fails gracefully (never blocks saving the product); could
-    not be verified end-to-end with an actual successful image today. Flag
-    for the owner: worth checking Google AI Studio's billing/quota page
-    for this specific model if this feature needs to work today rather
-    than whenever quota resets.
+    outright).
+    **2026-09-12: this is now confirmed as a hard, permanent free-tier
+    restriction, not a transient/stricter quota that "resets"** — called
+    Google's own API directly (via `pg_net`, bypassing the app entirely)
+    with the exact model already in use, same key pool, and got the
+    identical `429 RESOURCE_EXHAUSTED .../limit: 0` response. A "limit: 0"
+    quota is a hard block, not a rate limit — it will **never** clear up
+    by waiting or retrying, on any image-generation-capable Gemini model,
+    regardless of which one is configured. This only resolves if the
+    Owner enables billing (pay-as-you-go) on the Google AI Studio/Cloud
+    project a key belongs to — a Google account-level change, not
+    something fixable in this app's code.
+  - **UX fix (2026-09-12)**: `enhance-product-photo` previously passed
+    Google's raw error `.message` straight through to the client with no
+    wrapping at all — exactly the unreadable JSON blob a shop owner saw
+    on screen. Both this and `ai-product-photo` (which already had a
+    friendlier but inaccurate "daily limit, try again later" message)
+    now return an accurate, actionable Hinglish message for this specific
+    case explaining the billing requirement plainly, reusing each
+    function's own `classifyGeminiFailure()` (same "quota"/"invalid"/
+    "unavailable" classifier already used everywhere else in this
+    project's AI functions) rather than leaking the raw SDK error.
+    Redeployed both functions live.
+  - Both tools' code is correct and fails gracefully (never blocks saving
+    the product) — this is purely a Google billing-tier gate on the image
+    model itself, confirmed live, not a bug in either function.
   - Verified: `tsc --noEmit`, full test suite (26/26), static audit
     (16/16), production build — all clean.
 - [x] **All product photos permanently stored on Cloudflare R2 (durable,

@@ -161,8 +161,13 @@ product itself IS packaging. Photorealistic, high quality, square-ish compositio
 
   console.error("ai-product-photo: all keys failed", lastError);
   const failure = classifyGeminiFailure(lastError);
+  // 2026-09-12: corrected — live-verified (direct calls to Google's API)
+  // that this is a hard 0-quota free-tier restriction on every image
+  // model, not a transient daily limit. "Try again later" was misleading;
+  // this only resolves by enabling billing on the Google AI Studio/Cloud
+  // project the key belongs to.
   const friendly = failure === "quota"
-    ? "AI photo abhi available nahi hai (daily limit khatam) — thodi der baad try karein ya khud photo upload karein."
+    ? "AI photo generation is API key ke saath kaam nahi kar raha — Google free-tier keys mein photo generation ke liye 0 quota hoti hai (baad mein try karne se theek nahi hoga). Isko chalane ke liye Google AI Studio mein us key par billing enable karni hogi. Filhal khud photo upload karein."
     : "AI photo generate nahi ho paayi — khud photo upload karein.";
   return json({ success: false, error: friendly }, 503);
 });

@@ -294,6 +294,32 @@ Output only the edited photo.`;
   return { mimeType: imgPart.inlineData.mimeType || "image/png", base64Data: imgPart.inlineData.data };
 }
 
+// 2026-09-12: live-verified (via direct calls to Google's own API, not
+// just reading the error text) that this "quota exceeded" is NOT a
+// transient rate limit that clears up if you wait — Google's free tier
+// gives a hard 0 requests/day quota to EVERY image-generation-capable
+// Gemini model (tested gemini-2.5-flash-image itself, the exact model
+// this function already uses, and got the identical 429/limit:0
+// response). This only ever resolves by enabling billing (pay-as-you-go)
+// on the Google AI Studio / Cloud project the key belongs to — no code
+// change or model-name swap fixes it. The raw Google error was
+// previously leaking straight into the UI as an unreadable JSON blob
+// (error.message passed through unwrapped) — this replaces that with an
+// accurate, actionable Hinglish message instead.
+function friendlyPhotoError(err: any): string {
+  const failure = classifyGeminiFailure(err);
+  if (failure === "quota") {
+    return "AI Photo Enhance is API key ke saath kaam nahi kar raha — Google free-tier keys mein photo-editing/generation ke liye 0 quota hoti hai (ye baad mein try karne se theek nahi hoga). Isko chalane ke liye Google AI Studio mein us key par billing (pay-as-you-go) enable karni hogi. Filhal original photo hi use karein.";
+  }
+  if (failure === "unavailable") {
+    return "AI abhi high demand mein hai (Google ki taraf se) — 15-20 second baad ek baar phir try karein.";
+  }
+  if (failure === "invalid") {
+    return "Gemini API key invalid hai ya expire ho gayi hai — Settings mein naya key add karein.";
+  }
+  return err instanceof Error ? err.message : "AI photo enhance fail ho gaya. Original photo rakh sakte hain.";
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
   if (req.method !== "POST") return json({ success: false, error: "Method not allowed." }, 405);
@@ -314,6 +340,6 @@ Deno.serve(async (req: Request) => {
     return json({ success: true, image: `data:${result.mimeType};base64,${result.base64Data}` });
   } catch (error) {
     console.error("enhance-product-photo error", error);
-    return json({ success: false, error: error instanceof Error ? error.message : "AI photo enhance fail ho gaya. Original photo rakh sakte hain." }, 500);
+    return json({ success: false, error: friendlyPhotoError(error) }, 500);
   }
 });

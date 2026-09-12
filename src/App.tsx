@@ -79,6 +79,7 @@ import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
 import { sqliteList } from "./services/localSqlite";
 import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert } from "./services/telegram";
 import { getRepairDiagnosis } from "./services/aiOps";
+import { findAiSearchMatches } from "./services/aiSearch";
 import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./services/whatsapp";
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
 import { celebrate } from "./utils/celebrate";
@@ -699,6 +700,28 @@ export default function App() {
 
   // New Sale POS states
   const [sellSearchQuery, setSellSearchQuery] = useState("");
+  // Phase 8 — AI-powered search, additive on top of the instant keyword
+  // filter below (never instead of it). Debounced separately so typing
+  // itself never waits on a network call; ids here get UNIONED into
+  // filteredProds once they arrive, they never narrow/replace anything the
+  // instant filter already found.
+  const [aiSearchMatchIds, setAiSearchMatchIds] = useState<string[]>([]);
+  useEffect(() => {
+    const query = sellSearchQuery.trim();
+    if (query.length < 2) { setAiSearchMatchIds([]); return; }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const items = catalogProducts
+        .filter((p) => stockOf(p) > 0)
+        .slice(0, 400)
+        .map((p) => ({ id: p.id, name: p.name, brand: p.brand, category: p.category, compatibleModels: p.compatibleModels }));
+      void findAiSearchMatches(query, items).then((ids) => {
+        if (!cancelled) setAiSearchMatchIds(ids);
+      });
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sellSearchQuery]);
   const [sellCategoryFilter, setSellCategoryFilter] = useState<string>("ALL");
   // Step 4.2: the old flat, unconstrained "Discount (₹)" cart field has been
   // removed entirely — there is no manual discount override anywhere in the
@@ -2696,13 +2719,22 @@ export default function App() {
           // narrows results when the search box is empty; typing a query
           // searches across every category, like Amazon/Flipkart.
           if (sellSearchQuery) {
+            // Phase 8: AI-powered search runs alongside this instant
+            // keyword match, not instead of it -- aiSearchMatchIds (from
+            // the debounced effect above) is UNIONED in here, catching
+            // things plain substring matching can't (a phone model number
+            // that only appears in a glass's compatibleModels list, a
+            // misspelling, different wording). If the AI call is still in
+            // flight, slow, or fails, this union just adds nothing and the
+            // instant keyword results stand alone exactly as before.
             return (
               naturalMatch(p.name, sellSearchQuery) ||
               naturalMatch(p.brand, sellSearchQuery) ||
               naturalMatch(p.category, sellSearchQuery) ||
               p.sku.toLowerCase().includes(sellSearchQuery.toLowerCase()) ||
               (p.barcode || "").toLowerCase().includes(sellSearchQuery.toLowerCase()) ||
-              (p.units || []).some((u) => u.imei1.includes(sellSearchQuery.toLowerCase()))
+              (p.units || []).some((u) => u.imei1.includes(sellSearchQuery.toLowerCase())) ||
+              aiSearchMatchIds.includes(p.id)
             );
           }
           if (sellCategoryFilter !== "ALL") {
@@ -2773,10 +2805,30 @@ export default function App() {
                 {filteredProds.length === 0 ? (
                   <div className="empty">No in-stock products found matching query.</div>
                 ) : (
-                  filteredProds.map((p) => (
+                  filteredProds.map((p) => {
+                    // Phase 8: only badge products the AI layer found that
+                    // plain keyword matching alone would have missed --
+                    // keeps the badge meaningful (not shown on every result
+                    // once a query is typed) rather than decorative noise.
+                    const isAiOnlyMatch =
+                      !!sellSearchQuery &&
+                      aiSearchMatchIds.includes(p.id) &&
+                      !(
+                        naturalMatch(p.name, sellSearchQuery) ||
+                        naturalMatch(p.brand, sellSearchQuery) ||
+                        naturalMatch(p.category, sellSearchQuery) ||
+                        p.sku.toLowerCase().includes(sellSearchQuery.toLowerCase()) ||
+                        (p.barcode || "").toLowerCase().includes(sellSearchQuery.toLowerCase())
+                      );
+                    return (
                     <div key={p.id} className="cart-line">
                       <div className="nm">
                         <b>{p.name}</b> <span className="hint">({p.category})</span>
+                        {isAiOnlyMatch && (
+                          <span className="hint" style={{ marginLeft: "6px", color: "var(--glow)", fontWeight: 600 }} title="Keyword se match nahi hua, lekin AI ko lagta hai ye relevant hai (jaise compatible model list mein)">
+                            🤖 AI match
+                          </span>
+                        )}
                         <div className="hint">
                           Stock: <b style={{ color: stockOf(p) <= p.minStock ? "var(--red)" : "inherit" }}>{stockOf(p)}</b> • {inr(p.sellingPrice)}
                           {p.warrantyEnabled ? ` • ${p.warrantyMonths}m Warranty` : ""}
@@ -2797,7 +2849,8 @@ export default function App() {
                         </button>
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

@@ -1454,8 +1454,40 @@ actual code, per this document's own ground rule — not assumed or guessed._
       + `npm run build` + `vitest` (26/26), all clean; confirmed no other
       session had touched `App.tsx` in between (local pre-edit blob hash
       matched GitHub's SHA) before committing.
-- [ ] Add AI-powered search on top of normal keyword search — runs by
-      default alongside plain search, not instead of it
+- [x] **Add AI-powered search on top of normal keyword search — runs by
+      default alongside plain search, not instead of it — done
+      2026-09-10.** New standalone Edge Function `ai-search-match`
+      (deployed live, same key-pool/failover pattern as the other
+      standalone AI functions) reasons over the catalog's actual fields —
+      including `compatibleModels`, which is exactly where a
+      glass/cover-for-a-phone-model match lives even when the accessory's
+      own title doesn't mention that model — to find genuinely relevant
+      products a plain substring match would miss (model numbers,
+      misspellings, different wording).
+      **"Alongside, not instead of" is a real architectural property, not
+      just wording**: the existing instant, zero-latency `filteredProds` +
+      `naturalMatch()` keyword filter in the Sell screen is completely
+      unchanged and still runs on every keystroke with no network call.
+      A separate `useEffect` debounces 500ms after typing stops, calls
+      `findAiSearchMatches()` (`src/services/aiSearch.ts`), and the
+      returned ids are **unioned** into the same filter condition — never
+      used to replace or narrow the instant results. If the AI call is
+      slow, degraded (returns `{success:true, matchedIds:[], degraded:
+      true}` rather than an error), or the whole request fails outright,
+      the instant keyword results are completely unaffected either way —
+      confirmed by the function always returning `success:true` even on
+      an internal failure, and the client wrapper swallowing any exception
+      into an empty array. Products found only via the AI layer get a
+      small "🤖 AI match" badge (only shown when the plain-keyword check
+      would NOT have matched that product, so it's not decorative noise on
+      every result).
+      Scope note: this is the general-purpose AI search layer only — the
+      more specific glass-for-model-with-no-exact-match reasoning, the
+      permanent phone-model → screen-size reference table, and the
+      "closest size-compatible glass" suggestion (the next few items below)
+      are separate, not-yet-built pieces of this same phase.
+      Verified: `tsc --noEmit`, full test suite (26/26), static audit
+      (16/16), production build all clean.
 - [ ] Search by phone **model number** must surface matching glass/cases
       even if the product title doesn't literally contain that model
 - [ ] Clicking a matched model shows **all** compatible glass/cover models

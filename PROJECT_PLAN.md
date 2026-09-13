@@ -1591,12 +1591,32 @@ actual code, per this document's own ground rule — not assumed or guessed._
     `saveScreenSizeToSupabase()` in `aiOcr.ts`/`ai-gateway`) — read
     directly, not assumed. Leaving that checkbox for whoever's tracking
     it to mark, since it wasn't this entry's own assigned task.
-- [ ] **My own addition**: build this as a proper searchable **phone-model
+- [x] **My own addition**: build this as a proper searchable **phone-model
       → screen-size** reference table in the database (not just an AI call
       every time), so once a model's size is looked up once, every future
       search for that model is instant and doesn't re-spend an AI call —
       AI fills gaps in this table over time instead of being asked the same
-      question repeatedly
+      question repeatedly — **independently verified + closed out
+      2026-09-10.** Did not trust the earlier note that this already
+      existed; investigated fresh:
+  - `phone_screen_size_cache` table + `upsert_screen_size_cache` RPC
+    confirmed live, migration genuinely committed to git.
+  - Read `runScreenSizeLookup()` in `ai-gateway/index.ts` directly: checks
+    an in-memory `Map` first, then the Supabase table, and only calls
+    Gemini on a genuine double-miss; a successful AI result is saved back
+    to both caches. Table is deliberately global/shared (not per-store) —
+    a phone's screen size is a fixed physical fact, so every store
+    benefits from a lookup any other store already paid for.
+  - **Strongest evidence — queried the live table, not just the code**:
+    29 real rows already cached (Realme P4 → 6.7", Oppo A55 → 6.5", etc.),
+    with `lookup_count` already incrementing on repeat lookups (Realme P4
+    at 2) — proven working in production already, not just wired.
+  - Found + fixed a real (harmless) duplication while verifying: two
+    near-identical migration files existed for this same table/RPC from
+    two sessions independently reconstructing it at different times.
+    Removed the less-documented duplicate.
+  - Verified after cleanup: `tsc --noEmit` clean, vitest 26/26,
+    static-audit 16/16, production build clean.
 - [ ] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
       should still match "Realme"/"iPhone") since shop staff typing fast
       under pressure will misspell things

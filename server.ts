@@ -859,6 +859,71 @@ app.post("/api/product-photo-search", rateLimit(), async (req, res) => {
   }
 });
 
+async function runGenerateInvoiceRules(
+  storeId: string | null,
+  product: Record<string, unknown>
+): Promise<{ terms: string[]; quote: string } | null> {
+  if (!hasAI()) return null;
+  const prompt = `You are a legal and customer-relations advisor for an Indian mobile phone, electronics & cyber retail shop ("DS Mobile & Digital Hub").
+Based on the product details below, write:
+1. "terms": 2-3 concise, legally protective invoice terms/rules (warranty policy, exchange/return conditions, counter testing, exclusions like liquid/burn/physical damage).
+2. "quote": 1 warm, catchy, customer-facing feel-good quote/line (under 18 words) celebrating their purchase with 1-2 friendly emojis.
+
+Product Details:
+- Name: ${product.name || "N/A"}
+- Category: ${product.category || "N/A"}
+- Brand: ${product.brand || "N/A"}
+- Price: ₹${product.sellingPrice || 0}
+- Warranty: ${product.warrantyEnabled ? `${product.warrantyMonths || 12} Months` : "Tested at counter / standard store policy"}
+- Second Hand: ${product.isSecondHand ? "Yes (Pre-owned)" : "No (Brand New)"}
+- Notes: ${product.notes || "None"}
+
+Respond strictly with valid JSON only in this exact shape, without markdown or extra commentary:
+{
+  "terms": ["term 1", "term 2", "term 3"],
+  "quote": "Short inspirational customer quote"
+}`;
+
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({
+      model: process.env.GEMINI_MODEL || "gemini-3.7-flash",
+      contents: { parts: [{ text: prompt }] },
+      config: { responseMimeType: "application/json" },
+    })
+  );
+
+  const text = (response.text || "").trim();
+  try {
+    const cleaned = text.replace(/^```(json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (parsed && Array.isArray(parsed.terms) && parsed.terms.length > 0) {
+      return {
+        terms: parsed.terms.filter((t: any) => typeof t === "string" && t.trim()),
+        quote: typeof parsed.quote === "string" ? parsed.quote.trim() : "",
+      };
+    }
+  } catch (err) {
+    console.warn("Failed to parse Gemini invoice rules JSON", err);
+  }
+  return null;
+}
+
+app.post("/api/generate-invoice-rules", rateLimit(60_000, 20), async (req, res) => {
+  const ctx = await requireSupabaseUserAndStore(req, res);
+  const storeId = ctx?.storeId || null;
+  try {
+    const product = req.body || {};
+    const result = await runGenerateInvoiceRules(storeId, product);
+    if (result) {
+      return res.json({ success: true, terms: result.terms, quote: result.quote });
+    }
+    return res.status(503).json({ success: false, error: "AI generation unavailable." });
+  } catch (error) {
+    console.error("Generate invoice rules endpoint error", error);
+    res.status(500).json({ success: false, error: "Failed to generate rules." });
+  }
+});
+
 async function start() {
   if (!isProduction) {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
@@ -874,7 +939,7 @@ async function start() {
     if (!res.headersSent) res.status(500).json({ error: "Internal server error." });
   });
 
-  app.listen(PORT, () => console.log(`DS Mobile & Digital Hub running on http://localhost:${PORT}`));
+  app.listen(PORT, "0.0.0.0", () => console.log(`DS Mobile & Digital Hub running on http://0.0.0.0:${PORT}`));
 }
 
 start().catch((error) => {

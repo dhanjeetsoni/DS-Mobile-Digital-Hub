@@ -3,6 +3,7 @@ import { Printer, MessageCircle, RotateCcw, RefreshCw, X, ShieldCheck, Sparkles,
 import { Database, Sale, ReturnRecord, ExchangeRecord } from "../types";
 import { inr, numberToWordsIndian, computeDiscountPercent } from "../utils/indianCurrency";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
+import { resolveInvoiceRules } from "../utils/invoiceRulesEngine";
 import {
   buildEscPosReceipt,
   printViaBluetooth,
@@ -71,6 +72,12 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
 
   if (!sale && !creditNote && !exchange) return null;
 
+  const resolvedInvoiceRules = sale
+    ? resolveInvoiceRules(sale, db)
+    : exchange
+    ? resolveInvoiceRules({ items: exchange.replacementItems }, db)
+    : null;
+
   const handlePrint = () => {
     window.print();
   };
@@ -93,6 +100,8 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
         total: sale.total,
         amountPaid: sale.amountPaid,
         dueAmount: sale.dueAmount,
+        terms: resolvedInvoiceRules?.flatTerms || [],
+        quote: resolvedInvoiceRules?.feelGoodQuote,
       },
       paperWidth
     );
@@ -402,16 +411,34 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
 
                 <div className="invoice-foot-grid">
                   <div className="terms">
-                    <b><ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Terms &amp; Conditions:</b>
-                    <ol>
-                      {(db.settings.invoiceTerms || "")
-                        .split("\n")
-                        .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").trim())
-                        .filter(Boolean)
-                        .map((line, idx) => (
-                          <li key={idx}>{line}</li>
+                    <b><ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Terms &amp; Conditions (Applicable to Items on this Bill):</b>
+                    {resolvedInvoiceRules && resolvedInvoiceRules.groupedRules.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px" }}>
+                        {resolvedInvoiceRules.groupedRules.map((group) => (
+                          <div key={group.categoryKey} style={{ fontSize: "11px", lineHeight: "1.4" }}>
+                            <div style={{ fontWeight: 700, color: "var(--inv-navy)", display: "flex", alignItems: "center", gap: "4px", marginBottom: "2px" }}>
+                              <span>{group.icon}</span>
+                              <span>{group.badge || group.categoryName}:</span>
+                            </div>
+                            <ul style={{ margin: "0 0 2px 14px", padding: 0, listStyleType: "disc" }}>
+                              {group.rules.map((rule, idx) => (
+                                <li key={idx} style={{ marginBottom: "2px", color: "var(--inv-ink)" }}>{rule}</li>
+                              ))}
+                            </ul>
+                          </div>
                         ))}
-                    </ol>
+                      </div>
+                    ) : (
+                      <ol>
+                        {(db.settings.invoiceTerms || "")
+                          .split("\n")
+                          .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").trim())
+                          .filter(Boolean)
+                          .map((line, idx) => (
+                            <li key={idx}>{line}</li>
+                          ))}
+                      </ol>
+                    )}
                   </div>
 
                   {db.settings.upiId && (
@@ -440,7 +467,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 </div>
 
                 <div className="motivational-strip">
-                  <Sparkles size={13} /> {motivationalLineFor(sale.invoiceNo || sale.date)}
+                  <Sparkles size={13} /> {resolvedInvoiceRules?.feelGoodQuote || motivationalLineFor(sale.invoiceNo || sale.date)}
                 </div>
 
                 <p className="inv-footer-msg">

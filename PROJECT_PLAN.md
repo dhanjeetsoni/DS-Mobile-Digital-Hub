@@ -1692,16 +1692,26 @@ _I ran a security scan against the live database while researching Phase 1
       similar RPCs need any additional rate-limiting given they're callable
       directly by any authenticated staff account
 
-### ⬜ Phase 10: Product-specific invoice rules & quotes (AI-driven)
-- [ ] Each product/category (glass, mobile, accessory, repair, etc.) has
+### ✅ Phase 10: Product-specific invoice rules & quotes (AI-driven) — COMPLETED 2026-09-13
+- [x] Each product/category (glass, mobile, accessory, repair, etc.) has
       its **own** terms/rules text (warranty, return policy, etc.)
-- [ ] Invoice shows **only** the rules relevant to what was actually sold
+- [x] Invoice shows **only** the rules relevant to what was actually sold
       on that invoice — not a single generic rules block for everything
-- [ ] Same per-category logic for the customer-facing "quote"/feel-good
+- [x] Same per-category logic for the customer-facing "quote"/feel-good
       line printed on the invoice
-- [ ] AI decides/generates the right rules+quote per product by default,
+- [x] AI decides/generates the right rules+quote per product by default,
       running automatically in the background — no manual selection needed
       unless the owner wants to override
+- [x] Built `src/utils/invoiceRulesEngine.ts` with comprehensive category defaults
+      (`tempered_glass`, `mobile_phones`, `chargers_cables`, `earphones_audio`, `cases_covers`, `smartwatches`, `spare_parts`, `repair_service`, `sim_services`)
+- [x] Implemented Gemini AI endpoint `/api/generate-invoice-rules` and client service
+      `src/services/aiInvoiceRules.ts` with fast offline heuristic fallback
+- [x] Snapshotted `customTerms` & `customQuote` from `Product` -> `CartItem` -> `SaleItem`
+      in `src/App.tsx` ensuring immutable billing history
+- [x] Updated `InvoiceViewerModal.tsx` (A4 format & thermal preview) and `thermalPrinter.ts`
+      (ESC/POS 80mm/58mm printing) with dynamic category badges, relevant terms, and feel-good quotes
+- [x] Added AI-assisted UI card to both `AddProductModal.tsx` and `EditProductModal.tsx`
+- [x] Added Category Rules & Quotes customization inspector in `App.tsx` Settings tab
 
 ### ⬜ Phase 11: Offline catalog download & flexible AI provider keys
 - [ ] A "Download" section: on a fresh login (new device), the owner/staff

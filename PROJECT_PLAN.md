@@ -373,6 +373,38 @@ one concrete item left in the "enabled but unused" column.
 - [x] Staff can change their own PIN (Settings → "My PIN", self-service,
       requires current PIN if one is set); owner/manager can Reset or Clear
       any staff/manager's PIN from the Android Access Area
+- [x] **Real bug found and fixed 2026-09-12**: a shop owner reported "owner
+      password works when I first open the Windows app, but switching from
+      staff mode to owner mode says incorrect". Root cause: `handleGateOwnerSubmit`
+      is shared by three different situations — (1) `gateStage`
+      `"personalPin"`, anyone (staff included) just resuming their own
+      already-unlocked session with their own PIN; (2) `gateStage`
+      `"ownerAuth"` reached with no profile signed in at all, checked
+      against the device-level `ownerPasscode`; (3) a signed-in **staff**
+      member specifically asking for **owner** access mid-session (the
+      "Owner Re-Auth Modal", `isOwnerLoginOpen`). (1) and (3) were both
+      being treated as "a profile is signed in → check `verifyPin`(that
+      profile's own id)" — for (3) that means a staff member's typed
+      "owner password" was being compared against their OWN cached PIN,
+      which can never match (this device never has a cached PIN for the
+      *owner's* profile — that's only ever synced after a real login as
+      that person). A second, compounding bug: the success handler's
+      `setOwnerMode(true)` condition explicitly excluded `role === "staff"`
+      even on a correct match, so owner mode couldn't have activated for a
+      staff session either way. Fixed by keying off *what's actually being
+      asked for* (`gateStage === "ownerAuth" || isOwnerLoginOpen`, i.e.
+      "wants owner access specifically") rather than just "is a profile
+      signed in": a staff member asking for owner access now falls
+      through to the same device `ownerPasscode` check as (2) — the
+      "escape hatch" a standing code comment already described but which
+      was never actually reachable from a staff session before this fix —
+      while (1)'s plain "resume my own session" flow is untouched and
+      still checks the signed-in person's own PIN exactly as before.
+      Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+      production build clean. **Not device-tested** (same standing caveat
+      as the rest of this phase) — the three scenarios above were traced
+      by hand against the actual state variables, not exercised on a real
+      device.
 - [x] 3–4 wrong PIN attempts → lock/warning — reused the existing
       owner-lockout mechanism (2 min lock + Telegram alert), now keyed
       per-profile instead of one shared device counter. (An earlier pass
@@ -1234,22 +1266,42 @@ actual code, per this document's own ground rule — not assumed or guessed._
       the specific physical item in stock. Explicit "Ya AI se photo
       banwayein" button (only once name/brand is filled) — deliberately not
       automatic-on-save, so it never silently burns AI-key quota unasked.
-  - **Live-tested before shipping, found a real limitation**: confirmed
+  - **Live-tested before shipping, found a real limitation — and
+    confirmed definitively 2026-09-12** (a shop owner hit this live and
+    the raw Google error was leaking straight into the UI as an
+    unreadable JSON blob, screenshot showed it). Confirmed
     `gemini-2.5-flash-image` is a real, reachable model via
     `generateContent()` on a plain Gemini API key (`gemini-3.5-flash-image`
     404s — doesn't exist on this API version yet, and an earlier guess of
     `gemini-3-pro-image` for `enhance-product-photo`'s default was wrong
     for the same reason, corrected to match; the Imagen models via
     `generateImages()` are Vertex-AI-only and reject a plain API key
-    outright). **However every key in this store's 9-key pool returned 429
-    quota-exceeded on this specific model** — image generation appears to
-    sit on a separate, much stricter free-tier quota than the text/vision
-    models already working elsewhere in this app. Both tools' code is
-    correct and fails gracefully (never blocks saving the product); could
-    not be verified end-to-end with an actual successful image today. Flag
-    for the owner: worth checking Google AI Studio's billing/quota page
-    for this specific model if this feature needs to work today rather
-    than whenever quota resets.
+    outright).
+    **2026-09-12: this is now confirmed as a hard, permanent free-tier
+    restriction, not a transient/stricter quota that "resets"** — called
+    Google's own API directly (via `pg_net`, bypassing the app entirely)
+    with the exact model already in use, same key pool, and got the
+    identical `429 RESOURCE_EXHAUSTED .../limit: 0` response. A "limit: 0"
+    quota is a hard block, not a rate limit — it will **never** clear up
+    by waiting or retrying, on any image-generation-capable Gemini model,
+    regardless of which one is configured. This only resolves if the
+    Owner enables billing (pay-as-you-go) on the Google AI Studio/Cloud
+    project a key belongs to — a Google account-level change, not
+    something fixable in this app's code.
+  - **UX fix (2026-09-12)**: `enhance-product-photo` previously passed
+    Google's raw error `.message` straight through to the client with no
+    wrapping at all — exactly the unreadable JSON blob a shop owner saw
+    on screen. Both this and `ai-product-photo` (which already had a
+    friendlier but inaccurate "daily limit, try again later" message)
+    now return an accurate, actionable Hinglish message for this specific
+    case explaining the billing requirement plainly, reusing each
+    function's own `classifyGeminiFailure()` (same "quota"/"invalid"/
+    "unavailable" classifier already used everywhere else in this
+    project's AI functions) rather than leaking the raw SDK error.
+    Redeployed both functions live.
+  - Both tools' code is correct and fails gracefully (never blocks saving
+    the product) — this is purely a Google billing-tier gate on the image
+    model itself, confirmed live, not a bug in either function.
   - Verified: `tsc --noEmit`, full test suite (26/26), static audit
     (16/16), production build — all clean.
 - [x] **All product photos permanently stored on Cloudflare R2 (durable,
@@ -1454,8 +1506,40 @@ actual code, per this document's own ground rule — not assumed or guessed._
       + `npm run build` + `vitest` (26/26), all clean; confirmed no other
       session had touched `App.tsx` in between (local pre-edit blob hash
       matched GitHub's SHA) before committing.
-- [ ] Add AI-powered search on top of normal keyword search — runs by
-      default alongside plain search, not instead of it
+- [x] **Add AI-powered search on top of normal keyword search — runs by
+      default alongside plain search, not instead of it — done
+      2026-09-10.** New standalone Edge Function `ai-search-match`
+      (deployed live, same key-pool/failover pattern as the other
+      standalone AI functions) reasons over the catalog's actual fields —
+      including `compatibleModels`, which is exactly where a
+      glass/cover-for-a-phone-model match lives even when the accessory's
+      own title doesn't mention that model — to find genuinely relevant
+      products a plain substring match would miss (model numbers,
+      misspellings, different wording).
+      **"Alongside, not instead of" is a real architectural property, not
+      just wording**: the existing instant, zero-latency `filteredProds` +
+      `naturalMatch()` keyword filter in the Sell screen is completely
+      unchanged and still runs on every keystroke with no network call.
+      A separate `useEffect` debounces 500ms after typing stops, calls
+      `findAiSearchMatches()` (`src/services/aiSearch.ts`), and the
+      returned ids are **unioned** into the same filter condition — never
+      used to replace or narrow the instant results. If the AI call is
+      slow, degraded (returns `{success:true, matchedIds:[], degraded:
+      true}` rather than an error), or the whole request fails outright,
+      the instant keyword results are completely unaffected either way —
+      confirmed by the function always returning `success:true` even on
+      an internal failure, and the client wrapper swallowing any exception
+      into an empty array. Products found only via the AI layer get a
+      small "🤖 AI match" badge (only shown when the plain-keyword check
+      would NOT have matched that product, so it's not decorative noise on
+      every result).
+      Scope note: this is the general-purpose AI search layer only — the
+      more specific glass-for-model-with-no-exact-match reasoning, the
+      permanent phone-model → screen-size reference table, and the
+      "closest size-compatible glass" suggestion (the next few items below)
+      are separate, not-yet-built pieces of this same phase.
+      Verified: `tsc --noEmit`, full test suite (26/26), static audit
+      (16/16), production build all clean.
 - [x] Search by phone **model number** must surface matching glass/cases
       even if the product title doesn't literally contain that model —
       **fixed 2026-09-09**. Real bug found in the **most-used search box
@@ -1470,11 +1554,38 @@ actual code, per this document's own ground rule — not assumed or guessed._
       already had correctly. Verified `ModelSearchView.tsx`'s own search
       already did this right, so it needed no change — only the Sell/POS
       one had the gap. No other search box in the app does free-text
-      product search (checked every `naturalMatch(` call site).
+      product search (checked every `naturalMatch(` call site). This ran
+      independently of, and is complementary to, the general AI search
+      layer above — this fix means an EXACT model-number match in
+      `compatibleModels` is caught instantly (zero-latency, no AI call
+      needed at all); the AI layer's job is everything beyond an exact
+      match (misspellings, different wording, indirect reasoning).
   - Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
     production build clean.
-- [ ] Clicking a matched model shows **all** compatible glass/cover models
-      for that phone
+- [x] Clicking a matched model shows **all** compatible glass/cover models
+      for that phone — **built 2026-09-09**. Found the natural home for
+      this: `ModelSearchView.tsx` (the dedicated "Quick Finder" screen)
+      already rendered each product's compatible-models list, but every
+      model name in it was plain, unclickable text joined into one
+      string — a shop assistant searching loosely (e.g. "Realme") could
+      land on a card and notice it also fits "Realme 7", but had no way
+      to actually jump to "show me everything tagged for Realme 7".
+  - Each compatible-model name is now its own clickable chip; clicking
+    one re-runs the same search scoped to that exact model, reusing the
+    existing `filteredItems` matching logic (including the
+    `compatibleModels` check confirmed already correct here) — so every
+    OTHER product (different brand/style) tagged for that model surfaces
+    too, not just the card the click came from. Added a small "Showing N
+    item(s) compatible with X" line so it's clear the search re-scoped.
+  - Deliberately scoped to `ModelSearchView.tsx` only, not the Sell/POS
+    page — Sell/POS's product grid doesn't render per-product compatible-
+    models lists at all (simpler "tap to add to cart" cards), so there
+    was no natural click target there without a larger redesign of that
+    screen; `ModelSearchView` is the actual dedicated screen for
+    model-compatibility browsing and already had everything else this
+    needed.
+  - Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+    production build clean.
 - [ ] When adding a tempered-glass product, AI auto-fetches and
       **permanently saves** the actual screen size of the phone model it's
       for (e.g. Realme 7 → 6.5")
@@ -1512,12 +1623,32 @@ actual code, per this document's own ground rule — not assumed or guessed._
     `saveScreenSizeToSupabase()` in `aiOcr.ts`/`ai-gateway`) — read
     directly, not assumed. Leaving that checkbox for whoever's tracking
     it to mark, since it wasn't this entry's own assigned task.
-- [ ] **My own addition**: build this as a proper searchable **phone-model
+- [x] **My own addition**: build this as a proper searchable **phone-model
       → screen-size** reference table in the database (not just an AI call
       every time), so once a model's size is looked up once, every future
       search for that model is instant and doesn't re-spend an AI call —
       AI fills gaps in this table over time instead of being asked the same
-      question repeatedly
+      question repeatedly — **independently verified + closed out
+      2026-09-10.** Did not trust the earlier note that this already
+      existed; investigated fresh:
+  - `phone_screen_size_cache` table + `upsert_screen_size_cache` RPC
+    confirmed live, migration genuinely committed to git.
+  - Read `runScreenSizeLookup()` in `ai-gateway/index.ts` directly: checks
+    an in-memory `Map` first, then the Supabase table, and only calls
+    Gemini on a genuine double-miss; a successful AI result is saved back
+    to both caches. Table is deliberately global/shared (not per-store) —
+    a phone's screen size is a fixed physical fact, so every store
+    benefits from a lookup any other store already paid for.
+  - **Strongest evidence — queried the live table, not just the code**:
+    29 real rows already cached (Realme P4 → 6.7", Oppo A55 → 6.5", etc.),
+    with `lookup_count` already incrementing on repeat lookups (Realme P4
+    at 2) — proven working in production already, not just wired.
+  - Found + fixed a real (harmless) duplication while verifying: two
+    near-identical migration files existed for this same table/RPC from
+    two sessions independently reconstructing it at different times.
+    Removed the less-documented duplicate.
+  - Verified after cleanup: `tsc --noEmit` clean, vitest 26/26,
+    static-audit 16/16, production build clean.
 - [ ] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
       should still match "Realme"/"iPhone") since shop staff typing fast
       under pressure will misspell things
@@ -1531,15 +1662,29 @@ actual code, per this document's own ground rule — not assumed or guessed._
 ### ⬜ Phase 9: Security hardening (found via a live audit, 2026-09-06)
 _I ran a security scan against the live database while researching Phase 1
 — found a few real gaps worth closing, not asked for but worth doing:_
-- [ ] Several money-moving functions (`save_store_state`, `record_return`,
+- [x] **Several money-moving functions (`save_store_state`, `record_return`,
       `record_exchange`, `record_customer_payment`, `record_supplier_payment`,
       `upsert_customer`, `upsert_supplier`, `enqueue_invoice_telegram`,
-      `handle_new_user`) are currently callable by **`anon`** — meaning a
-      request that isn't even logged in can attempt to call them. Each one
-      does check the caller's role internally before doing anything, so
-      this hasn't been exploited, but it's needless exposed surface area
-      that should be locked down to `authenticated` only, as defence in
-      depth
+      `handle_new_user`) are currently callable by `anon` — done 2026-09-09.**
+      `REVOKE EXECUTE ... FROM anon` alone did nothing — verified with
+      `has_function_privilege('anon', ...)` still returning true after that
+      first attempt, traced it to PostgreSQL's default `GRANT EXECUTE ON
+      FUNCTION ... TO PUBLIC` (every role, including `anon`, implicitly
+      inherits PUBLIC's privileges). Corrected to `REVOKE ... FROM PUBLIC`
+      + explicit `GRANT ... TO authenticated, service_role`. That in turn
+      caught a real regression before it shipped: `handle_new_user()` fires
+      via the `on_auth_user_created` trigger on `auth.users`, whose INSERT
+      is performed by `supabase_auth_admin` — not authenticated/service_role
+      — so the PUBLIC revoke would have silently broken every new user
+      signup. Caught by checking
+      `has_function_privilege('supabase_auth_admin', ...)` directly (it had
+      gone to `false`) rather than assuming the fix was complete, and
+      granted that role execute specifically. Verified `enqueue_invoice_telegram`'s
+      own trigger (on `invoices`) is only ever fired by
+      authenticated/service_role inserts, so no similar gap there.
+      Re-verified final state directly: `anon` → false, `authenticated` →
+      true, `service_role` → true, `supabase_auth_admin` → true, for all
+      11 function signatures (two of the payment functions are overloaded).
 - [ ] Enable Supabase Auth's **leaked-password protection** (checks new
       passwords against known breached-password lists) — currently off,
       one toggle to turn on
@@ -1547,16 +1692,26 @@ _I ran a security scan against the live database while researching Phase 1
       similar RPCs need any additional rate-limiting given they're callable
       directly by any authenticated staff account
 
-### ⬜ Phase 10: Product-specific invoice rules & quotes (AI-driven)
-- [ ] Each product/category (glass, mobile, accessory, repair, etc.) has
+### ✅ Phase 10: Product-specific invoice rules & quotes (AI-driven) — COMPLETED 2026-09-13
+- [x] Each product/category (glass, mobile, accessory, repair, etc.) has
       its **own** terms/rules text (warranty, return policy, etc.)
-- [ ] Invoice shows **only** the rules relevant to what was actually sold
+- [x] Invoice shows **only** the rules relevant to what was actually sold
       on that invoice — not a single generic rules block for everything
-- [ ] Same per-category logic for the customer-facing "quote"/feel-good
+- [x] Same per-category logic for the customer-facing "quote"/feel-good
       line printed on the invoice
-- [ ] AI decides/generates the right rules+quote per product by default,
+- [x] AI decides/generates the right rules+quote per product by default,
       running automatically in the background — no manual selection needed
       unless the owner wants to override
+- [x] Built `src/utils/invoiceRulesEngine.ts` with comprehensive category defaults
+      (`tempered_glass`, `mobile_phones`, `chargers_cables`, `earphones_audio`, `cases_covers`, `smartwatches`, `spare_parts`, `repair_service`, `sim_services`)
+- [x] Implemented Gemini AI endpoint `/api/generate-invoice-rules` and client service
+      `src/services/aiInvoiceRules.ts` with fast offline heuristic fallback
+- [x] Snapshotted `customTerms` & `customQuote` from `Product` -> `CartItem` -> `SaleItem`
+      in `src/App.tsx` ensuring immutable billing history
+- [x] Updated `InvoiceViewerModal.tsx` (A4 format & thermal preview) and `thermalPrinter.ts`
+      (ESC/POS 80mm/58mm printing) with dynamic category badges, relevant terms, and feel-good quotes
+- [x] Added AI-assisted UI card to both `AddProductModal.tsx` and `EditProductModal.tsx`
+- [x] Added Category Rules & Quotes customization inspector in `App.tsx` Settings tab
 
 ### ⬜ Phase 11: Offline catalog download & flexible AI provider keys
 - [ ] A "Download" section: on a fresh login (new device), the owner/staff
@@ -1677,3 +1832,18 @@ reveal window changed. Historical entries above describing "5 minutes"
 are left as-is (accurate for what was true when they were written) rather
 than rewritten, per this file's own ground rule about not erasing past
 entries — this note is the record of the change.
+
+**Deployed 2026-09-10** — the git source change above sat un-deployed for
+a while: the Edge Function deploy tool repeatedly failed with `import map
+path does not exist` (an internal tool bug, reproduced ~8 times across
+different parameter combinations — confirmed via `get_edge_function` that
+the live function genuinely still said "5 minute" after every failed
+attempt, not just a misleading error). Root cause found: the deploy call
+needs `import_map_path` passed explicitly (`"deno.json"`) alongside the
+`deno.json` file itself in `files` — every earlier attempt omitted that
+parameter. `telegram-connect` is now live at version 15 with the real
+code; re-fetched via `get_edge_function` afterward and confirmed every
+"1 minute" string is genuinely present in the live deployed source, not
+assumed from the deploy call succeeding. Worth remembering this
+`import_map_path` requirement for any future Edge Function redeploy in
+this project.

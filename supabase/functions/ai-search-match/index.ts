@@ -1,52 +1,46 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { GoogleGenAI } from "npm:@google/genai@2";
+import { GoogleGenAI, Type } from "npm:@google/genai@2";
 
 // ---------------------------------------------------------------------------
-// enhance-product-photo — Supabase Edge Function (Phase 7: "AI sources/
-// generates good-quality product photos automatically").
+// ai-search-match — Supabase Edge Function (Phase 8: "Add AI-powered search
+// on top of normal keyword search — runs by default alongside plain
+// search, not instead of it").
 //
-// IMPORTANT SCOPE NOTE: this does NOT source real photos from Amazon/
-// Flipkart/anywhere else — reproducing another retailer's copyrighted
-// product photography into this shop's own commercial catalog (shown to
-// customers via invoices, WhatsApp, etc.) would be a real copyright
-// problem, not something to build regardless of how it's asked for. What
-// this DOES do: takes the shop's OWN uploaded photo and asks a Gemini
-// image-generation-capable model to clean it up into an e-commerce-style
-// shot — white/neutral background, product centered and well-lit, junk/
-// clutter removed — the same *source* product, not a different or
-// invented one. If the model can't do this reliably it fails loudly with
-// a clear error; it never silently returns something misleading.
+// SCOPE: this is deliberately an ADDITIVE layer, not a replacement. The
+// existing instant, zero-latency client-side filter (App.tsx's
+// `filteredProds` + `naturalMatch()`) stays exactly as it is — every
+// keystroke still filters instantly with no network call. This function is
+// called separately, debounced, after the shop pauses typing, and its
+// results get UNIONED onto the instant results (never used to replace or
+// narrow them) — see src/services/aiSearch.ts and its call site for the
+// merge logic.
 //
-// Same multi-key failover/rate-limit/auth pattern as the other AI Edge
-// Functions in this project (ai-gateway, ai-price-advisor) — duplicated
-// rather than shared, matching how every function here is self-contained.
+// WHY THIS EXISTS: the plain keyword filter (name/brand/category/SKU/
+// barcode substring + a small hardcoded Hindi colour-word list) can't
+// catch a search that requires actual understanding — a customer typing a
+// phone MODEL NUMBER to find a compatible glass/cover whose own title
+// doesn't literally contain that model name, a misspelling, a category
+// description in different words ("cover" vs "back case"), etc. This
+// function reasons over the catalog's actual fields (including
+// compatibleModels, which is exactly where glass/cover-for-a-phone-model
+// matches live) instead of pure substring matching.
 //
-// Model name is env-configurable (GEMINI_MODEL_IMAGE) specifically because
-// image-generation model names change faster than text/vision ones and
-// this is genuinely the one part of this feature that needs a live check
-// against the real API to confirm — if the default is wrong for whatever
-// account/region this runs under, the Owner can override it in Settings/
-// Supabase env without a code change, and every call site here degrades
-// to a clear "AI enhance failed, try again or keep the original photo"
-// rather than corrupting or losing the original photo either way (the
-// original is never touched/deleted by this function — it only ever
-// returns a NEW image for the client to preview and optionally accept).
+// Deliberately conservative: only returns product IDs that are ACTUALLY
+// present in the list given — never invents a product, never returns an ID
+// not in the input. If nothing matches beyond what plain search already
+// found, returns an empty list rather than force a result.
+//
+// Same multi-key failover/rate-limit/auth pattern as the other standalone
+// AI Edge Functions in this project.
 // ---------------------------------------------------------------------------
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SECRET_KEY") || "";
-// 2026-09-10: corrected default per a live-tested finding from a parallel
-// session's `ai-product-photo` function (same account/API) — the guessed
-// "gemini-3-pro-image" and "gemini-3.5-flash-image" both 404 (don't exist
-// on this API version yet); "gemini-2.5-flash-image" is the real,
-// reachable model via generateContent() on a plain Gemini API key. Note:
-// that session also found every key in this store's pool returning 429
-// quota-exceeded specifically on this model (image generation sits on a
-// separate, stricter quota than text/vision) — so a "quota"/429 error here
-// is expected until that quota resets or is raised, not a config bug.
-const GEMINI_MODEL_IMAGE = Deno.env.get("GEMINI_MODEL_IMAGE") || "gemini-2.5-flash-image";
-const GEMINI_TIMEOUT_MS = Number(Deno.env.get("GEMINI_TIMEOUT_MS")) || 25_000;
+const GEMINI_MODEL_TEXT = Deno.env.get("GEMINI_MODEL_TEXT") || "gemini-3.5-flash-lite";
+const GEMINI_TIMEOUT_MS = Number(Deno.env.get("GEMINI_TIMEOUT_MS")) || 12_000;
+// No thinkingConfig here at all (see the Phase 5 root-cause note in
+// ai-gateway/index.ts — gemini-3.5-flash-lite hard-rejects that param).
 
 const supabaseAdmin = SUPABASE_URL && SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } })
@@ -74,7 +68,7 @@ function callWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 const rateMap = new Map<string, { count: number; resetAt: number }>();
 let lastRateMapSweep = 0;
-function checkRateLimit(key: string, windowMs = 60_000, max = 10): boolean {
+function checkRateLimit(key: string, windowMs = 60_000, max = 30): boolean {
   const now = Date.now();
   if (now - lastRateMapSweep > 60_000) {
     lastRateMapSweep = now;
@@ -93,9 +87,6 @@ function clientIp(req: Request): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("cf-connecting-ip") || "unknown";
 }
 
-// --- Multi-key Gemini failover pool (kept in sync with ai-gateway/index.ts
-// and ai-price-advisor/index.ts — see ai-gateway/index.ts for the full
-// original writeup) ---
 const ENV_POOL_ID = "__env__";
 const ENV_GEMINI_KEYS: string[] = (() => {
   const keys: string[] = [];
@@ -193,39 +184,34 @@ function hasAI(): boolean {
   return ENV_GEMINI_KEYS.length > 0 || Boolean(supabaseAdmin);
 }
 
-const FAILOVER_TIME_BUDGET_MS = 27_000;
+// Kept short — this must never make the search experience feel slow. If
+// the whole pool is struggling, better to fail fast and let the instant
+// keyword results stand alone than to keep the shop waiting.
+const FAILOVER_TIME_BUDGET_MS = 10_000;
 
 async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
   const poolId = storeId && supabaseAdmin ? storeId : ENV_POOL_ID;
   const keys = await loadKeyPool(storeId);
-  if (keys.length === 0) throw new Error("AI unavailable — no Gemini API keys configured. Owner: add keys in Settings.");
+  if (keys.length === 0) throw new Error("AI unavailable");
 
   const startedAt = Date.now();
   let activeIdx = activeKeyIndexByPool.get(poolId) || 0;
   let lastError: any = null;
-  let anyUnavailable = false;
 
-  for (let pass = 0; pass < 2; pass++) {
-    if (pass === 1) {
-      if (!anyUnavailable) break;
-      await new Promise((r) => setTimeout(r, 1500));
-    }
-    for (let attempt = 0; attempt < keys.length; attempt++) {
-      if (Date.now() - startedAt > FAILOVER_TIME_BUDGET_MS) {
-        throw lastError || new Error("AI busy hai (high demand) — thodi der mein dobara try karein.");
-      }
-      const idx = (activeIdx + attempt) % keys.length;
-      const entry = keys[idx];
-      try {
-        const result = await callWithTimeout(fn(clientForKey(entry.apiKey)), GEMINI_TIMEOUT_MS);
-        activeKeyIndexByPool.set(poolId, idx);
-        void markKeyResult(storeId, entry.slot, true);
-        return result;
-      } catch (err) {
-        lastError = err;
-        const failure = classifyGeminiFailure(err);
-        if (!failure) throw err;
-        if (failure === "unavailable") { anyUnavailable = true; continue; }
+  for (let attempt = 0; attempt < keys.length; attempt++) {
+    if (Date.now() - startedAt > FAILOVER_TIME_BUDGET_MS) throw lastError || new Error("AI search timed out");
+    const idx = (activeIdx + attempt) % keys.length;
+    const entry = keys[idx];
+    try {
+      const result = await callWithTimeout(fn(clientForKey(entry.apiKey)), GEMINI_TIMEOUT_MS);
+      activeKeyIndexByPool.set(poolId, idx);
+      void markKeyResult(storeId, entry.slot, true);
+      return result;
+    } catch (err) {
+      lastError = err;
+      const failure = classifyGeminiFailure(err);
+      if (!failure) throw err;
+      if (failure !== "unavailable") {
         void markKeyResult(storeId, entry.slot, false, (err as any)?.message || String(err), failure === "invalid" ? "invalid" : "exhausted");
       }
     }
@@ -250,74 +236,53 @@ async function requireUserAndStore(req: Request): Promise<{ userId: string; stor
   return { userId: data.user.id, storeId };
 }
 
-function decodeImage(image: unknown): { mimeType: string; base64Data: string } | null {
-  if (!image || typeof image !== "string") return null;
-  if (image.length > 14_000_000) return null;
-  let mimeType = "image/jpeg";
-  let base64Data = image;
-  if (image.startsWith("data:")) {
-    const parts = image.split(";base64,");
-    mimeType = parts[0].replace("data:", "") || mimeType;
-    base64Data = parts[1] || "";
-  }
-  if (!/^image\/(jpeg|png|webp|jpg)$/i.test(mimeType)) return null;
-  return { mimeType, base64Data };
+interface CatalogItem {
+  id: string;
+  name: string;
+  brand?: string;
+  category?: string;
+  compatibleModels?: string[];
 }
 
-async function runPhotoEnhance(storeId: string | null, base64Data: string, mimeType: string): Promise<{ mimeType: string; base64Data: string }> {
-  if (!hasAI()) throw new Error("AI unavailable");
-  // Deliberately conservative prompt: same product, same angle/framing —
-  // only background/lighting/cleanup change. Never asked to "improve",
-  // "upscale detail", or otherwise invent visual information that wasn't
-  // in the source photo, since this is a real product a real customer is
-  // buying, not illustrative art.
-  const prompt = `Edit this exact product photo for an e-commerce catalog listing, in the style of a
-professional Amazon/Flipkart product shot. Keep the SAME product, SAME angle, and SAME physical details
-visible in the photo — do not add, remove, or change any feature of the product itself, and do not invent
-detail that isn't visible in the source image. Only change:
-- Replace the background with a clean, plain white/light-neutral studio background.
-- Center the product with balanced margins.
-- Even, bright, shadow-free studio-style lighting.
-- Remove any clutter, hands, price tags, or background objects not part of the product itself.
-Output only the edited photo.`;
+async function runSearchMatch(storeId: string | null, query: string, items: CatalogItem[]): Promise<string[]> {
+  if (!hasAI()) return [];
+  const prompt = `A customer/staff at a small Indian mobile phone & accessories shop typed this search query
+into the product search box: "${query}"
+
+Below is a list of products currently in the shop's catalog (id, name, brand, category, and — for
+accessories like glass/covers — the phone models they fit). A simple keyword/substring search has
+ALREADY been run separately; your job is to find any ADDITIONAL products in this list that are
+genuinely relevant to the query but wouldn't match on plain substring search — for example:
+- The query is a phone model number/name, and an accessory's compatibleModels list includes that model
+  even though the accessory's own product name/title doesn't mention it.
+- The query is a common misspelling, an abbreviation, or a different wording for the same thing
+  (e.g. "cover" vs "case", a model typed without spaces or with a typo).
+- The query describes the product by category/purpose in different words than the title uses.
+
+Respond ONLY as compact JSON: { "matchedIds": [ "id1", "id2", ... ] } — ONLY ids that are actually
+present in the list below, and ONLY genuinely relevant ones. If nothing beyond an exact substring match
+applies, or you are not confident, return an empty array. Never invent an id not in the list.
+
+CATALOG:
+${JSON.stringify(items)}`;
 
   const response = await runWithGeminiFailover(storeId, (ai) =>
     ai.models.generateContent({
-      model: GEMINI_MODEL_IMAGE,
-      contents: { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: prompt }] },
+      model: GEMINI_MODEL_TEXT,
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: { matchedIds: { type: Type.ARRAY, items: { type: Type.STRING } } },
+        },
+      },
     })
   );
-
-  const parts = (response as any)?.candidates?.[0]?.content?.parts || [];
-  const imgPart = parts.find((p: any) => p.inlineData?.data);
-  if (!imgPart) throw new Error("AI ne photo edit nahi ki — dobara try karein ya original photo rakhein.");
-  return { mimeType: imgPart.inlineData.mimeType || "image/png", base64Data: imgPart.inlineData.data };
-}
-
-// 2026-09-12: live-verified (via direct calls to Google's own API, not
-// just reading the error text) that this "quota exceeded" is NOT a
-// transient rate limit that clears up if you wait — Google's free tier
-// gives a hard 0 requests/day quota to EVERY image-generation-capable
-// Gemini model (tested gemini-2.5-flash-image itself, the exact model
-// this function already uses, and got the identical 429/limit:0
-// response). This only ever resolves by enabling billing (pay-as-you-go)
-// on the Google AI Studio / Cloud project the key belongs to — no code
-// change or model-name swap fixes it. The raw Google error was
-// previously leaking straight into the UI as an unreadable JSON blob
-// (error.message passed through unwrapped) — this replaces that with an
-// accurate, actionable Hinglish message instead.
-function friendlyPhotoError(err: any): string {
-  const failure = classifyGeminiFailure(err);
-  if (failure === "quota") {
-    return "AI Photo Enhance is API key ke saath kaam nahi kar raha — Google free-tier keys mein photo-editing/generation ke liye 0 quota hoti hai (ye baad mein try karne se theek nahi hoga). Isko chalane ke liye Google AI Studio mein us key par billing (pay-as-you-go) enable karni hogi. Filhal original photo hi use karein.";
-  }
-  if (failure === "unavailable") {
-    return "AI abhi high demand mein hai (Google ki taraf se) — 15-20 second baad ek baar phir try karein.";
-  }
-  if (failure === "invalid") {
-    return "Gemini API key invalid hai ya expire ho gayi hai — Settings mein naya key add karein.";
-  }
-  return err instanceof Error ? err.message : "AI photo enhance fail ho gaya. Original photo rakh sakte hain.";
+  const parsed = JSON.parse(response.text || "{}");
+  const ids = Array.isArray(parsed.matchedIds) ? parsed.matchedIds : [];
+  const validIds = new Set(items.map((i) => i.id));
+  return ids.filter((id: unknown) => typeof id === "string" && validIds.has(id));
 }
 
 Deno.serve(async (req: Request) => {
@@ -326,20 +291,23 @@ Deno.serve(async (req: Request) => {
 
   const ctx = await requireUserAndStore(req);
   if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
-  if (!checkRateLimit(`enhance-photo:${clientIp(req)}`, 60_000, 8)) {
-    return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+  if (!checkRateLimit(`ai-search:${clientIp(req)}`, 60_000, 30)) {
+    return json({ success: false, error: "Too many requests." }, 429);
   }
 
   const body = await req.json().catch(() => ({}));
-  const decoded = decodeImage(body?.image);
-  if (!body?.image) return json({ success: false, error: "No image provided." }, 400);
-  if (!decoded) return json({ success: false, error: "Unsupported image type." }, 415);
+  const query = typeof body?.query === "string" ? body.query.trim() : "";
+  const items: CatalogItem[] = Array.isArray(body?.items) ? body.items.slice(0, 400) : [];
+  if (!query || query.length < 2) return json({ success: true, matchedIds: [] });
+  if (items.length === 0) return json({ success: true, matchedIds: [] });
 
   try {
-    const result = await runPhotoEnhance(ctx.storeId, decoded.base64Data, decoded.mimeType);
-    return json({ success: true, image: `data:${result.mimeType};base64,${result.base64Data}` });
+    const matchedIds = await runSearchMatch(ctx.storeId, query, items);
+    return json({ success: true, matchedIds });
   } catch (error) {
-    console.error("enhance-product-photo error", error);
-    return json({ success: false, error: friendlyPhotoError(error) }, 500);
+    // Never a hard failure for the caller — this is an additive layer on
+    // top of instant keyword search, which already stands on its own.
+    console.error("ai-search-match error", error);
+    return json({ success: true, matchedIds: [], degraded: true });
   }
 });

@@ -62,6 +62,15 @@ export interface Settings {
   // the other 7 checklist items (there's no natural "pricing understood"
   // signal), so this is the one explicit owner-acknowledged flag.
   pricingTutorialSeen?: boolean;
+  // Phase 10: Category-specific invoice terms and customer-facing quotes.
+  // When an invoice is printed/viewed, only the rules and quotes matching
+  // the categories of items actually sold on that bill are rendered.
+  categoryInvoiceRules?: {
+    [categoryName: string]: {
+      terms: string[];
+      quote: string;
+    };
+  };
 }
 
 export interface StockBatch {
@@ -189,6 +198,10 @@ export interface Product {
   // photoStorage.ts's cleanupStaleOutOfStockPhotos(). Undefined/null means
   // "currently in stock" or "never tracked yet" (pre-7.2 products).
   outOfStockSince?: string | null;
+  // Phase 10: Product-specific terms/rules (warranty, return conditions, exclusions)
+  customTerms?: string[];
+  // Phase 10: Product-specific feel-good line / quote printed on the invoice
+  customQuote?: string;
 }
 
 export interface CartItem {
@@ -203,6 +216,9 @@ export interface CartItem {
   requireCustomerDetails: boolean;
   selectedImeis?: string[];
   isMobilePhone?: boolean;
+  // Phase 10: Optional product-level custom terms/quote snapshots
+  customTerms?: string[];
+  customQuote?: string;
   // Step 5.1 — snapshot of the product's MRP at the moment this line was
   // added, so the auto-calculated discount % shown on the invoice/report
   // reflects what MRP actually was at sale time even if it's edited later.
@@ -240,6 +256,9 @@ export interface SaleItem {
   mrp?: number | null;
   isGift?: boolean;
   giftSellingPrice?: number | null;
+  // Phase 10: Product-specific terms/quote snapshot
+  customTerms?: string[];
+  customQuote?: string;
 }
 
 export interface Customer {

@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcode, ShieldCheck, Search } from "lucide-react";
+import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcode, ShieldCheck, Search, FileText } from "lucide-react";
 import { Database, Product, StockBatch } from "../types";
 import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
 import { processAccessoryOcr, lookupScreenSizeRange, getPriceSuggestion, getProductSpecifications } from "../utils/aiOcr";
@@ -11,6 +11,8 @@ import { isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
 import { enhanceProductPhoto } from "../services/photoEnhance";
 import { generateProductPhoto } from "../services/phase6";
+import { generateProductInvoiceRules } from "../services/aiInvoiceRules";
+import { synthesizeProductRules, DEFAULT_CATEGORY_INVOICE_RULES } from "../utils/invoiceRulesEngine";
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -123,6 +125,11 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   // on the product detail page, separate from the structured spec sheet.
   const [featureHighlights, setFeatureHighlights] = useState<string[]>([]);
   const [specsLoading, setSpecsLoading] = useState(false);
+  // Phase 10: Product-specific invoice rules & feel-good quote (AI-driven)
+  const [customTerms, setCustomTerms] = useState<string[]>([]);
+  const [customQuote, setCustomQuote] = useState<string>("");
+  const [isGeneratingRules, setIsGeneratingRules] = useState(false);
+  const [rulesSource, setRulesSource] = useState<string>("");
   const isScreenAccessory = category === "Tempered Glass" || category === "Curved Glass" || category === "Back Covers";
 
   // These are always left blank for the shop to fill in — never guessed by AI.
@@ -226,16 +233,76 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       });
       setSpecifications(result.specifications);
       setFeatureHighlights(result.featureHighlights);
+
+      // Phase 10: Also auto-fill invoice rules & quote if not already set
+      if (!customTerms.length && !customQuote) {
+        try {
+          const rulesRes = await generateProductInvoiceRules({
+            name: name.trim(),
+            category: category.trim(),
+            brand: brand.trim() || undefined,
+            sellingPrice,
+            mrp,
+            warrantyEnabled,
+            warrantyMonths,
+            notes,
+            isMobilePhone: category === "Mobile Phones" || /phone|mobile/i.test(category),
+            isSparePart: category === "Spare Parts",
+          });
+          if (rulesRes.terms?.length) setCustomTerms(rulesRes.terms);
+          if (rulesRes.quote) setCustomQuote(rulesRes.quote);
+          setRulesSource(rulesRes.source);
+        } catch (e) {
+          console.warn("Background invoice rules auto-generation failed", e);
+        }
+      }
+
       toast(
         result.confidence === "low"
           ? "Specifications aur highlights bhar diye — kam confidence hai, check kar lein"
-          : "AI ne specifications aur highlights bhar diye — check kar lein",
+          : "AI ne specifications, highlights aur invoice rules bhar diye — check kar lein",
         "green",
       );
     } catch (err: any) {
       toast(err?.message || "AI specifications abhi available nahi hain", "amber");
     } finally {
       setSpecsLoading(false);
+    }
+  }
+
+  // Phase 10: Manual or targeted trigger for invoice rules & quotes
+  async function handleGenerateInvoiceRules() {
+    if (!name.trim() || !category.trim()) {
+      toast("Pehle product name aur category bharein", "amber");
+      return;
+    }
+    setIsGeneratingRules(true);
+    try {
+      const res = await generateProductInvoiceRules({
+        name: name.trim(),
+        category: category.trim(),
+        brand: brand.trim() || undefined,
+        sellingPrice,
+        mrp,
+        warrantyEnabled,
+        warrantyMonths,
+        notes,
+        isMobilePhone: category === "Mobile Phones" || /phone|mobile/i.test(category),
+        isSparePart: category === "Spare Parts",
+      });
+      if (res.terms?.length) setCustomTerms(res.terms);
+      if (res.quote) setCustomQuote(res.quote);
+      setRulesSource(res.source);
+      toast(
+        res.source === "gemini"
+          ? "AI ne product-specific invoice rules & quote generate kiye!"
+          : "Rules & quote synthesize ho gaye!",
+        "green"
+      );
+    } catch {
+      toast("Rules generate nahi ho sake", "amber");
+    } finally {
+      setIsGeneratingRules(false);
     }
   }
   const tryAutoFillPriceFromBrand = (brandValue: string, categoryValue: string) => {
@@ -635,6 +702,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       notes: notes.trim(),
       specifications: specifications.length ? specifications : undefined,
       featureHighlights: featureHighlights.length ? featureHighlights : undefined,
+      customTerms: customTerms.length ? customTerms.filter((t) => t.trim()) : undefined,
+      customQuote: customQuote.trim() ? customQuote.trim() : undefined,
       compatibleModels,
       screenSizeInches: isScreenAccessory && screenSizeInches ? screenSizeInches : undefined,
       // Step 3.4b: only save a max when it's a real, distinct range (and
@@ -1255,6 +1324,105 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                 >
                   <Plus size={12} /> Highlight add karein
                 </button>
+              </div>
+
+              {/* Phase 10: Product-specific invoice rules & feel-good quote (AI-driven) */}
+              <div className="field full" style={{ background: "var(--paper)", padding: "12px 14px", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: "13px", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <FileText size={15} style={{ color: "var(--primary)" }} />
+                      <span>Product-Specific Invoice Rules &amp; Quote</span>
+                      {rulesSource && (
+                        <span className={`badge ${rulesSource === "gemini" ? "success" : ""}`} style={{ fontSize: "10px", padding: "1px 6px" }}>
+                          {rulesSource === "gemini" ? "✨ AI Generated" : "⚡ Auto"}
+                        </span>
+                      )}
+                    </div>
+                    <div className="hint" style={{ marginTop: "2px" }}>
+                      Jab yeh item invoice par bikega, to bill par iske specific warranty &amp; return rules aur feel-good line print honge. AI background mein khud decide karta hai.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={handleGenerateInvoiceRules}
+                    disabled={isGeneratingRules}
+                    style={{ fontSize: "11.5px" }}
+                  >
+                    <Sparkles size={12} /> {isGeneratingRules ? "Generating..." : "AI Generate Rules & Quote"}
+                  </button>
+                </div>
+
+                <div style={{ marginTop: "10px" }}>
+                  <div style={{ fontSize: "11.5px", fontWeight: 600, color: "var(--ink-soft)", marginBottom: "4px" }}>
+                    Invoice Terms &amp; Conditions (Lines printed on customer bill):
+                  </div>
+                  {customTerms.length === 0 ? (
+                    <div style={{ fontSize: "11.5px", color: "var(--ink-soft)", fontStyle: "italic", background: "var(--bg)", padding: "6px 10px", borderRadius: "6px" }}>
+                      Default category rules apply automatically. Click "AI Generate Rules" or "Rule line add karein" to override.
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                      {customTerms.map((t, i) => (
+                        <div key={i} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                          <span style={{ fontSize: "11px", color: "var(--ink-soft)", width: "16px" }}>{i + 1}.</span>
+                          <input
+                            value={t}
+                            onChange={(e) => setCustomTerms((prev) => prev.map((x, xi) => (xi === i ? e.target.value : x)))}
+                            style={{ flex: 1, fontSize: "12px" }}
+                            placeholder="e.g. 7-day testing warranty, physical damage not covered"
+                          />
+                          <button
+                            type="button"
+                            className="btn sm"
+                            onClick={() => setCustomTerms((prev) => prev.filter((_, xi) => xi !== i))}
+                            title="Remove line"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() => setCustomTerms((prev) => [...prev, ""])}
+                      style={{ fontSize: "11px" }}
+                    >
+                      <Plus size={11} /> Rule line add karein
+                    </button>
+                    {customTerms.length > 0 && (
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => {
+                          const syn = synthesizeProductRules({ name, category, brand, warrantyEnabled, warrantyMonths, notes });
+                          setCustomTerms(syn.terms);
+                          setCustomQuote(syn.quote);
+                          setRulesSource("heuristic");
+                        }}
+                        style={{ fontSize: "11px" }}
+                      >
+                        <RefreshCw size={11} /> Reset to Category Standard
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ marginTop: "10px" }}>
+                  <div style={{ fontSize: "11.5px", fontWeight: 600, color: "var(--ink-soft)", marginBottom: "4px" }}>
+                    Customer Feel-Good Line / Quote (printed on bill footer):
+                  </div>
+                  <input
+                    value={customQuote}
+                    onChange={(e) => setCustomQuote(e.target.value)}
+                    style={{ width: "100%", fontSize: "12px" }}
+                    placeholder="e.g. Tough protection for your daily hustle! Stay protected."
+                  />
+                </div>
               </div>
 
               <div className="field">

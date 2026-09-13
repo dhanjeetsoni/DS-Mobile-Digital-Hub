@@ -137,6 +137,8 @@ export interface ReceiptSale {
   total: number;
   amountPaid: number;
   dueAmount: number;
+  terms?: string[];
+  quote?: string;
 }
 
 function money(n: number): string {
@@ -177,6 +179,22 @@ export function buildEscPosReceipt(shop: ReceiptShop, sale: ReceiptSale, width: 
   r.twoCol("Received", money(sale.amountPaid));
   if (sale.dueAmount > 0.5) r.bold(true).twoCol("BALANCE DUE", money(sale.dueAmount)).bold(false);
   r.rule();
+
+  if (sale.quote) {
+    r.align("center");
+    wrapText(sale.quote, cols).forEach((ln) => r.line(ln));
+    r.rule();
+  }
+
+  if (sale.terms && sale.terms.length > 0) {
+    r.align("left").bold(true).line("TERMS & CONDITIONS:").bold(false);
+    sale.terms.forEach((term, idx) => {
+      const clean = term.replace(/^\d+[.)]\s*/, "");
+      const wrapped = wrapText(`${idx + 1}. ${clean}`, cols);
+      wrapped.forEach((ln) => r.line(ln));
+    });
+    r.rule();
+  }
 
   r.align("center").line("Thank you for shopping with us!");
   r.feed(4).cut();

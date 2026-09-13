@@ -373,6 +373,38 @@ one concrete item left in the "enabled but unused" column.
 - [x] Staff can change their own PIN (Settings → "My PIN", self-service,
       requires current PIN if one is set); owner/manager can Reset or Clear
       any staff/manager's PIN from the Android Access Area
+- [x] **Real bug found and fixed 2026-09-12**: a shop owner reported "owner
+      password works when I first open the Windows app, but switching from
+      staff mode to owner mode says incorrect". Root cause: `handleGateOwnerSubmit`
+      is shared by three different situations — (1) `gateStage`
+      `"personalPin"`, anyone (staff included) just resuming their own
+      already-unlocked session with their own PIN; (2) `gateStage`
+      `"ownerAuth"` reached with no profile signed in at all, checked
+      against the device-level `ownerPasscode`; (3) a signed-in **staff**
+      member specifically asking for **owner** access mid-session (the
+      "Owner Re-Auth Modal", `isOwnerLoginOpen`). (1) and (3) were both
+      being treated as "a profile is signed in → check `verifyPin`(that
+      profile's own id)" — for (3) that means a staff member's typed
+      "owner password" was being compared against their OWN cached PIN,
+      which can never match (this device never has a cached PIN for the
+      *owner's* profile — that's only ever synced after a real login as
+      that person). A second, compounding bug: the success handler's
+      `setOwnerMode(true)` condition explicitly excluded `role === "staff"`
+      even on a correct match, so owner mode couldn't have activated for a
+      staff session either way. Fixed by keying off *what's actually being
+      asked for* (`gateStage === "ownerAuth" || isOwnerLoginOpen`, i.e.
+      "wants owner access specifically") rather than just "is a profile
+      signed in": a staff member asking for owner access now falls
+      through to the same device `ownerPasscode` check as (2) — the
+      "escape hatch" a standing code comment already described but which
+      was never actually reachable from a staff session before this fix —
+      while (1)'s plain "resume my own session" flow is untouched and
+      still checks the signed-in person's own PIN exactly as before.
+      Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+      production build clean. **Not device-tested** (same standing caveat
+      as the rest of this phase) — the three scenarios above were traced
+      by hand against the actual state variables, not exercised on a real
+      device.
 - [x] 3–4 wrong PIN attempts → lock/warning — reused the existing
       owner-lockout mechanism (2 min lock + Telegram alert), now keyed
       per-profile instead of one shared device counter. (An earlier pass

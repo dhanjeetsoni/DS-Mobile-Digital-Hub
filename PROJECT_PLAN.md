@@ -1630,15 +1630,29 @@ actual code, per this document's own ground rule — not assumed or guessed._
 ### ⬜ Phase 9: Security hardening (found via a live audit, 2026-09-06)
 _I ran a security scan against the live database while researching Phase 1
 — found a few real gaps worth closing, not asked for but worth doing:_
-- [ ] Several money-moving functions (`save_store_state`, `record_return`,
+- [x] **Several money-moving functions (`save_store_state`, `record_return`,
       `record_exchange`, `record_customer_payment`, `record_supplier_payment`,
       `upsert_customer`, `upsert_supplier`, `enqueue_invoice_telegram`,
-      `handle_new_user`) are currently callable by **`anon`** — meaning a
-      request that isn't even logged in can attempt to call them. Each one
-      does check the caller's role internally before doing anything, so
-      this hasn't been exploited, but it's needless exposed surface area
-      that should be locked down to `authenticated` only, as defence in
-      depth
+      `handle_new_user`) are currently callable by `anon` — done 2026-09-09.**
+      `REVOKE EXECUTE ... FROM anon` alone did nothing — verified with
+      `has_function_privilege('anon', ...)` still returning true after that
+      first attempt, traced it to PostgreSQL's default `GRANT EXECUTE ON
+      FUNCTION ... TO PUBLIC` (every role, including `anon`, implicitly
+      inherits PUBLIC's privileges). Corrected to `REVOKE ... FROM PUBLIC`
+      + explicit `GRANT ... TO authenticated, service_role`. That in turn
+      caught a real regression before it shipped: `handle_new_user()` fires
+      via the `on_auth_user_created` trigger on `auth.users`, whose INSERT
+      is performed by `supabase_auth_admin` — not authenticated/service_role
+      — so the PUBLIC revoke would have silently broken every new user
+      signup. Caught by checking
+      `has_function_privilege('supabase_auth_admin', ...)` directly (it had
+      gone to `false`) rather than assuming the fix was complete, and
+      granted that role execute specifically. Verified `enqueue_invoice_telegram`'s
+      own trigger (on `invoices`) is only ever fired by
+      authenticated/service_role inserts, so no similar gap there.
+      Re-verified final state directly: `anon` → false, `authenticated` →
+      true, `service_role` → true, `supabase_auth_admin` → true, for all
+      11 function signatures (two of the payment functions are overloaded).
 - [ ] Enable Supabase Auth's **leaked-password protection** (checks new
       passwords against known breached-password lists) — currently off,
       one toggle to turn on

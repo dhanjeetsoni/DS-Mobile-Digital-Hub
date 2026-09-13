@@ -1623,12 +1623,32 @@ actual code, per this document's own ground rule — not assumed or guessed._
     `saveScreenSizeToSupabase()` in `aiOcr.ts`/`ai-gateway`) — read
     directly, not assumed. Leaving that checkbox for whoever's tracking
     it to mark, since it wasn't this entry's own assigned task.
-- [ ] **My own addition**: build this as a proper searchable **phone-model
+- [x] **My own addition**: build this as a proper searchable **phone-model
       → screen-size** reference table in the database (not just an AI call
       every time), so once a model's size is looked up once, every future
       search for that model is instant and doesn't re-spend an AI call —
       AI fills gaps in this table over time instead of being asked the same
-      question repeatedly
+      question repeatedly — **independently verified + closed out
+      2026-09-10.** Did not trust the earlier note that this already
+      existed; investigated fresh:
+  - `phone_screen_size_cache` table + `upsert_screen_size_cache` RPC
+    confirmed live, migration genuinely committed to git.
+  - Read `runScreenSizeLookup()` in `ai-gateway/index.ts` directly: checks
+    an in-memory `Map` first, then the Supabase table, and only calls
+    Gemini on a genuine double-miss; a successful AI result is saved back
+    to both caches. Table is deliberately global/shared (not per-store) —
+    a phone's screen size is a fixed physical fact, so every store
+    benefits from a lookup any other store already paid for.
+  - **Strongest evidence — queried the live table, not just the code**:
+    29 real rows already cached (Realme P4 → 6.7", Oppo A55 → 6.5", etc.),
+    with `lookup_count` already incrementing on repeat lookups (Realme P4
+    at 2) — proven working in production already, not just wired.
+  - Found + fixed a real (harmless) duplication while verifying: two
+    near-identical migration files existed for this same table/RPC from
+    two sessions independently reconstructing it at different times.
+    Removed the less-documented duplicate.
+  - Verified after cleanup: `tsc --noEmit` clean, vitest 26/26,
+    static-audit 16/16, production build clean.
 - [ ] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
       should still match "Realme"/"iPhone") since shop staff typing fast
       under pressure will misspell things
@@ -1642,15 +1662,29 @@ actual code, per this document's own ground rule — not assumed or guessed._
 ### ⬜ Phase 9: Security hardening (found via a live audit, 2026-09-06)
 _I ran a security scan against the live database while researching Phase 1
 — found a few real gaps worth closing, not asked for but worth doing:_
-- [ ] Several money-moving functions (`save_store_state`, `record_return`,
+- [x] **Several money-moving functions (`save_store_state`, `record_return`,
       `record_exchange`, `record_customer_payment`, `record_supplier_payment`,
       `upsert_customer`, `upsert_supplier`, `enqueue_invoice_telegram`,
-      `handle_new_user`) are currently callable by **`anon`** — meaning a
-      request that isn't even logged in can attempt to call them. Each one
-      does check the caller's role internally before doing anything, so
-      this hasn't been exploited, but it's needless exposed surface area
-      that should be locked down to `authenticated` only, as defence in
-      depth
+      `handle_new_user`) are currently callable by `anon` — done 2026-09-09.**
+      `REVOKE EXECUTE ... FROM anon` alone did nothing — verified with
+      `has_function_privilege('anon', ...)` still returning true after that
+      first attempt, traced it to PostgreSQL's default `GRANT EXECUTE ON
+      FUNCTION ... TO PUBLIC` (every role, including `anon`, implicitly
+      inherits PUBLIC's privileges). Corrected to `REVOKE ... FROM PUBLIC`
+      + explicit `GRANT ... TO authenticated, service_role`. That in turn
+      caught a real regression before it shipped: `handle_new_user()` fires
+      via the `on_auth_user_created` trigger on `auth.users`, whose INSERT
+      is performed by `supabase_auth_admin` — not authenticated/service_role
+      — so the PUBLIC revoke would have silently broken every new user
+      signup. Caught by checking
+      `has_function_privilege('supabase_auth_admin', ...)` directly (it had
+      gone to `false`) rather than assuming the fix was complete, and
+      granted that role execute specifically. Verified `enqueue_invoice_telegram`'s
+      own trigger (on `invoices`) is only ever fired by
+      authenticated/service_role inserts, so no similar gap there.
+      Re-verified final state directly: `anon` → false, `authenticated` →
+      true, `service_role` → true, `supabase_auth_admin` → true, for all
+      11 function signatures (two of the payment functions are overloaded).
 - [ ] Enable Supabase Auth's **leaked-password protection** (checks new
       passwords against known breached-password lists) — currently off,
       one toggle to turn on
@@ -1788,3 +1822,18 @@ reveal window changed. Historical entries above describing "5 minutes"
 are left as-is (accurate for what was true when they were written) rather
 than rewritten, per this file's own ground rule about not erasing past
 entries — this note is the record of the change.
+
+**Deployed 2026-09-10** — the git source change above sat un-deployed for
+a while: the Edge Function deploy tool repeatedly failed with `import map
+path does not exist` (an internal tool bug, reproduced ~8 times across
+different parameter combinations — confirmed via `get_edge_function` that
+the live function genuinely still said "5 minute" after every failed
+attempt, not just a misleading error). Root cause found: the deploy call
+needs `import_map_path` passed explicitly (`"deno.json"`) alongside the
+`deno.json` file itself in `files` — every earlier attempt omitted that
+parameter. `telegram-connect` is now live at version 15 with the real
+code; re-fetched via `get_edge_function` afterward and confirmed every
+"1 minute" string is genuinely present in the live deployed source, not
+assumed from the deploy call succeeding. Worth remembering this
+`import_map_path` requirement for any future Edge Function redeploy in
+this project.

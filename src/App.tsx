@@ -276,9 +276,24 @@ export default function App() {
   // Read-only, display-ready product list — every screen that only lists/
   // shows products (not one that finds-then-mutates-then-saves) should
   // read from this instead of db.products directly.
+  //
+  // BUG FIX (2026-09-10): this used to only overlay catalog fields
+  // (photo/MRP/warranty/etc.) via catalogOf(), never stock — so every
+  // screen fed catalogDb was silently showing the potentially-stale
+  // blob's `.stock` regardless, the exact same class of bug already found
+  // and fixed individually in the backup export and PhotoStockFinderView.
+  // Auditing every catalogDb consumer turned up 5 more real instances:
+  // AiAdviceCard (AI advice about which items are low), BarcodeTagStudio
+  // (stock printed on tags), OwnerReportsView (stock VALUATION — a real
+  // number the owner reads as their inventory's worth), Sidebar (the
+  // low-stock count badge shown constantly in the nav), and AddGiftModal
+  // (which items are even eligible to gift). Overlaying stockOf() here
+  // once, at the source, closes all 5 (and any future catalogDb consumer)
+  // at once instead of requiring every call site to remember to do it
+  // individually.
   const catalogProducts = useMemo(
-    () => db.products.map(catalogOf),
-    [db.products, liveCatalogByClientId, liveCatalogBySku]
+    () => db.products.map((p) => ({ ...catalogOf(p), stock: stockOf(p) })),
+    [db.products, liveCatalogByClientId, liveCatalogBySku, liveStock]
   );
   // For child components confirmed to only ever READ db.products (list/
   // filter/display — never db.products.push/find-then-mutate-then-save).

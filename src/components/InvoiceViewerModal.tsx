@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Printer, MessageCircle, RotateCcw, RefreshCw, X, ShieldCheck, Sparkles, Gift, Bluetooth, Usb } from "lucide-react";
 import { Database, Sale, ReturnRecord, ExchangeRecord } from "../types";
 import { inr, numberToWordsIndian, computeDiscountPercent } from "../utils/indianCurrency";
@@ -10,6 +10,7 @@ import {
   isBluetoothPrintSupported,
   isSerialPrintSupported,
 } from "../services/thermalPrinter";
+import { lookupCategoryQuote } from "../utils/aiOcr";
 
 const MOTIVATIONAL_LINES = [
   "Great choice! Take care of it well and it'll take care of you for years. 📱✨",
@@ -68,6 +69,36 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
   // threading a new settings-write callback through every caller of this
   // modal just for this one field.
   const [paperWidth, setPaperWidth] = useState<"58mm" | "80mm">(db.settings.thermalPaperWidth === "80mm" ? "80mm" : "58mm");
+
+  // Phase 10 — per-category customer-facing quote line, replacing the old
+  // fixed-set-of-8-generic-lines-chosen-by-hash below. Picks the category
+  // with the highest line-total on THIS invoice (the item the customer is
+  // actually most likely thinking of) rather than a single line for the
+  // whole invoice regardless of what was bought. Falls back to the old
+  // generic line (motivationalLineFor) while the AI call is in flight, on
+  // any failure, or for a multi-item/no-category edge case — this can
+  // only ever improve on the old line, never break the invoice if AI is
+  // unavailable.
+  const primaryCategory = (() => {
+    if (!sale?.items?.length) return "";
+    const totals: Record<string, number> = {};
+    sale.items.forEach((it) => {
+      totals[it.category] = (totals[it.category] || 0) + it.price * it.qty;
+    });
+    return Object.entries(totals).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+  })();
+  const [categoryQuote, setCategoryQuote] = useState("");
+  useEffect(() => {
+    setCategoryQuote("");
+    if (!primaryCategory) return;
+    let cancelled = false;
+    void lookupCategoryQuote(primaryCategory).then((q) => {
+      if (!cancelled && q) setCategoryQuote(q);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [primaryCategory]);
 
   if (!sale && !creditNote && !exchange) return null;
 
@@ -440,7 +471,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 </div>
 
                 <div className="motivational-strip">
-                  <Sparkles size={13} /> {motivationalLineFor(sale.invoiceNo || sale.date)}
+                  <Sparkles size={13} /> {categoryQuote || motivationalLineFor(sale.invoiceNo || sale.date)}
                 </div>
 
                 <p className="inv-footer-msg">

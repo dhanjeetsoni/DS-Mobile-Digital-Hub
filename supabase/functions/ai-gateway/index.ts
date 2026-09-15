@@ -499,6 +499,80 @@ async function saveScreenSizeToSupabase(key: string, modelName: string, size: nu
   }
 }
 
+// Phase 10 — "Same per-category logic for the customer-facing 'quote'/
+// feel-good line printed on the invoice". Categories are open-ended (a
+// shop can add its own), so this can't be a static lookup table — same
+// shape of problem as screen-size lookup above: ask AI once per
+// store+category, cache in Supabase (category_quotes), never call AI
+// again for that category. In-memory cache mirrors screenSizeCache for
+// the same reason (avoid hitting Supabase on every single invoice print
+// within one Edge Function instance's lifetime).
+const categoryQuoteCache = new Map<string, { quote: string; at: number }>();
+const CATEGORY_QUOTE_CACHE_MS = 24 * 60 * 60 * 1000;
+
+async function getCategoryQuoteFromSupabase(storeId: string, category: string): Promise<string | null> {
+  if (!supabaseAdmin) return null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("category_quotes")
+      .select("quote_text")
+      .eq("store_id", storeId)
+      .eq("category", category)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data.quote_text || null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveCategoryQuoteToSupabase(storeId: string, category: string, quote: string): Promise<void> {
+  if (!supabaseAdmin || !quote) return;
+  try {
+    await supabaseAdmin
+      .from("category_quotes")
+      .upsert({ store_id: storeId, category, quote_text: quote, generated_at: new Date().toISOString() });
+  } catch {
+    // Best-effort only — next invoice just asks AI again.
+  }
+}
+
+async function runCategoryQuote(storeId: string | null, category: string): Promise<string> {
+  const cacheKey = `${storeId || ENV_POOL_ID}:${category.toLowerCase()}`;
+  const cached = categoryQuoteCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < CATEGORY_QUOTE_CACHE_MS) return cached.quote;
+
+  if (storeId) {
+    const fromDb = await getCategoryQuoteFromSupabase(storeId, category);
+    if (fromDb) {
+      categoryQuoteCache.set(cacheKey, { quote: fromDb, at: Date.now() });
+      return fromDb;
+    }
+  }
+
+  if (!hasAI()) return "";
+  const prompt = `You are writing ONE short, warm, customer-facing "thank you" line to print at
+the bottom of a retail invoice for a small Indian mobile phone & digital accessories shop, for a
+customer who just bought an item in the category "${category}".
+Make it feel specific to that category (e.g. a phone purchase feels different from buying a
+tempered glass, a repair service, or an accessory) — not a generic one-size-fits-all line.
+Simple English (a little Hinglish warmth is fine), under 20 words, no quotation marks, no emoji,
+one line only.`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({
+      model: GEMINI_MODEL_TEXT,
+      contents: { parts: [{ text: prompt }] },
+      config: TEXT_MODE_CONFIG,
+    })
+  );
+  const quote = String(response.text || "").trim().replace(/^["']|["']$/g, "").slice(0, 200);
+  if (quote) {
+    categoryQuoteCache.set(cacheKey, { quote, at: Date.now() });
+    if (storeId) await saveCategoryQuoteToSupabase(storeId, category, quote);
+  }
+  return quote;
+}
+
 async function runScreenSizeLookup(storeId: string | null, modelName: string): Promise<number> {
   const key = modelName.trim().toLowerCase();
 
@@ -1095,6 +1169,27 @@ Deno.serve(async (req: Request) => {
         } catch (error) {
           console.error("Accessory OCR endpoint error", error);
           return json({ success: false, error: friendlyAiError(error, "AI scan failed. Enter manually.") }, 500);
+        }
+      }
+
+      case "category-quote": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`category-quote:${ip}`, 60_000, 30)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const category = body?.category;
+        if (!category || typeof category !== "string" || category.trim().length < 2) {
+          return json({ success: false, error: "No category provided." }, 400);
+        }
+
+        try {
+          const quote = await runCategoryQuote(ctx.storeId, category.trim().slice(0, 60));
+          if (!quote) return json({ success: false, error: "Could not generate a quote for this category." }, 503);
+          return json({ success: true, category: category.trim(), quote });
+        } catch (error) {
+          console.error("Category quote error", error);
+          return json({ success: false, error: "Lookup failed." }, 500);
         }
       }
 

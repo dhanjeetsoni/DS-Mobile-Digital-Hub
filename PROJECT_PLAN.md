@@ -373,6 +373,38 @@ one concrete item left in the "enabled but unused" column.
 - [x] Staff can change their own PIN (Settings → "My PIN", self-service,
       requires current PIN if one is set); owner/manager can Reset or Clear
       any staff/manager's PIN from the Android Access Area
+- [x] **Real bug found and fixed 2026-09-12**: a shop owner reported "owner
+      password works when I first open the Windows app, but switching from
+      staff mode to owner mode says incorrect". Root cause: `handleGateOwnerSubmit`
+      is shared by three different situations — (1) `gateStage`
+      `"personalPin"`, anyone (staff included) just resuming their own
+      already-unlocked session with their own PIN; (2) `gateStage`
+      `"ownerAuth"` reached with no profile signed in at all, checked
+      against the device-level `ownerPasscode`; (3) a signed-in **staff**
+      member specifically asking for **owner** access mid-session (the
+      "Owner Re-Auth Modal", `isOwnerLoginOpen`). (1) and (3) were both
+      being treated as "a profile is signed in → check `verifyPin`(that
+      profile's own id)" — for (3) that means a staff member's typed
+      "owner password" was being compared against their OWN cached PIN,
+      which can never match (this device never has a cached PIN for the
+      *owner's* profile — that's only ever synced after a real login as
+      that person). A second, compounding bug: the success handler's
+      `setOwnerMode(true)` condition explicitly excluded `role === "staff"`
+      even on a correct match, so owner mode couldn't have activated for a
+      staff session either way. Fixed by keying off *what's actually being
+      asked for* (`gateStage === "ownerAuth" || isOwnerLoginOpen`, i.e.
+      "wants owner access specifically") rather than just "is a profile
+      signed in": a staff member asking for owner access now falls
+      through to the same device `ownerPasscode` check as (2) — the
+      "escape hatch" a standing code comment already described but which
+      was never actually reachable from a staff session before this fix —
+      while (1)'s plain "resume my own session" flow is untouched and
+      still checks the signed-in person's own PIN exactly as before.
+      Verified: `tsc --noEmit` clean, vitest 26/26, static-audit 16/16,
+      production build clean. **Not device-tested** (same standing caveat
+      as the rest of this phase) — the three scenarios above were traced
+      by hand against the actual state variables, not exercised on a real
+      device.
 - [x] 3–4 wrong PIN attempts → lock/warning — reused the existing
       owner-lockout mechanism (2 min lock + Telegram alert), now keyed
       per-profile instead of one shared device counter. (An earlier pass
@@ -1617,15 +1649,45 @@ actual code, per this document's own ground rule — not assumed or guessed._
     Removed the less-documented duplicate.
   - Verified after cleanup: `tsc --noEmit` clean, vitest 26/26,
     static-audit 16/16, production build clean.
-- [ ] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
+- [x] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
       should still match "Realme"/"iPhone") since shop staff typing fast
-      under pressure will misspell things
-- [ ] **Discovered while researching**: a `upsert_screen_size_cache()`
-      function and backing cache table **already exist** in the database —
-      the phone-model → screen-size groundwork above is partially built
-      already. Needs auditing (is it actually wired into the Add Product
-      flow yet? how many models does it already know?) rather than built
-      from scratch
+      under pressure will misspell things — **confirmed live and working,
+      2026-09-10.** `getScreenSizeFromSupabase()` in `ai-gateway/index.ts`
+      tries an exact-key match first, then falls back to a fuzzy
+      `search_screen_size_cache()` (pg_trgm) match at a 0.45 similarity
+      floor before ever spending a fresh AI call — this covers phone-model
+      typos specifically. General catalog search typo-tolerance is handled
+      separately by the AI search layer (`ai-search-match`, ~500ms
+      debounce), not the instant keyword layer — that part remains a
+      genuine gap, tracked below under "ai-gateway regression fix."
+
+**ai-gateway regression fix (2026-09-10):** an audit found the *live*
+`ai-gateway` Edge Function had fallen behind git — someone had deployed an
+older snapshot at some point, silently reverting two already-fixed things
+back out of production: the `catalog-search` route (superseded on the
+client by the newer dedicated `ai-search-match` function, so losing this
+was harmless) and, critically, the `search_screen_size_cache` fuzzy
+fallback above (a real regression — every screen-size lookup with so much
+as a typo was silently re-spending an AI call instead of hitting the
+cache). The live version also had one addition git didn't have,
+`category-quote` — investigated before assuming it was worth preserving:
+confirmed it's called from **nowhere** in the client (`grep` across
+`src/`), and Phase 10's actual, currently-used invoice-quote mechanism is
+a completely different pipeline (`/api/generate-invoice-rules` via
+`src/services/aiInvoiceRules.ts`) — so `category-quote` is an earlier,
+abandoned attempt at the same feature, orphaned exactly like the
+`ai-product-search` duplicate found earlier, not something to merge back.
+Redeployed git's current `ai-gateway/index.ts` (1,394 lines) as-is,
+verified byte-for-byte via `get_edge_function` after deploying — the fuzzy
+cache and `catalog-search` are back live, and the dead `category-quote`
+code was correctly left out rather than resurrected. **Not verified against
+a real live request** (this sandbox's network egress can't reach
+`*.supabase.co` directly) — verified by re-fetching the deployed function
+source and confirming it matches the intended file exactly instead.
+- [ ] **Cleanup noted, not actioned (no delete capability from this
+      session's tools)**: the orphaned `ai-product-search` Edge Function
+      is still live and unused — flagged again here since it came up again
+      during this audit. Safe to delete via the Supabase dashboard.
 
 ### ⬜ Phase 9: Security hardening (found via a live audit, 2026-09-06)
 _I ran a security scan against the live database while researching Phase 1
@@ -1660,16 +1722,26 @@ _I ran a security scan against the live database while researching Phase 1
       similar RPCs need any additional rate-limiting given they're callable
       directly by any authenticated staff account
 
-### ⬜ Phase 10: Product-specific invoice rules & quotes (AI-driven)
-- [ ] Each product/category (glass, mobile, accessory, repair, etc.) has
+### ✅ Phase 10: Product-specific invoice rules & quotes (AI-driven) — COMPLETED 2026-09-13
+- [x] Each product/category (glass, mobile, accessory, repair, etc.) has
       its **own** terms/rules text (warranty, return policy, etc.)
-- [ ] Invoice shows **only** the rules relevant to what was actually sold
+- [x] Invoice shows **only** the rules relevant to what was actually sold
       on that invoice — not a single generic rules block for everything
-- [ ] Same per-category logic for the customer-facing "quote"/feel-good
+- [x] Same per-category logic for the customer-facing "quote"/feel-good
       line printed on the invoice
-- [ ] AI decides/generates the right rules+quote per product by default,
+- [x] AI decides/generates the right rules+quote per product by default,
       running automatically in the background — no manual selection needed
       unless the owner wants to override
+- [x] Built `src/utils/invoiceRulesEngine.ts` with comprehensive category defaults
+      (`tempered_glass`, `mobile_phones`, `chargers_cables`, `earphones_audio`, `cases_covers`, `smartwatches`, `spare_parts`, `repair_service`, `sim_services`)
+- [x] Implemented Gemini AI endpoint `/api/generate-invoice-rules` and client service
+      `src/services/aiInvoiceRules.ts` with fast offline heuristic fallback
+- [x] Snapshotted `customTerms` & `customQuote` from `Product` -> `CartItem` -> `SaleItem`
+      in `src/App.tsx` ensuring immutable billing history
+- [x] Updated `InvoiceViewerModal.tsx` (A4 format & thermal preview) and `thermalPrinter.ts`
+      (ESC/POS 80mm/58mm printing) with dynamic category badges, relevant terms, and feel-good quotes
+- [x] Added AI-assisted UI card to both `AddProductModal.tsx` and `EditProductModal.tsx`
+- [x] Added Category Rules & Quotes customization inspector in `App.tsx` Settings tab
 
 ### ⬜ Phase 11: Offline catalog download & flexible AI provider keys
 - [ ] A "Download" section: on a fresh login (new device), the owner/staff

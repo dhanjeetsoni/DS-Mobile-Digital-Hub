@@ -84,6 +84,7 @@ import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./se
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
 import { celebrate } from "./utils/celebrate";
 import { compressImageToDataUrl, estimateDataUrlBytes, formatBytes } from "./utils/imageCompress";
+import { DEFAULT_CATEGORY_INVOICE_RULES } from "./utils/invoiceRulesEngine";
 import {
   Search,
   Plus,
@@ -508,15 +509,43 @@ export default function App() {
     if (gateAttempts.lockUntil > Date.now()) return;
 
     // Phase 2 (2026-09-06): two different things share this same screen —
-    // 1) A real signed-in person (owner/manager/staff) re-entering their own
+    // 1) A real signed-in person (owner/manager) re-entering their own
     //    PIN after an app relaunch — checked against their personal
     //    profiles.pin_hash via pinAuth.ts.
     // 2) The old fully-offline "Owner Confidential Area" device passcode,
     //    reachable with NO cloud account signed in at all (db.settings.
     //    ownerPasscode, "1234" default) — kept exactly as before so a
     //    mostly-offline shop doesn't lose local owner-mode access.
+    //
+    // Bug fix (2026-09-12): this same handler is ALSO used by gateStage
+    // "personalPin" — a signed-in STAFF (or owner/manager) member just
+    // resuming their own already-unlocked session with their own PIN
+    // after a relaunch, which correctly must check verifyPin(their own
+    // id, ...) regardless of role. That is genuinely different from a
+    // signed-in STAFF member specifically asking for OWNER access
+    // (gateStage "ownerAuth", or the "Owner Re-Auth Modal" mid-session —
+    // isOwnerLoginOpen) — those two cases were being lumped together as
+    // "any signed-in profile -> check their own PIN", which for a staff
+    // person asking for OWNER access always checked their own PIN against
+    // whatever they'd typed as "the owner's password" — that can never
+    // match; this device has no cached PIN for the owner's profile at
+    // all, it's only ever synced after a real login as that person. Exact
+    // match for the report: "works when the app first opens [nobody
+    // signed in yet], not when switching from staff mode".
+    //
+    // Fix: only use the signed-in person's own PIN when they're either
+    // just resuming their own session (personalPin) or they themselves
+    // already ARE owner/manager asking for owner access (their own PIN
+    // legitimately IS the owner credential in that case). Every other
+    // case asking specifically for OWNER access (staff on gateStage
+    // "ownerAuth", or the mid-session modal) falls through to the same
+    // device-level ownerPasscode as (2) above — the intentionally-
+    // preserved "escape hatch" this comment already described, just
+    // never actually reachable from a staff session before this fix.
+    const wantsOwnerAccessSpecifically = gateStage === "ownerAuth" || isOwnerLoginOpen;
+    const isOwnerOrManager = cloudProfile?.role === "owner" || cloudProfile?.role === "manager";
     let correct = false;
-    if (cloudProfile?.id) {
+    if (cloudProfile?.id && (!wantsOwnerAccessSpecifically || isOwnerOrManager)) {
       correct = await verifyPin(cloudProfile.id, gatePassInput);
     } else {
       const configuredPass = db.settings.ownerPasscode || "";
@@ -531,7 +560,14 @@ export default function App() {
 
     if (correct) {
       persistGateAttempts({ count: 0, lockUntil: 0 });
-      if (cloudProfile?.role === "owner" || cloudProfile?.role === "manager" || !cloudProfile) setOwnerMode(true);
+      // Any path that reaches here already verified the right credential
+      // for the situation (own PIN when just resuming, own PIN when
+      // already owner/manager, or the device owner passcode for a staff
+      // person specifically asking for owner access / nobody signed in)
+      // — always unlock owner mode on success EXCEPT the plain
+      // "personalPin, resuming my own staff session" case, which must NOT
+      // silently grant owner mode just because it shares this handler.
+      if (wantsOwnerAccessSpecifically || isOwnerOrManager) setOwnerMode(true);
       setGateUnlocked(true);
       setGatePassInput("");
       setIsOwnerLoginOpen(false);
@@ -1574,6 +1610,8 @@ export default function App() {
           isMobilePhone: product.isMobilePhone,
           selectedImeis: availableImei ? [availableImei] : [],
           mrp: product.mrp ?? null,
+          customTerms: product.customTerms,
+          customQuote: product.customQuote,
         },
       ]);
     }
@@ -1876,6 +1914,8 @@ export default function App() {
         mrp: item.mrp ?? null,
         isGift: item.isGift || false,
         giftSellingPrice: item.giftSellingPrice ?? null,
+        customTerms: item.customTerms || prod?.customTerms,
+        customQuote: item.customQuote || prod?.customQuote,
         // Reconciliation fields for the relational public.products table —
         // see resolve_product_for_sale(). Locally-created products only ever
         // get a client id like "p_<uuid>", never a row in public.products,
@@ -4186,13 +4226,79 @@ export default function App() {
                     )}
                   </div>
                 </div>
+                <div className="field full" style={{ background: "var(--paper)", padding: "14px", borderRadius: "10px", border: "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--ink)" }}>
+                        📜 Product-Specific Invoice Rules &amp; Feel-Good Quotes (AI-Driven)
+                      </div>
+                      <div className="hint" style={{ marginTop: "2px" }}>
+                        Bill par ab sirf wahi rules print hote hain jo customer ne asal mein khareede hain (e.g. tempered glass par sirf glass policies, phone par brand warranty &amp; DOA terms, earphones par testing period). Har invoice par category-matched feel-good line bhi print hoti hai.
+                      </div>
+                    </div>
+                  </div>
+
+                  <details style={{ marginTop: "10px", background: "var(--bg)", borderRadius: "8px", padding: "10px", border: "1px solid var(--border)" }}>
+                    <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "13px", color: "var(--primary)" }}>
+                      🔍 View &amp; Customize Default Category Rules &amp; Quotes ({Object.keys(DEFAULT_CATEGORY_INVOICE_RULES).length} Categories)
+                    </summary>
+                    <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                      {Object.entries(DEFAULT_CATEGORY_INVOICE_RULES).map(([catKey, def]) => {
+                        const currentTerms = db.settings.categoryInvoiceRules?.[catKey]?.terms || def.terms;
+                        const currentQuote = db.settings.categoryInvoiceRules?.[catKey]?.quote || def.quote;
+                        return (
+                          <div key={catKey} style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 700, fontSize: "12.5px", marginBottom: "6px" }}>
+                              <span>{def.icon}</span>
+                              <span>{def.badge}</span>
+                              <span style={{ fontSize: "11px", color: "var(--ink-soft)", fontWeight: 400 }}>({catKey})</span>
+                            </div>
+                            <div style={{ fontSize: "11.5px", fontWeight: 600, color: "var(--ink-soft)", marginBottom: "3px" }}>
+                              Invoice Rules:
+                            </div>
+                            <textarea
+                              rows={currentTerms.length + 1}
+                              style={{ width: "100%", fontSize: "11.5px", lineHeight: "1.4" }}
+                              value={currentTerms.join("\n")}
+                              onChange={(e) => {
+                                const newLines = e.target.value.split("\n").filter((l) => l.trim().length > 0);
+                                const catRules = { ...(db.settings.categoryInvoiceRules || {}) };
+                                catRules[catKey] = {
+                                  terms: newLines,
+                                  quote: currentQuote,
+                                };
+                                setDb({ ...db, settings: { ...db.settings, categoryInvoiceRules: catRules } });
+                              }}
+                            />
+                            <div style={{ fontSize: "11.5px", fontWeight: 600, color: "var(--ink-soft)", marginTop: "6px", marginBottom: "3px" }}>
+                              Customer Feel-Good Line / Quote:
+                            </div>
+                            <input
+                              style={{ width: "100%", fontSize: "11.5px" }}
+                              value={currentQuote}
+                              onChange={(e) => {
+                                const catRules = { ...(db.settings.categoryInvoiceRules || {}) };
+                                catRules[catKey] = {
+                                  terms: currentTerms,
+                                  quote: e.target.value,
+                                };
+                                setDb({ ...db, settings: { ...db.settings, categoryInvoiceRules: catRules } });
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
+                </div>
+
                 <div className="field full">
-                  <label>Invoice Terms &amp; Rules (printed on every bill)</label>
+                  <label>General Invoice Fallback Terms (agar koi specific category rule na ho)</label>
                   <textarea
-                    rows={6}
+                    rows={4}
                     value={db.settings.invoiceTerms}
                     onChange={(e) => setDb({ ...db, settings: { ...db.settings, invoiceTerms: e.target.value } })}
-                    placeholder="One rule per line, e.g. No warranty on tempered glass..."
+                    placeholder="One rule per line..."
                   />
                 </div>
                 <div className="field full">

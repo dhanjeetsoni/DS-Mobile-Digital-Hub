@@ -7,15 +7,6 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.g
 const GEMINI_MODEL_VISION = Deno.env.get("GEMINI_MODEL_VISION") || Deno.env.get("GEMINI_MODEL") || "gemini-3.7-flash";
 const GEMINI_MODEL_TEXT = Deno.env.get("GEMINI_MODEL_TEXT") || "gemini-3.5-flash-lite";
 const GEMINI_TIMEOUT_MS = Number(Deno.env.get("GEMINI_TIMEOUT_MS")) || 20_000;
-// 2026-09-08 root-cause fix (live-verified against Google's API directly,
-// not just reasoned about): gemini-3.5-flash-lite now hard-rejects a
-// thinkingConfig param with 400 INVALID_ARGUMENT — every text-based AI
-// feature (business insights, staff advice, screen-size lookup, customer
-// reply draft, demand forecast, churn risk, the daily digest) was silently
-// failing on every single call because of this. FAST_MODE_CONFIG (which
-// sets thinkingConfig) stays ONLY on the 4 vision/OCR routes below, which
-// use gemini-3.7-flash and were never affected. Every text route now uses
-// TEXT_MODE_CONFIG (empty) instead.
 const FAST_MODE_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
 const TEXT_MODE_CONFIG = {};
 
@@ -226,15 +217,6 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | 
     return "unavailable";
   }
 
-  // 2026-09-07 (Phase 6, "better Gemini key pool handling"): a genuine
-  // network-transport failure (dropped connection, DNS blip, Deno's fetch
-  // layer itself throwing) has none of the shapes above — no HTTP status,
-  // no Gemini-specific error text — so it fell through to `null` and got
-  // rethrown immediately below without ever trying another key, even
-  // though the failure has nothing to do with which key was used and a
-  // different key (a fresh outbound connection) has a real chance of
-  // succeeding. Treated the same as "unavailable": retryable, key stays in
-  // rotation, no cooldown applied.
   if (
     err instanceof TypeError ||
     msg.includes("failed to fetch") ||
@@ -472,19 +454,45 @@ Never invent a model that is not printed on the pack.`;
 const screenSizeCache = new Map<string, { size: number; at: number }>();
 const SCREEN_SIZE_CACHE_MS = 24 * 60 * 60 * 1000;
 
-async function getScreenSizeFromSupabase(key: string): Promise<number | null> {
+// Phase 8: exact-key lookup first (fast path, unchanged); if that misses,
+// try a typo-tolerant fuzzy match against the SAME cache table via
+// search_screen_size_cache() (pg_trgm) before ever falling through to a
+// fresh AI call — so "reelme p4" benefits from a prior "Realme P4" lookup
+// (by this store or any other) instead of re-spending an AI call just
+// because of a misspelling. Conservative similarity floor (0.45, above
+// the RPC's own 0.25 listing floor) since this substitution happens with
+// no human confirming it — a wrong fuzzy match here silently returns the
+// wrong phone's screen size.
+async function getScreenSizeFromSupabase(key: string, originalName: string): Promise<{ size: number; matchedName: string } | null> {
   if (!supabaseAdmin) return null;
   try {
     const { data, error } = await supabaseAdmin
       .from("phone_screen_size_cache")
-      .select("screen_size_inches")
+      .select("screen_size_inches, model_name")
       .eq("model_key", key)
       .maybeSingle();
-    if (error || !data) return null;
-    return Number(data.screen_size_inches) || null;
+    if (!error && data) {
+      const size = Number(data.screen_size_inches) || 0;
+      if (size) return { size, matchedName: data.model_name };
+    }
   } catch {
-    return null;
+    // fall through to fuzzy match
   }
+
+  try {
+    const { data: fuzzyRows, error: fuzzyErr } = await supabaseAdmin
+      .rpc("search_screen_size_cache", { p_query: originalName, p_limit: 1 });
+    if (!fuzzyErr && Array.isArray(fuzzyRows) && fuzzyRows.length > 0) {
+      const top = fuzzyRows[0];
+      const size = Number(top.screen_size_inches) || 0;
+      if (size && Number(top.similarity) >= 0.45) {
+        return { size, matchedName: top.model_name };
+      }
+    }
+  } catch {
+    // Best-effort only.
+  }
+  return null;
 }
 
 async function saveScreenSizeToSupabase(key: string, modelName: string, size: number): Promise<void> {
@@ -579,10 +587,10 @@ async function runScreenSizeLookup(storeId: string | null, modelName: string): P
   const cached = screenSizeCache.get(key);
   if (cached && Date.now() - cached.at < SCREEN_SIZE_CACHE_MS) return cached.size;
 
-  const fromDb = await getScreenSizeFromSupabase(key);
+  const fromDb = await getScreenSizeFromSupabase(key, modelName);
   if (fromDb) {
-    screenSizeCache.set(key, { size: fromDb, at: Date.now() });
-    return fromDb;
+    screenSizeCache.set(key, { size: fromDb.size, at: Date.now() });
+    return fromDb.size;
   }
 
   if (!hasAI()) return 0;
@@ -617,10 +625,10 @@ async function runScreenSizeRangeLookup(
       results.push({ modelName: m, size: cached.size });
       continue;
     }
-    const fromDb = await getScreenSizeFromSupabase(key);
+    const fromDb = await getScreenSizeFromSupabase(key, m);
     if (fromDb) {
-      screenSizeCache.set(key, { size: fromDb, at: Date.now() });
-      results.push({ modelName: m, size: fromDb });
+      screenSizeCache.set(key, { size: fromDb.size, at: Date.now() });
+      results.push({ modelName: m, size: fromDb.size });
       continue;
     }
     uncached.push(m);
@@ -845,6 +853,55 @@ SHOP NAME: ${String(input.shopName || "our shop")}`;
     ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] }, config: TEXT_MODE_CONFIG })
   );
   return (response.text || "").trim();
+}
+
+async function runCatalogSearch(
+  storeId: string | null,
+  query: string,
+  products: { id: string; name: string; brand?: string; category?: string; compatibleModels?: string[] }[]
+): Promise<{ matchedIds: string[]; note: string }> {
+  if (!hasAI()) throw new Error("AI unavailable");
+  const prompt = `You are a semantic search layer for a small Indian mobile phone & digital
+accessories shop's product catalog, running ALONGSIDE a plain keyword search (not replacing it —
+the shop already shows literal keyword matches; your job is to find additional genuinely relevant
+items that keyword matching alone would miss because the customer's wording doesn't literally
+appear in the product name/brand/category, e.g. "cracked screen protector" should surface a
+"Tempered Glass" product, or a phone model name should surface glass/covers whose
+compatibleModels list includes it even if that model isn't in the product's own name).
+
+Return ONLY product ids from the CATALOG list below that are genuinely relevant to the SEARCH
+QUERY. Be conservative — an irrelevant suggestion is worse than no suggestion. If nothing in the
+catalog is a good semantic match beyond plain keywords, return an empty array; do not force a
+match. Respond ONLY as compact JSON: { "matchedIds": string[], "note": a short Hinglish phrase
+(under 15 words) explaining the connection if you found matches, or empty string if you didn't }.
+
+SEARCH QUERY: ${JSON.stringify(query)}
+
+CATALOG (id, name, brand, category, compatibleModels):
+${JSON.stringify(products.slice(0, 300))}`;
+  const response = await runWithGeminiFailover(storeId, (ai) =>
+    ai.models.generateContent({
+      model: GEMINI_MODEL_TEXT,
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            matchedIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+            note: { type: Type.STRING },
+          },
+        },
+      },
+    })
+  );
+  const parsed = JSON.parse(response.text || "{}");
+  const validIds = new Set(products.map((p) => p.id));
+  const matchedIds = (Array.isArray(parsed.matchedIds) ? parsed.matchedIds : [])
+    .map((id: unknown) => String(id))
+    .filter((id: string) => validIds.has(id))
+    .slice(0, 20);
+  return { matchedIds, note: String(parsed.note || "").trim() };
 }
 
 async function runDemandForecast(storeId: string | null, products: unknown[]) {
@@ -1328,6 +1385,26 @@ Deno.serve(async (req: Request) => {
         } catch (error) {
           console.error("Customer reply draft error", error);
           return json({ success: false, error: friendlyAiError(error, "AI reply draft failed. Write manually.") }, 500);
+        }
+      }
+
+      case "catalog-search": {
+        const ctx = await requireUserAndStore(req);
+        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
+        if (!checkRateLimit(`catalog-search:${ip}`, 60_000, 20)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
+
+        const body = await req.json().catch(() => ({}));
+        const query = typeof body?.query === "string" ? body.query.trim() : "";
+        const products = Array.isArray(body?.products) ? body.products : null;
+        if (query.length < 2) return json({ success: false, error: "Query too short." }, 400);
+        if (!products || products.length === 0) return json({ success: true, matchedIds: [], note: "" });
+
+        try {
+          const result = await runCatalogSearch(ctx.storeId, query, products);
+          return json({ success: true, ...result });
+        } catch (error) {
+          console.error("Catalog search error", error);
+          return json({ success: false, error: "AI search unavailable." }, 503);
         }
       }
 

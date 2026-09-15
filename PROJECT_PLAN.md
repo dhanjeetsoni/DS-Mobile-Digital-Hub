@@ -1649,15 +1649,45 @@ actual code, per this document's own ground rule — not assumed or guessed._
     Removed the less-documented duplicate.
   - Verified after cleanup: `tsc --noEmit` clean, vitest 26/26,
     static-audit 16/16, production build clean.
-- [ ] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
+- [x] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
       should still match "Realme"/"iPhone") since shop staff typing fast
-      under pressure will misspell things
-- [ ] **Discovered while researching**: a `upsert_screen_size_cache()`
-      function and backing cache table **already exist** in the database —
-      the phone-model → screen-size groundwork above is partially built
-      already. Needs auditing (is it actually wired into the Add Product
-      flow yet? how many models does it already know?) rather than built
-      from scratch
+      under pressure will misspell things — **confirmed live and working,
+      2026-09-10.** `getScreenSizeFromSupabase()` in `ai-gateway/index.ts`
+      tries an exact-key match first, then falls back to a fuzzy
+      `search_screen_size_cache()` (pg_trgm) match at a 0.45 similarity
+      floor before ever spending a fresh AI call — this covers phone-model
+      typos specifically. General catalog search typo-tolerance is handled
+      separately by the AI search layer (`ai-search-match`, ~500ms
+      debounce), not the instant keyword layer — that part remains a
+      genuine gap, tracked below under "ai-gateway regression fix."
+
+**ai-gateway regression fix (2026-09-10):** an audit found the *live*
+`ai-gateway` Edge Function had fallen behind git — someone had deployed an
+older snapshot at some point, silently reverting two already-fixed things
+back out of production: the `catalog-search` route (superseded on the
+client by the newer dedicated `ai-search-match` function, so losing this
+was harmless) and, critically, the `search_screen_size_cache` fuzzy
+fallback above (a real regression — every screen-size lookup with so much
+as a typo was silently re-spending an AI call instead of hitting the
+cache). The live version also had one addition git didn't have,
+`category-quote` — investigated before assuming it was worth preserving:
+confirmed it's called from **nowhere** in the client (`grep` across
+`src/`), and Phase 10's actual, currently-used invoice-quote mechanism is
+a completely different pipeline (`/api/generate-invoice-rules` via
+`src/services/aiInvoiceRules.ts`) — so `category-quote` is an earlier,
+abandoned attempt at the same feature, orphaned exactly like the
+`ai-product-search` duplicate found earlier, not something to merge back.
+Redeployed git's current `ai-gateway/index.ts` (1,394 lines) as-is,
+verified byte-for-byte via `get_edge_function` after deploying — the fuzzy
+cache and `catalog-search` are back live, and the dead `category-quote`
+code was correctly left out rather than resurrected. **Not verified against
+a real live request** (this sandbox's network egress can't reach
+`*.supabase.co` directly) — verified by re-fetching the deployed function
+source and confirming it matches the intended file exactly instead.
+- [ ] **Cleanup noted, not actioned (no delete capability from this
+      session's tools)**: the orphaned `ai-product-search` Edge Function
+      is still live and unused — flagged again here since it came up again
+      during this audit. Safe to delete via the Supabase dashboard.
 
 ### ⬜ Phase 9: Security hardening (found via a live audit, 2026-09-06)
 _I ran a security scan against the live database while researching Phase 1

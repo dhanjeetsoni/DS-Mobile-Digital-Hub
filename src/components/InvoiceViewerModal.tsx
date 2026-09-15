@@ -22,10 +22,75 @@ const MOTIVATIONAL_LINES = [
   "Handled with care, sold with pride. Enjoy your new device!",
 ];
 
-function motivationalLineFor(seed: string) {
+function seededPick(arr: string[], seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  return MOTIVATIONAL_LINES[hash % MOTIVATIONAL_LINES.length];
+  return arr[hash % arr.length];
+}
+
+function motivationalLineFor(seed: string) {
+  return seededPick(MOTIVATIONAL_LINES, seed);
+}
+
+// Phase 10 — "Invoice shows only the rules relevant to what was actually
+// sold on that invoice, not a single generic rules block for everything".
+// Collects every category actually present on this sale, pulls each
+// category's own rules text (categoryInvoiceRules), plus the always-shown
+// "_universal" block, dedupes identical lines, and falls back to the old
+// flat invoiceTerms parse for any store that hasn't configured
+// category-specific rules yet (never breaks an existing store mid-upgrade).
+function computeInvoiceRuleLines(sale: Sale | null | undefined, settings: Database["settings"]): string[] {
+  const catRules = settings.categoryInvoiceRules;
+  if (!catRules || Object.keys(catRules).length === 0) {
+    return (settings.invoiceTerms || "")
+      .split("\n")
+      .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").trim())
+      .filter(Boolean);
+  }
+  const categories = Array.from(new Set((sale?.items || []).map((i) => i.category).filter(Boolean)));
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  const addBlock = (text?: string) => {
+    if (!text) return;
+    text
+      .split("\n")
+      .map((l) => l.replace(/^\s*\d+[.)]\s*/, "").trim())
+      .filter(Boolean)
+      .forEach((l) => {
+        if (!seen.has(l)) { seen.add(l); lines.push(l); }
+      });
+  };
+  categories.forEach((cat) => addBlock(catRules[cat]));
+  addBlock(catRules._universal);
+  // A brand-new store or a category with nothing configured at all yet
+  // (including no _universal) should still show *something* rather than a
+  // blank Terms box — fall back to the flat invoiceTerms text in that one
+  // edge case only.
+  if (lines.length === 0) {
+    return (settings.invoiceTerms || "")
+      .split("\n")
+      .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").trim())
+      .filter(Boolean);
+  }
+  return lines;
+}
+
+// Phase 10 item 3 — same per-category idea for the feel-good/motivational
+// line: the first category on the sale (in item order) that has its own
+// quote pool wins; falls back to "_universal", then to the original fixed
+// MOTIVATIONAL_LINES pool for a store that hasn't configured any yet.
+// Seeded on the invoice number so a reprint always shows the same line
+// rather than re-rolling it.
+function computeInvoiceQuote(sale: Sale | null | undefined, settings: Database["settings"]): string {
+  const seed = sale?.invoiceNo || "invoice";
+  const catQuotes = settings.categoryInvoiceQuotes;
+  if (!catQuotes) return motivationalLineFor(seed);
+  const categories = Array.from(new Set((sale?.items || []).map((i) => i.category).filter(Boolean)));
+  for (const cat of categories) {
+    if (catQuotes[cat]?.length) return seededPick(catQuotes[cat], seed);
+  }
+  const pool = catQuotes._universal?.length ? catQuotes._universal : MOTIVATIONAL_LINES;
+  return seededPick(pool, seed);
 }
 
 interface InvoiceViewerModalProps {
@@ -404,13 +469,9 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                   <div className="terms">
                     <b><ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Terms &amp; Conditions:</b>
                     <ol>
-                      {(db.settings.invoiceTerms || "")
-                        .split("\n")
-                        .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").trim())
-                        .filter(Boolean)
-                        .map((line, idx) => (
-                          <li key={idx}>{line}</li>
-                        ))}
+                      {computeInvoiceRuleLines(sale, db.settings).map((line, idx) => (
+                        <li key={idx}>{line}</li>
+                      ))}
                     </ol>
                   </div>
 
@@ -440,7 +501,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 </div>
 
                 <div className="motivational-strip">
-                  <Sparkles size={13} /> {motivationalLineFor(sale.invoiceNo || sale.date)}
+                  <Sparkles size={13} /> {computeInvoiceQuote(sale, db.settings)}
                 </div>
 
                 <p className="inv-footer-msg">

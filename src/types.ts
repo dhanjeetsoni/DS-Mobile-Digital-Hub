@@ -14,6 +14,23 @@ export interface Settings {
   gstPercent: number;
   upiId: string;
   invoiceTerms: string;
+  // Phase 10 — "Invoice shows only the rules relevant to what was actually
+  // sold on that invoice, not a single generic rules block for
+  // everything". Key is a product category name (e.g. "Tempered Glass",
+  // "Second-Hand Mobile"); a rule under a category only ever prints on an
+  // invoice that actually contains an item from that category. The
+  // special key "_universal" always prints regardless of what was sold
+  // (e.g. "preserve this invoice for any claim"). `invoiceTerms` above is
+  // kept as the pre-Phase-10 fallback for any store that hasn't split
+  // theirs into categories yet — never deleted, never silently
+  // overwritten, so nothing breaks for an existing store mid-upgrade.
+  categoryInvoiceRules?: Record<string, string>;
+  // Same per-category idea for the feel-good/motivational line (Phase 10
+  // item 3) — each category can have its own small pool of lines to
+  // rotate through (stable per invoice number, not re-randomized on every
+  // reprint); "_universal" is the fallback pool used when nothing sold on
+  // this invoice has a category-specific pool configured.
+  categoryInvoiceQuotes?: Record<string, string[]>;
   thermalDefault: boolean;
   // Phase 4 — 58mm is the far more common cheap counter-printer size in
   // India; 80mm optional for shops with the wider roll. Drives both the

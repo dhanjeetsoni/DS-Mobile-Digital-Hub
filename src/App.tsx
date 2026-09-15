@@ -158,6 +158,32 @@ function defaultDB(): Database {
       gstPercent: 18,
       upiId: "",
       invoiceTerms: "1. TEMPERED GLASS / SCREEN GUARD: Sold strictly on an \"as-applied\" basis — NO warranty or guarantee against breakage, cracks or scratches once fitted.\n2. SECOND-HAND MOBILE RETURN: A minimum handling charge of ₹500 applies on any return, and increases proportionally for higher-value devices. Device must be free of scratches, physical damage, water damage or missing accessories to be eligible.\n3. Brand warranty (if any) is honoured only via the respective Brand Service Center as per manufacturer policy — not by this store directly.\n4. Goods once sold are exchanged only as per store policy and strictly against this original invoice.\n5. Please preserve this invoice safely — required for any warranty, return or exchange claim.",
+      // Phase 10 — the block above mixed a Tempered Glass rule, a
+      // Second-Hand Mobile rule, and 3 universal rules into one list that
+      // printed on every single invoice regardless of what was actually
+      // sold. Split into the same content, but scoped, as the real
+      // default going forward — invoiceTerms above stays untouched as the
+      // pre-Phase-10 fallback for any code path that hasn't been updated
+      // to read this yet.
+      categoryInvoiceRules: {
+        "Tempered Glass": "Sold strictly on an \"as-applied\" basis — NO warranty or guarantee against breakage, cracks or scratches once fitted.",
+        "Curved Glass": "Sold strictly on an \"as-applied\" basis — NO warranty or guarantee against breakage, cracks or scratches once fitted.",
+        "Second-Hand Mobile": "A minimum handling charge of ₹500 applies on any return, and increases proportionally for higher-value devices. Device must be free of scratches, physical damage, water damage or missing accessories to be eligible.",
+        _universal:
+          "Brand warranty (if any) is honoured only via the respective Brand Service Center as per manufacturer policy — not by this store directly.\nGoods once sold are exchanged only as per store policy and strictly against this original invoice.\nPlease preserve this invoice safely — required for any warranty, return or exchange claim.",
+      },
+      categoryInvoiceQuotes: {
+        _universal: [
+          "Great choice! Take care of it well and it'll take care of you for years. 📱✨",
+          "Thank you for trusting us with your purchase — your happiness is our best sale.",
+          "Small shops, big promises kept. Thanks for shopping local with us!",
+          "Every device we sell comes with our word — genuine products, honest pricing.",
+          "Your trust today is our motivation for tomorrow. Visit again!",
+          "Technology changes fast — our commitment to you never does.",
+          "We don't just sell mobiles, we build relationships. Thank you!",
+          "Handled with care, sold with pride. Enjoy your new device!",
+        ],
+      },
       thermalDefault: false,
       theme: "obsidian-orange",
       jobPrefix: "JOB",

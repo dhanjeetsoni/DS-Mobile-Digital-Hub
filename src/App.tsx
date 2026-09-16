@@ -51,6 +51,15 @@ import { LowStockAlertsView } from "./components/LowStockAlertsView";
 import { AuditLogView } from "./components/AuditLogView";
 import { ProductDetailView } from "./components/ProductDetailView";
 import { StaffPerformanceView } from "./components/StaffPerformanceView";
+import { StaffIncentiveTrackerView } from "./components/StaffIncentiveTrackerView";
+import { SecurityAuditLogView } from "./components/SecurityAuditLogView";
+import { OfflineSyncCenterView } from "./components/OfflineSyncCenterView";
+import { SmartRestockPredictorView } from "./components/SmartRestockPredictorView";
+import { DeadStockHeatmapView } from "./components/DeadStockHeatmapView";
+import { StockAuditScannerView } from "./components/StockAuditScannerView";
+import { ImeiWarrantyLookupView } from "./components/ImeiWarrantyLookupView";
+import { StaffAttendanceView } from "./components/StaffAttendanceView";
+import { CounterCalculatorModal } from "./components/CounterCalculatorModal";
 import { LoyaltyRewardsView } from "./components/LoyaltyRewardsView";
 import { DownloadAreaView } from "./components/DownloadAreaView";
 import { ProfitLossDashboardView } from "./components/ProfitLossDashboardView";
@@ -72,7 +81,7 @@ import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured, isBiometricEn
 import { biometricCheck, authenticateBiometric, getMyStaffAccessPolicy } from "./services/phase6";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
-import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
+import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, applyStockAdjustment, type LiveCatalogEntry } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
@@ -311,6 +320,7 @@ export default function App() {
 
   // Modals
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+  const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
   // 2026-09-04 — Android/narrow-screen nav drawer. Sidebar is fixed-width and
   // always in the document flow at desktop widths (unchanged); below the
   // 900px breakpoint (see index.css) it becomes an off-canvas drawer that
@@ -3888,6 +3898,109 @@ export default function App() {
       case "staffPerformance":
         return <StaffPerformanceView showToast={showToast} />;
 
+      case "staffIncentives":
+        return (
+          <StaffIncentiveTrackerView
+            db={db}
+            onUpdateDb={(updater) => setDb((prev) => { const next = updater(prev); saveState(next); return next; })}
+            activeRole={isStaffIdentity ? "staff" : "owner"}
+            currentStaffName={cloudProfile?.staff_name || cloudProfile?.full_name || "Staff"}
+          />
+        );
+
+      case "securityAudit":
+        return (
+          <SecurityAuditLogView
+            db={db}
+            onUpdateDb={(updater) => setDb((prev) => { const next = updater(prev); saveState(next); return next; })}
+            activeRole={isStaffIdentity ? "staff" : "owner"}
+          />
+        );
+
+      case "offlineSync":
+        return (
+          <OfflineSyncCenterView
+            db={db}
+            isOnline={typeof navigator !== "undefined" ? navigator.onLine : true}
+            cloudStatus={isCloudConfigured ? "Connected" : "Local Only"}
+            onUpdateDb={(updater) => setDb((prev) => { const next = updater(prev); saveState(next); return next; })}
+          />
+        );
+
+      case "smartRestock":
+        return (
+          <SmartRestockPredictorView
+            db={catalogDb}
+            onUpdateDb={(nextDb) => { setDb(nextDb); saveState(nextDb); }}
+            showToast={showToast}
+          />
+        );
+
+      case "deadStock":
+        return (
+          <DeadStockHeatmapView
+            products={catalogProducts}
+            sales={db.sales}
+            onOpenEditProduct={(p) => { setEditingProduct(p); setIsEditProductOpen(true); }}
+            showToast={showToast}
+          />
+        );
+
+      case "stockAudit":
+        return (
+          <StockAuditScannerView
+            products={catalogProducts}
+            onApplyReconciliation={async (updates) => {
+              // The uploaded build mutated `product.stock` on the local JSON
+              // blob directly here. Since Phase 1 the relational
+              // products.stock_qty is the source of truth, so that would have
+              // left the server untouched and been silently reverted by the
+              // next reconcile/realtime sync -- an audit that appears to work
+              // and then quietly undoes itself. Route every line through the
+              // same atomic RPC path the manual Stock Adjust form uses, so
+              // each correction is a real, audited stock_movements entry.
+              if (!cloudProfile?.store_id) {
+                showToast("Stock audit ke liye cloud connection chahiye.", "red");
+                return;
+              }
+              let applied = 0;
+              for (const { productId, newStock } of updates) {
+                const product = db.products.find((p) => p.id === productId);
+                if (!product) continue;
+                try {
+                  await applyStockAdjustment(cloudProfile.store_id, product, newStock, "Physical stock audit");
+                  applied++;
+                } catch (err: any) {
+                  showToast(err?.message || `${product.name}: adjustment reject ho gaya`, "red");
+                }
+              }
+              if (applied > 0) showToast(`${applied} item ka physical stock audit ho gaya!`, "green");
+            }}
+            showToast={showToast}
+          />
+        );
+
+      case "warrantyLookup":
+        return (
+          <ImeiWarrantyLookupView
+            db={catalogDb}
+            onCreateJobForDevice={(deviceName, phone, customerName) => {
+              setJobForm((prev) => ({ ...prev, device: deviceName || prev.device, phone: phone || prev.phone, customerName: customerName || prev.customerName }));
+              setIsJobModalOpen(true);
+            }}
+            showToast={showToast}
+          />
+        );
+
+      case "staffAttendance":
+        return (
+          <StaffAttendanceView
+            db={db}
+            onUpdateDb={(nextDb) => { setDb(nextDb); saveState(nextDb); }}
+            showToast={showToast}
+          />
+        );
+
       case "downloadArea":
         return <DownloadAreaView db={catalogDb} isStaff={cloudProfile?.role === "staff"} showToast={showToast} />;
 
@@ -4705,6 +4818,7 @@ export default function App() {
           else setOwnerMode(false);
         }}
         onOpenQuickScan={() => setIsCameraScannerOpen(true)}
+        onOpenCalculator={() => setIsCalculatorOpen(true)}
         isMobileOpen={isMobileNavOpen}
         onCloseMobile={() => setIsMobileNavOpen(false)}
         isStaffIdentity={isStaffIdentity}
@@ -4964,6 +5078,8 @@ export default function App() {
       </div>
 
       {/* Modals */}
+      <CounterCalculatorModal isOpen={isCalculatorOpen} onClose={() => setIsCalculatorOpen(false)} />
+
       {isCameraScannerOpen && (
         <CameraScannerModal
           isOpen={isCameraScannerOpen}

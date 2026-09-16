@@ -888,3 +888,88 @@ export async function getStaffPerformance(startDate: string, endDate: string): P
   if (error) throw error;
   return (data || []) as StaffPerformanceRow[];
 }
+
+// Server-side rejections (bad delta, unknown product, no permission) will
+// fail again on retry — queuing those would spam the offline queue forever.
+// Only network/availability errors get queued for the background worker.
+// (Mirrors the same classifier StockAdjustView has used since 2026-09-04.)
+function isStockBusinessRejection(message: string): boolean {
+  return /invalid quantity|not authorized|unknown product/i.test(message);
+}
+
+/**
+ * Applies a single stock adjustment the CORRECT way: resolve the real
+ * products-table uuid first (local products only ever carry a client id
+ * like "p_<uuid>", which atomic_apply_stock_adjustment's strict `uuid`
+ * parameter rejects outright), then call the atomic RPC so the movement is
+ * recorded in stock_movements and the relational stock_qty — the actual
+ * source of truth since Phase 1 — is what changes.
+ *
+ * Extracted from StockAdjustView so the Physical Stock Audit Scanner
+ * reconciliation goes through the identical path instead of mutating the
+ * local JSON blob's `product.stock` directly (which would leave the
+ * relational table untouched and get silently reverted by the next
+ * reconcile/realtime sync).
+ *
+ * Throws on a business rejection; queues offline and resolves on a
+ * network/availability failure, same as the manual adjustment form.
+ */
+export async function applyStockAdjustment(
+  storeId: string,
+  product: { id: string; sku?: string | null; name?: string | null; brand?: string | null; category?: string | null; purchasePrice?: number | null; sellingPrice?: number | null; minStock?: number | null; stock: number },
+  newStock: number,
+  reason: string,
+): Promise<void> {
+  const previousStock = product.stock;
+  const delta = newStock - previousStock;
+  if (delta === 0) return;
+
+  const idempotencyKey = crypto.randomUUID();
+  try {
+    const { data: realProductId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
+      p_store_id: storeId,
+      p_local_id: String(product.id),
+      p_sku: product.sku || null,
+      p_model: product.name || null,
+      p_brand: product.brand || null,
+      p_category: product.category || null,
+      p_cost_price: product.purchasePrice ?? 0,
+      p_selling_price: product.sellingPrice ?? 0,
+      p_stock_qty: previousStock,
+      p_min_stock: product.minStock ?? 0,
+    });
+    if (resolveError) throw resolveError;
+
+    const { error } = await supabase.rpc("atomic_apply_stock_adjustment", {
+      p_store_id: storeId,
+      p_product_id: realProductId,
+      p_delta: delta,
+      p_reason: reason,
+      p_idempotency_key: idempotencyKey,
+    });
+    if (error) throw error;
+  } catch (err: any) {
+    const msg = String(err?.message || err || "");
+    if (isStockBusinessRejection(msg)) throw err;
+    await queueOfflineOperation(
+      "stock_adjustment",
+      "stock_movements",
+      {
+        adjustment: {
+          productId: product.id,
+          delta,
+          reason,
+          sku: product.sku || null,
+          model: product.name || null,
+          brand: product.brand || null,
+          category: product.category || null,
+          costPrice: product.purchasePrice ?? 0,
+          sellingPrice: product.sellingPrice ?? 0,
+          stockQty: previousStock,
+          minStock: product.minStock ?? 0,
+        },
+      },
+      idempotencyKey,
+    );
+  }
+}

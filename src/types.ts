@@ -305,6 +305,14 @@ export interface Sale {
   amountPaid: number;
   dueAmount: number;
   status: "Paid" | "Partial" | "Due" | "Cancelled";
+  // Split payment across multiple methods in one sale (e.g. part cash, part
+  // UPI). Optional — most sales still use the single `payment` field above.
+  splitPayments?: {
+    cash: number;
+    upi: number;
+    card: number;
+    credit: number;
+  };
   // Part 3: owner correction trail. Editing/cancelling is only allowed
   // inside the store's `saleCorrectionWindowDays` window (from `createdAt`);
   // once that passes the sale is permanently locked.
@@ -675,4 +683,103 @@ export interface Database {
   warrantyClaimSeq?: number;
   simSeq: number;
   kycSeq: number;
+  // New feature-set added 2026-09-13 (staff attendance, incentive tracking,
+  // security audit log, smart restock purchase orders) — all optional so
+  // existing saved states keep loading without a migration, same pattern
+  // as warrantyClaims above.
+  staffIncentives?: StaffIncentiveRecord[];
+  securityAlerts?: SecurityAuditAlert[];
+  staffAttendance?: StaffAttendanceRecord[];
+  purchaseOrders?: RestockPurchaseOrder[];
+  poSeq?: number;
+}
+
+export interface StaffAttendanceRecord {
+  id: string;
+  staffName: string;
+  date: string;
+  inTime: string;
+  outTime?: string;
+  status: "Present" | "Half-Day" | "Late" | "Leave" | "Handover Completed";
+  counterRole?: "Main Counter / Billing" | "Repair & Service" | "Accessories Desk" | "Cyber & Xerox";
+  gallaOpeningVerified?: number;
+  gallaClosingHandover?: number;
+  notes?: string;
+  verifiedByOwner?: boolean;
+}
+
+export interface RestockPurchaseOrderItem {
+  productId: string;
+  productName: string;
+  category: string;
+  currentStock: number;
+  minStock: number;
+  salesLast15Days: number;
+  suggestedQty: number;
+  orderQty: number;
+  purchasePrice: number;
+  totalCost: number;
+}
+
+export interface RestockPurchaseOrder {
+  id: string;
+  orderNo: string;
+  date: string;
+  supplierName: string;
+  supplierPhone?: string;
+  items: RestockPurchaseOrderItem[];
+  totalEstimatedCost: number;
+  status: "Draft" | "Sent via WhatsApp" | "Received & Added to Stock" | "Cancelled";
+  notes?: string;
+  createdAt: string;
+}
+
+export interface StaffCommissionRule {
+  category: string; // e.g. "Repairs", "Smartphones", "Accessories", "Tempered Glass", "Xerox"
+  type: "flat" | "percent";
+  value: number; // e.g. 50 (₹50 flat) or 5 (5%)
+}
+
+export interface StaffIncentiveRecord {
+  id: string;
+  staffName: string;
+  date: string;
+  time: string;
+  sourceType: "POS Sale" | "Repair Completed" | "Xerox / Cyber" | "SIM Activation";
+  referenceId: string; // Invoice No / Job No / Xerox ID
+  description: string;
+  saleAmount: number;
+  incentiveEarned: number;
+  status: "Pending" | "Paid Out";
+  paidAt?: string;
+  paidNotes?: string;
+}
+
+export interface SecurityAuditAlert {
+  id: string;
+  timestamp: string;
+  severity: "High" | "Medium" | "Low";
+  eventType:
+    | "Excessive Discount Given"
+    | "Sale Deleted/Cancelled"
+    | "Sold Below Cost Price"
+    | "Negative Stock Adjustment"
+    | "Cash Galla Discrepancy"
+    | "After-Hours Activity"
+    | "Price Override";
+  performedBy: string; // Staff name or Owner
+  description: string;
+  referenceId?: string;
+  amountInvolved?: number;
+  resolved: boolean;
+  resolvedAt?: string;
+  resolvedNotes?: string;
+}
+
+export interface PettyCashPreset {
+  id: string;
+  label: string;
+  amount: number;
+  category: "Refreshment / Chai" | "Delivery & Transport" | "Shop Cleaning / Maintenance" | "Utilities & Bills" | "Spares Transport" | "Miscellaneous";
+  icon: string;
 }

@@ -107,7 +107,18 @@ function fuzzyMatch(haystack: string, query: string): boolean {
 
   return queryWords.every((qw) => {
     const budget = fuzzyBudgetForLength(qw.length);
-    if (budget === 0) return false; // exact substring/word match already failed above
+    if (budget === 0) {
+      // 2026-09-14 fix: the old code just returned false here, on the
+      // assumption an exact match had already been tried and failed. That
+      // assumption only holds for a single-word query — the earlier exact/
+      // synonym checks in naturalMatch() run against the WHOLE query
+      // phrase (and against synonym expansions of length > 1), so a short
+      // word (e.g. "7") embedded inside a longer multi-word query (e.g.
+      // "reelme 7") was never actually checked on its own before landing
+      // here, and always silently failed the whole match as a result —
+      // even though the exact word genuinely exists in the haystack.
+      return haystackWords.includes(qw);
+    }
     return haystackWords.some((hw) => {
       // Skip pairs whose length gap alone already exceeds the budget —
       // avoids wasted DP work and prevents e.g. "app" fuzzy-matching a

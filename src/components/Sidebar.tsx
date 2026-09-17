@@ -12,6 +12,7 @@ import {
   Tag,
   Calendar,
   TrendingUp,
+  TrendingDown,
   DollarSign,
   User,
   Shield,
@@ -34,6 +35,10 @@ import {
   Activity,
   Rocket,
   ClipboardList,
+  Award,
+  ShieldCheck,
+  Clock,
+  Calculator,
 } from "lucide-react";
 import { Database } from "../types";
 import { inr } from "../utils/indianCurrency";
@@ -46,6 +51,7 @@ interface SidebarProps {
   ownerMode: boolean;
   onToggleOwnerMode: () => void;
   onOpenQuickScan: () => void;
+  onOpenCalculator?: () => void;
   onOpenWindowsModal?: () => void;
   /** 2026-09-04: narrow-screen (Android/small window) off-canvas drawer state — see index.css's 900px breakpoint. Both no-ops on desktop widths. */
   isMobileOpen?: boolean;
@@ -113,10 +119,18 @@ export const SECONDARY_NAV_ITEMS = [
   { key: "ownerreports", label: "Owner Financial Reports", icon: Shield, ownerOnly: true },
   { key: "staffAccess", label: "Android Access Area", icon: Users, ownerOnly: true },
   { key: "staffPerformance", label: "Staff Performance", icon: TrendingUp, ownerOnly: true },
+  { key: "staffIncentives", label: "🏆 Staff Incentives & Commission", icon: Award, ownerOnly: false },
+  { key: "securityAudit", label: "🚨 Anti-Theft & Suspicious Audit", icon: Shield, ownerOnly: true },
+  { key: "offlineSync", label: "📴 100% Offline SQLite Sync Engine", icon: DownloadCloud, ownerOnly: false },
   { key: "statusDashboard", label: "System Status Dashboard", icon: Activity, ownerOnly: true },
   { key: "auditLog", label: "Audit Log", icon: ClipboardList, ownerOnly: true },
   { key: "setupWizard", label: "🚀 Shuruaati Setup Checklist", icon: Rocket, ownerOnly: true },
   { key: "appVersions", label: "🚀 App Versions (Update Push)", icon: Rocket, ownerOnly: true },
+  { key: "smartRestock", label: "📦 AI Smart Restock & PO", icon: TrendingUp, ownerOnly: true },
+  { key: "deadStock", label: "🔥 Slow & Dead Stock Heatmap", icon: TrendingDown, ownerOnly: true },
+  { key: "stockAudit", label: "📋 Physical Stock Audit Scanner", icon: ClipboardList, ownerOnly: true },
+  { key: "warrantyLookup", label: "🛡️ IMEI & Warranty Lookup", icon: ShieldCheck, ownerOnly: false },
+  { key: "staffAttendance", label: "⏱️ Staff Attendance & Shifts", icon: Clock, ownerOnly: false },
   { key: "backup", label: "Backup & Restore", icon: Save, ownerOnly: true },
   { key: "settings", label: "Shop Settings", icon: SettingsIcon, ownerOnly: true },
   { key: "appearanceStudio", label: "🎨 Appearance Studio (New)", icon: Sparkles, ownerOnly: false },
@@ -157,13 +171,13 @@ export const SECONDARY_NAV_GROUPS: NavGroup[] = [
     id: "inventory",
     label: "📦 Inventory",
     icon: Package,
-    itemKeys: ["products", "stockadjust", "purchases", "lowstock", "labels", "secondHandKyc", "downloadArea"],
+    itemKeys: ["products", "stockadjust", "purchases", "lowstock", "labels", "secondHandKyc", "downloadArea", "offlineSync", "smartRestock", "deadStock", "stockAudit", "warrantyLookup"],
   },
   {
     id: "people",
     label: "👥 People",
     icon: Users,
-    itemKeys: ["staffAccess", "customerDirectory", "loyalty"],
+    itemKeys: ["staffAccess", "staffPerformance", "staffIncentives", "customerDirectory", "loyalty", "staffAttendance"],
   },
   {
     id: "documents",
@@ -181,7 +195,7 @@ export const SECONDARY_NAV_GROUPS: NavGroup[] = [
     id: "system",
     label: "⚙️ System",
     icon: Activity,
-    itemKeys: ["statusDashboard", "auditLog", "setupWizard", "appVersions", "backup", "settings", "appearanceStudio"],
+    itemKeys: ["securityAudit", "statusDashboard", "auditLog", "setupWizard", "appVersions", "backup", "settings", "appearanceStudio"],
   },
 ];
 
@@ -201,6 +215,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ownerMode,
   onToggleOwnerMode,
   onOpenQuickScan,
+  onOpenCalculator,
   onOpenWindowsModal,
   isMobileOpen = false,
   onCloseMobile,
@@ -284,22 +299,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Quick Camera Barcode & AI Scan Button */}
-      <div style={{ padding: "10px 14px 4px 14px" }}>
+      {/* Quick Camera Barcode & AI Scan and Calculator */}
+      <div style={{ padding: "10px 14px 4px 14px", display: "flex", gap: "6px" }}>
         <button
           className="btn primary sm"
           style={{
-            width: "100%",
+            flex: 1,
             justifyContent: "center",
             background: "var(--accent)",
-            padding: "9px",
-            fontSize: "12.5px",
+            padding: "9px 6px",
+            fontSize: "12px",
             fontWeight: 800,
           }}
           onClick={onOpenQuickScan}
+          title="Scan barcode or product box with camera"
         >
-          <Camera size={15} /> 1-Tap Barcode / Box Scan
+          <Camera size={14} /> Scan
         </button>
+        {onOpenCalculator && (
+          <button
+            className="btn sm"
+            style={{
+              justifyContent: "center",
+              background: "var(--card)",
+              color: "var(--ink)",
+              border: "1px solid var(--sidebar-border)",
+              padding: "9px 10px",
+              fontSize: "12px",
+              fontWeight: 800,
+            }}
+            onClick={onOpenCalculator}
+            title="Open Counter GST & Margin Calculator"
+          >
+            <Calculator size={15} style={{ color: "var(--brand)" }} />
+          </button>
+        )}
       </div>
 
       {/* Navigation List */}

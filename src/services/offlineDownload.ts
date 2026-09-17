@@ -16,8 +16,10 @@
 import type { Database } from "../types";
 import { isStorageUrl } from "./photoStorage";
 import { sqliteList } from "./localSqlite";
+import { persistLocalState } from "./repository";
 
 const LAST_DOWNLOAD_KEY = "dsmdh_last_offline_download_at";
+const LAST_CATALOG_KEY = "dsmdh_last_catalog_download_at";
 
 export interface PrecacheProgress {
   done: number;
@@ -25,21 +27,44 @@ export interface PrecacheProgress {
   total: number;
 }
 
+export interface FullDownloadProgress {
+  stage: "catalog" | "specs" | "photos" | "done";
+  message: string;
+  catalogSaved: boolean;
+  productsCount: number;
+  specsIndexed: number;
+  photosProgress: PrecacheProgress;
+}
+
 export interface OfflineStatus {
+  catalogCached: boolean;
+  catalogProductsCount: number;
+  specsCount: number;
   photosCached: number;
   photosTotal: number;
   pendingQueueCount: number;
   lastDownloadAt: string | null;
+  lastCatalogDownloadAt: string | null;
   storageUsedMb: number | null;
   storageQuotaMb: number | null;
   serviceWorkerReady: boolean;
 }
 
-/** Every distinct Supabase Storage photo URL currently referenced by this store's data. */
+/** Check if current device hasn't downloaded the catalog yet (fresh device login) */
+export function isFreshDeviceLogin(): boolean {
+  return !localStorage.getItem(LAST_DOWNLOAD_KEY) && !localStorage.getItem(LAST_CATALOG_KEY);
+}
+
+/** Every distinct Supabase Storage photo URL currently referenced by this store's data (front + secondary/gallery). */
 export function collectPhotoUrls(db: Database): string[] {
   const urls = new Set<string>();
   for (const p of db.products || []) {
     if (isStorageUrl(p.photo)) urls.add(p.photo as string);
+    if (Array.isArray(p.photos)) {
+      for (const ph of p.photos) {
+        if (isStorageUrl(ph)) urls.add(ph as string);
+      }
+    }
   }
   return Array.from(urls);
 }
@@ -97,9 +122,103 @@ export async function downloadPhotosForOffline(
   return { done: result.done, failed: result.failed, total: result.total };
 }
 
+/**
+ * Phase 11: Comprehensive offline download for new device setup / fresh login.
+ * Downloads and caches the full catalog, product detail pages (specs, highlights,
+ * custom invoice rules & quotes), and all product photos to guarantee 100% offline capability.
+ */
+export async function downloadFullCatalogForOffline(
+  db: Database,
+  onProgress?: (progress: FullDownloadProgress) => void
+): Promise<{
+  productsCount: number;
+  specsCount: number;
+  photos: PrecacheProgress;
+  timestamp: string;
+}> {
+  const urls = collectPhotoUrls(db);
+  const productsCount = db.products?.length || 0;
+
+  // Step 1: Persist full catalog state to local storage and SQLite
+  onProgress?.({
+    stage: "catalog",
+    message: "Saving full catalog, prices, and stock ledgers locally...",
+    catalogSaved: false,
+    productsCount,
+    specsIndexed: 0,
+    photosProgress: { done: 0, failed: 0, total: urls.length },
+  });
+
+  persistLocalState(db);
+
+  // Step 2: Index specs & highlights
+  let specsCount = 0;
+  for (const p of db.products || []) {
+    if (p.specifications?.length || p.featureHighlights?.length || p.customTerms?.length) {
+      specsCount++;
+    }
+  }
+
+  onProgress?.({
+    stage: "specs",
+    message: `Indexing ${specsCount} product detail pages with specs & terms...`,
+    catalogSaved: true,
+    productsCount,
+    specsIndexed: specsCount,
+    photosProgress: { done: 0, failed: 0, total: urls.length },
+  });
+
+  await new Promise((r) => setTimeout(r, 120));
+
+  // Step 3: Precache product photos into Service Worker cache
+  let photoResult: PrecacheProgress = { done: 0, failed: 0, total: urls.length };
+  if (urls.length > 0) {
+    onProgress?.({
+      stage: "photos",
+      message: `Downloading ${urls.length} product photos for offline view...`,
+      catalogSaved: true,
+      productsCount,
+      specsIndexed: specsCount,
+      photosProgress: photoResult,
+    });
+
+    photoResult = await downloadPhotosForOffline(db, (pProgress) => {
+      onProgress?.({
+        stage: "photos",
+        message: `Downloading photos (${pProgress.done}/${pProgress.total})...`,
+        catalogSaved: true,
+        productsCount,
+        specsIndexed: specsCount,
+        photosProgress: pProgress,
+      });
+    });
+  }
+
+  const now = new Date().toISOString();
+  localStorage.setItem(LAST_DOWNLOAD_KEY, now);
+  localStorage.setItem(LAST_CATALOG_KEY, now);
+
+  onProgress?.({
+    stage: "done",
+    message: "Full catalog and product pages ready for offline use!",
+    catalogSaved: true,
+    productsCount,
+    specsIndexed: specsCount,
+    photosProgress: photoResult,
+  });
+
+  return {
+    productsCount,
+    specsCount,
+    photos: photoResult,
+    timestamp: now,
+  };
+}
+
 export async function clearDownloadedPhotos(): Promise<void> {
   await messageWorker({ type: "CLEAR_PHOTO_CACHE" });
   localStorage.removeItem(LAST_DOWNLOAD_KEY);
+  localStorage.removeItem(LAST_CATALOG_KEY);
 }
 
 export async function getOfflineStatus(db: Database): Promise<OfflineStatus> {
@@ -136,11 +255,22 @@ export async function getOfflineStatus(db: Database): Promise<OfflineStatus> {
     }
   }
 
+  let specsCount = 0;
+  for (const p of db.products || []) {
+    if (p.specifications?.length || p.featureHighlights?.length || p.customTerms?.length) {
+      specsCount++;
+    }
+  }
+
   return {
+    catalogCached: Boolean(localStorage.getItem(LAST_CATALOG_KEY)),
+    catalogProductsCount: db.products?.length || 0,
+    specsCount,
     photosCached,
     photosTotal,
     pendingQueueCount,
     lastDownloadAt: localStorage.getItem(LAST_DOWNLOAD_KEY),
+    lastCatalogDownloadAt: localStorage.getItem(LAST_CATALOG_KEY),
     storageUsedMb,
     storageQuotaMb,
     serviceWorkerReady,

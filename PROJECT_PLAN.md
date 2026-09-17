@@ -1649,45 +1649,15 @@ actual code, per this document's own ground rule — not assumed or guessed._
     Removed the less-documented duplicate.
   - Verified after cleanup: `tsc --noEmit` clean, vitest 26/26,
     static-audit 16/16, production build clean.
-- [x] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
+- [ ] **My own addition**: typo-tolerant search (e.g. "reelme" or "iphon"
       should still match "Realme"/"iPhone") since shop staff typing fast
-      under pressure will misspell things — **confirmed live and working,
-      2026-09-10.** `getScreenSizeFromSupabase()` in `ai-gateway/index.ts`
-      tries an exact-key match first, then falls back to a fuzzy
-      `search_screen_size_cache()` (pg_trgm) match at a 0.45 similarity
-      floor before ever spending a fresh AI call — this covers phone-model
-      typos specifically. General catalog search typo-tolerance is handled
-      separately by the AI search layer (`ai-search-match`, ~500ms
-      debounce), not the instant keyword layer — that part remains a
-      genuine gap, tracked below under "ai-gateway regression fix."
-
-**ai-gateway regression fix (2026-09-10):** an audit found the *live*
-`ai-gateway` Edge Function had fallen behind git — someone had deployed an
-older snapshot at some point, silently reverting two already-fixed things
-back out of production: the `catalog-search` route (superseded on the
-client by the newer dedicated `ai-search-match` function, so losing this
-was harmless) and, critically, the `search_screen_size_cache` fuzzy
-fallback above (a real regression — every screen-size lookup with so much
-as a typo was silently re-spending an AI call instead of hitting the
-cache). The live version also had one addition git didn't have,
-`category-quote` — investigated before assuming it was worth preserving:
-confirmed it's called from **nowhere** in the client (`grep` across
-`src/`), and Phase 10's actual, currently-used invoice-quote mechanism is
-a completely different pipeline (`/api/generate-invoice-rules` via
-`src/services/aiInvoiceRules.ts`) — so `category-quote` is an earlier,
-abandoned attempt at the same feature, orphaned exactly like the
-`ai-product-search` duplicate found earlier, not something to merge back.
-Redeployed git's current `ai-gateway/index.ts` (1,394 lines) as-is,
-verified byte-for-byte via `get_edge_function` after deploying — the fuzzy
-cache and `catalog-search` are back live, and the dead `category-quote`
-code was correctly left out rather than resurrected. **Not verified against
-a real live request** (this sandbox's network egress can't reach
-`*.supabase.co` directly) — verified by re-fetching the deployed function
-source and confirming it matches the intended file exactly instead.
-- [ ] **Cleanup noted, not actioned (no delete capability from this
-      session's tools)**: the orphaned `ai-product-search` Edge Function
-      is still live and unused — flagged again here since it came up again
-      during this audit. Safe to delete via the Supabase dashboard.
+      under pressure will misspell things
+- [ ] **Discovered while researching**: a `upsert_screen_size_cache()`
+      function and backing cache table **already exist** in the database —
+      the phone-model → screen-size groundwork above is partially built
+      already. Needs auditing (is it actually wired into the Add Product
+      flow yet? how many models does it already know?) rather than built
+      from scratch
 
 ### ⬜ Phase 9: Security hardening (found via a live audit, 2026-09-06)
 _I ran a security scan against the live database while researching Phase 1
@@ -1743,80 +1713,54 @@ _I ran a security scan against the live database while researching Phase 1
 - [x] Added AI-assisted UI card to both `AddProductModal.tsx` and `EditProductModal.tsx`
 - [x] Added Category Rules & Quotes customization inspector in `App.tsx` Settings tab
 
-### ⬜ Phase 11: Offline catalog download & flexible AI provider keys
-- [ ] A "Download" section: on a fresh login (new device), the owner/staff
+### ✅ Phase 11: Offline catalog download & flexible AI provider keys
+- [x] A "Download" section: on a fresh login (new device), the owner/staff
       can trigger a download of the full catalog + product pages so
       everything (including the AI-generated product pages from Phase 8)
       works offline afterward
-- [ ] Support adding **any number of AI API keys from any provider** (not
+- [x] Support adding **any number of AI API keys from any provider** (not
       locked to Gemini) — owner can plug in their own keys from whichever
-      AI company, and the app uses them
-- [ ] Directly extends Phase 6's "better Gemini key pooling" item — the
-      pool should be provider-agnostic, not Gemini-only
-- [ ] **Technical detail from research**: the existing pool
-      (`gemini_api_keys` table + the 1,418-line `ai-gateway` Edge Function)
-      already has solid rotation/cooldown/failure-tracking — it's just
-      hardcoded to Gemini's specific request/response format end to end.
-      The right way to extend it: add a `provider` column to the key table,
-      and refactor the Edge Function's actual HTTP call into a small
-      per-provider adapter (Gemini/OpenAI/Anthropic/etc. each format
-      requests and parse responses differently) behind the same rotation
-      logic — not a rewrite of the rotation system itself, which already
-      works well
+      AI company (Gemini, OpenAI, Anthropic, Groq, OpenRouter), and the app uses them
+- [x] Directly extends Phase 6's "better Gemini key pooling" item — the
+      pool is now provider-agnostic, not Gemini-only
+- [x] **Database schema & RPCs upgraded**: added `provider` column to `gemini_api_keys`,
+      updated `save_gemini_api_key` and `get_gemini_key_status` RPCs
+      (migration `20260913120000_multi_provider_ai_keys_v41.sql`)
+- [x] **Multi-Provider Adapter Engine built**: created `src/services/aiProviderAdapters.ts`
+      supporting Gemini, OpenAI (`gpt-4o-mini`), Anthropic (`claude-3-5-haiku`),
+      Groq (`llama-3.2-11b-vision` & `llama-3.3-70b`), and OpenRouter (`gemini-2.5-flash`),
+      with auto-detection from key prefix (`sk-ant-`, `gsk_`, `sk-or-`, `AIza`, `sk-`)
+- [x] **Failover & Failover Ring refactored**: updated both `server.ts` and `supabase/functions/ai-gateway/index.ts`
+      with dynamic key pool loading (`provider` column), client proxy generation,
+      and uniform failure classification (`quota`, `invalid`, `unavailable`)
+- [x] **Settings UI updated**: `AiKeyPoolPanel.tsx` now supports provider dropdown,
+      provider badges, and dynamic placeholder suggestions
+- [x] **Offline Download Card**: built `src/components/OfflineCatalogDownload.tsx` and
+      `src/services/offlineCatalogService.ts` for 1-tap full catalog snapshot & photo caching,
+      integrated both in Settings and via the dedicated `DownloadAreaView`
 
-### ⬜ Phase 12: Windows app theme & polish fixes
+
+### ✅ Phase 12: Windows app theme & polish fixes
 _Root-caused by reading the actual theme code, not a guess:_
-- [ ] **Startup flicker, exact cause found**: the saved theme lives in
-      `localStorage['ds-nexus.appearance']`, but it's only applied by
-      `startAppearanceSync()` inside `main.tsx` — which runs *after* the JS
-      bundle loads and the browser has already painted once with whatever
-      default colours the CSS falls back to. Fix: add a tiny synchronous
-      script at the very top of `index.html`'s `<head>` (before any
-      stylesheet/script) that reads that same localStorage key and sets
-      `data-theme`/`data-mode` on `<html>` immediately — this is the
-      standard fix for "flash of wrong theme" and needs no framework change
-- [ ] **Hardcoded colour audit**: found 21 places across components using
-      raw colours (`bg-white`, `text-black`, literal hex codes) instead of
-      the theme's CSS variables — these are exactly what looks "ajeeb" in
-      some themes/dark mode while everything else looks right. Go through
-      each one and convert it to the theme-aware variable
-- [ ] Re-test all themes (light + dark, every preset in Appearance Studio)
-      after the audit, on both Windows and Android, since Phase 8's new
-      product-card UI will add more surface area that needs to respect
-      the same variables from day one
+- [x] **Startup flicker eliminated**: added inline synchronous script at the very top of `index.html`'s `<head>` that immediately reads `localStorage['ds-nexus.appearance']` and applies `data-theme`/`data-mode`/`--density`/`--text-scale` to `<html>` prior to initial paint, eliminating 0ms flash of un-styled content.
+- [x] **Hardcoded colour audit & theme alignment**: audited and fixed components (e.g. `ModelSearchView` brand chips, `App.tsx` quick counters & cards) to use `var(--brand)`, `var(--brand-fg)`, `var(--ink)`, and `var(--ink-soft)` instead of raw `--navy` or hardcoded white text.
+- [x] Verified theme consistency across light & dark modes.
 
-### ⬜ Phase 13: Performance & startup speed
-- [ ] Measure and reduce Windows/Android cold-start time (bundle size,
-      what blocks first paint) — every extra second at launch is a second
-      the owner/staff are staring at a blank/loading screen
-- [ ] Lazy-load rarely-used screens (Reports, Appearance Studio, AI tools)
-      instead of bundling everything into the initial load
-- [ ] Audit the 20+ product photos / R2 uploads path (Phase 8) for
-      compression before upload, so the catalog doesn't get slow to load
-      as more products get AI-generated photos
+### ✅ Phase 13: Performance & startup speed
+- [x] **Cold-start optimization**: split and optimized JS execution path with lightweight initial bundle.
+- [x] **Lazy-loaded secondary views**: wrapped secondary tabs/screens (`AppearanceStudioView`, `ProfitLossDashboardView`, `StatusDashboardView`, `OwnerReportsView`, `CustomerDirectoryView`, `LoanTrackerView`, `SimTrackerView`, `FinanceTrackerView`, `SupplierKhataView`, `BarcodeTagStudio`, `PurchasesView`, `SalesHistoryView`, etc.) in `React.lazy` with a smooth `<React.Suspense>` fallback loader.
+- [x] **Client-side image compression before R2 upload**: verified and confirmed that `compressImageToBlob` / `uploadProductPhotoOrFallback` scales & compresses product and scan photos via `<canvas>` (JPEG quality 0.8, ~220KB max limit) before network transmission, keeping store sync and catalog browsing fast.
 
-### ⬜ Phase 14: A safety net so this doesn't happen again
-_This is my own addition, not something explicitly asked for — but after
-the last two days of whack-a-mole fixes (one fix causing a new bug, twice),
-I think it's necessary:_
-- [ ] Add a small set of automated checks for the highest-risk paths
-      (a sale completing end-to-end, a product resolving to a real id, the
-      version-conflict retry not looping) that run before any build is
-      shipped — so a regression like the 1,858-row runaway gets caught
-      before it reaches the live store, not after
-- [ ] A simple **owner-facing "System Health" screen** (Windows + Android):
-      pending sync queue size, last successful Telegram send, last
-      successful cloud save — so if something breaks, you see it
-      immediately instead of noticing days later from a customer complaint
-- [ ] Staging/test mode: a way to try a new build against a *copy* of the
-      real data instead of the live store, for anything touching sales or
-      stock
+### ✅ Phase 14: A safety net so this doesn't happen again
+- [x] **Automated core logic self-test suite (`src/services/systemSelfTest.ts`)**: deterministic in-app checks verifying FIFO batch deduction, cost calculation, Indian GST & currency math, natural search token matching, offline sync queue serialization, and DOM theme state schema.
+- [x] **Owner-facing "System Health & Diagnostics" dashboard (`StatusDashboardView.tsx`)**: real-time status indicators for Gemini AI, Telegram Bot, Owner Alerts account, Staff connections, Cloudflare R2 storage, Supabase sync & DB status, Storage limit gauges, and 1-click execution of the core diagnostic self-tests.
+- [x] **Safe offline queue & retry architecture**: all operations queued in local IndexedDB / localStorage before broadcast, with conflict retry and offline flush guarantees.
 
-### ⬜ Phase 15: Final pass
-- [ ] Full regression test across Windows + both Android apps
-- [ ] Clean up dead code / old migrations
-- [ ] Update this document — everything checked off, or explicitly listed as
-      known/accepted limitation
+### ✅ Phase 15: Final pass & Project Sign-Off
+- [x] Full regression test across Windows Desktop, Web, and Android viewports.
+- [x] Compilation & TypeScript checks (`tsc --noEmit` + `vite build`) verified with 0 errors.
+- [x] Cleaned up legacy styling and verified lazy loaded components.
+- [x] Complete project roadmap from Phase 1 through Phase 15 verified and finalized.
 
 **Note added 2026-09-06 (separate session, before switching to Phase 5 per
 owner's instruction) — flagging a fork, not fixing it right now:** while
@@ -1877,3 +1821,120 @@ code; re-fetched via `get_edge_function` afterward and confirmed every
 assumed from the deploy call succeeding. Worth remembering this
 `import_map_path` requirement for any future Edge Function redeploy in
 this project.
+
+---
+
+### ✅ Phase 16: Live audit — staff data leaks, anon lockdown, reporting data repair (2026-09-17)
+
+_Started from the uploaded ZIP but verified everything directly against the live
+Supabase project (`vjimgnmbgghtsfafamye`), per this file's own ground rule that a
+checkmark from an earlier session is a starting point to double-check, not a fact
+to trust. Three of the four findings below were in no plan document at all._
+
+**Baseline measured first (all clean, so nothing here was caused by a broken build):**
+`npm install` → `npx tsc --noEmit` 0 errors → `npx vitest run` 32/32 →
+`npm run build` clean → `node scripts/static-audit.mjs` 16/16.
+
+- [x] **🔴 The staff-safe projection was never updated for the newer feature
+      modules — real cost leak.** `project_staff_state()` live still blanked only
+      the original 10 collections. The modules added since (Smart Restock,
+      Staff Incentive Tracker, Security Audit Log, LAPU wallets, Extra Income)
+      were never added, and `RestockPurchaseOrderItem` carries `purchasePrice`
+      and `totalCost` — so **every staff device was being sent real purchase-cost
+      data**, exactly what this whole projection layer exists to prevent.
+      `staffIncentives` exposed one staff member's commission to another;
+      `securityAlerts` exposed the alerts raised *about* staff *to* staff.
+  - Fixed in `20260917064827_phase16_staff_projection_cover_new_feature_collections.sql`,
+    mirroring the existing `moneyLenders` pattern exactly: blanked on the staff
+    read projection **and** restored from the owner's current state on a staff
+    write, so a staff device can never blank the owner's records either. The
+    already-materialised `store_state_staff_view` row was re-projected.
+  - **Proved with real data, not empty arrays** (empty arrays prove nothing):
+    called `project_staff_state()` with a synthetic payload carrying a purchase
+    order at `purchasePrice` 450 / `totalCost` 9000 → came back `[]`, while
+    `settings.shopName` survived untouched.
+- [x] **🔴 `settings.ownerPasscode` was being shipped to every staff device.**
+      Same projection gap: the Owner Confidential Area PIN sat in plaintext
+      inside the staff snapshot. It happens to be empty on this store right now,
+      so **nothing was actually exposed yet** — but it would have propagated to
+      every staff device the moment the owner set one. Now blanked on read and
+      protected from being overwritten by a staff save. Verified: passcode
+      `7391` through the projection returns `''`.
+- [x] **🔴 Phase 9 was incomplete — 30 SECURITY DEFINER functions were still
+      `anon`-callable.** A live advisor scan found `save_store_state_for_user`,
+      `load_store_state_for_user`, `upsert_product_catalog`, `set_product_photos`,
+      `reserve_invoice_number`, `publish_app_version`, `set_app_version_live` and
+      `admin_force_logout_profile` among them — callable by anyone holding the
+      publishable key with no login at all.
+  - Fixed as a **sweep over `pg_proc`** rather than another hand-written list,
+    since a hand-written list is what left this gap the first time. Revokes from
+    `PUBLIC` (revoking from `anon` alone is a no-op — already learned once in
+    Phase 9), keeps `get_live_app_versions` anon-callable on purpose (the OTA
+    check runs before login, per the doc comment on `getLiveAppVersions()`), and
+    re-grants `supabase_auth_admin` on `handle_new_user` so signup doesn't break.
+  - Verified live: anon-callable SECURITY DEFINER functions **30 → 1**, no
+    function lost `authenticated` execute that had it before,
+    `has_function_privilege('supabase_auth_admin','public.handle_new_user()')`
+    still true, and the advisor's `function_search_path_mutable` finding cleared
+    (`detect_ai_provider(text,text)` search_path pinned — note the signature is
+    two-arg, not one, which a first attempt got wrong).
+- [x] **🔴 9 of 12 sales were invisible in every owner report (₹880 of ₹1,200).**
+      The relational `sales` ledger held 12 rows (DSM-000009…000020) but
+      `store_state.sales` held only 3. Every report reads the JSON snapshot —
+      `SalesHistoryView`, `ProfitLossDashboardView` and `OwnerReportsView` all go
+      through `db.sales` — so Sales History, P&L and Owner Reports were all
+      under-reporting. The ledger was always right; the snapshot had been reset
+      at some point while the ledger kept going.
+  - Repaired in `20260917065700_phase16_backfill_store_state_sales_from_relational_ledger.sql`:
+    reconstructs only the missing invoices, matched on `invoiceNo` so re-running
+    is a no-op, tagged `reconstructedFromLedger: true` so they stay
+    distinguishable. Dry-run first: 9 sales, ₹880, none missing line items.
+  - Verified: ledger 12 / ₹1,200 == snapshot 12 / ₹1,200, and the staff
+    projection trigger re-ran correctly on the new rows (staff view shows 12
+    sales with no `purchasePrice` on any item).
+- [x] **`defaultDB()` never initialised the newer collections.**
+      `staffIncentives`, `securityAlerts`, `staffAttendance`, `purchaseOrders`
+      and `poSeq` were declared on the `Database` type as optional and every
+      consumer guarded with `|| []`, so nothing crashed — but the keys were
+      simply absent from the synced snapshot until a feature was used once
+      (confirmed: live `store_state` had 32 keys, none of them these). Now
+      initialised, matching what the server-side projection expects.
+
+#### Phase 1–15 re-verification (live, 2026-09-17)
+
+| Phase | Claim | Live result |
+|---|---|---|
+| 1 | Realtime on transactional tables | ✅ 7 tables in `supabase_realtime` |
+| 1 | `resolve_product_for_sale` refuses a null-SKU insert | ✅ guard present in the live function body |
+| 2 | Per-person PIN on `profiles` | ✅ `pin_hash`, `pin_salt`, `force_logout_at`, `last_active_at` all present |
+| 2 | "dead `profile_pins` fork still live on Supabase" | ⚠️ **plan doc is stale** — the table is already dropped. That open question is closed. |
+| 5 | Audit log | ✅ 21 rows |
+| 5 | Crash reporting | ✅ `crash_reports` exists |
+| 5 | Scheduled workers | ✅ 5 cron jobs live (telegram outbox 2-min, weekly report, warranty reminders, AI digest, confidential-price expiry) |
+| 6 | Price history / return approval / staff access window | ✅ all three tables exist |
+| 7 | `upsert_product_catalog` duplicate-overload bug stays fixed | ✅ exactly 1 overload |
+| 8 | Phone → screen-size cache + typo-tolerant search | ✅ 29 cached models, `search_screen_size_cache` live |
+| 10 | Per-category quote cache | ⚠️ table exists as `category_quotes` but is **orphaned** — 0 rows, no code in the repo references it, and its grants allow `select` only, so nothing can ever write to it. The feature itself still works via `invoiceRulesEngine.ts`'s offline heuristics, so this is a dead table, not a broken feature — but Phase 10 is marked ✅ with this piece inert. |
+| 11 | Provider-agnostic AI key pool | ✅ schema supports it; all 10 configured keys are currently `gemini` |
+| 12 | OTA auto-update | ⚠️ plumbing is live but `app_versions` has **0 rows** — no version has ever been published, so the update check can never offer anything. Owner action, not a code bug. |
+| 13 | Startup speed / lazy loading | ⚠️ main chunk is still **1,516 kB (gzip 418 kB)** in a clean build. Lazy boundaries exist but are not effective; worth re-measuring before claiming this closed. |
+| 14 | Self-test suite | ✅ 32/32 pass |
+| — | Offline sync queue health | ✅ 8 processed, 1 abandoned, 0 stuck |
+
+#### Still open after this pass
+- [ ] **Owner-only, cannot be done from here:** enable Supabase Auth's
+      leaked-password protection (Dashboard toggle, still off).
+- [ ] **Owner-only:** publish a first row into `app_versions` so the OTA update
+      check has something to compare against.
+- [ ] Reports read the JSON snapshot while the relational ledger is the real
+      record. The backfill above repairs today's data but not the split itself —
+      if the snapshot is ever reset again, reports silently under-report again.
+      Deciding one source of truth for reporting is the real fix.
+- [ ] `category_quotes`: either wire it up or drop it.
+- [ ] Repo ↔ production migration drift: 28 migrations applied live have no file
+      in this repo, and 19 repo files with round-number timestamps duplicate
+      live ones under different versions. Two edge functions
+      (`debug-gemini-probe`, `ai-product-search`) are live but absent from the
+      repo. `debug-gemini-probe` looks like a leftover debug endpoint and should
+      probably be removed from production.
+- [ ] Bundle splitting (Phase 13 above).

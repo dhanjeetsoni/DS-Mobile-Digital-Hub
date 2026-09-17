@@ -24,7 +24,13 @@
     "android:mobile:dev": "tauri android dev --config src-tauri/tauri.mobile-android.conf.json",
     "android:mobile:build": "tauri android build --config src-tauri/tauri.mobile-android.conf.json",
     "audit:hardening": "npm run typecheck && npm run test:static",
-    "build:production": "npm run audit:hardening && npm run build"
+    "build:production": "npm run audit:hardening && npm run build",
+    "supabase:login": "npx supabase login",
+    "functions:deploy": "npx supabase functions deploy --project-ref vjimgnmbgghtsfafamye",
+    "functions:deploy:ai": "npx supabase functions deploy ai-gateway ai-price-advisor ai-product-photo ai-product-specs ai-search-match enhance-product-photo --project-ref vjimgnmbgghtsfafamye",
+    "functions:deploy:telegram": "npx supabase functions deploy telegram-connect telegram-outbox-worker daily-digest-worker --project-ref vjimgnmbgghtsfafamye",
+    "functions:deploy:staff": "npx supabase functions deploy staff-manage --project-ref vjimgnmbgghtsfafamye",
+    "functions:deploy:all": "npx supabase functions deploy --project-ref vjimgnmbgghtsfafamye"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

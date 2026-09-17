@@ -877,3 +877,81 @@ returns its own `screenSizeMaxInches` guess in the API response (for any
 other caller) — this fix works entirely on the frontend by simply no
 longer trusting/using that field for this flow, which is the safer,
 smaller change and needed no Edge Function redeploy.
+
+## 2026-09-17 — Live audit pass: staff cost/passcode leak, anon lockdown completed, ₹880 of sales restored to reports
+
+Naye uploaded ZIP se shuru kiya, lekin har cheez **live Supabase project
+(`vjimgnmbgghtsfafamye`) ko seedha query karke** verify ki — sirf docs par
+bharosa nahi kiya. Poori detail `PROJECT_PLAN.md` ke naye "Phase 16" section
+mein hai; yahan summary:
+
+- **Baseline pehle measure kiya** (taaki pata rahe ki kuch pehle se toota hua
+  nahi hai): `npm install` → `tsc --noEmit` 0 errors → `vitest` 32/32 →
+  `npm run build` clean → `static-audit` 16/16.
+- **🔴 Staff ko purchase cost dikh raha tha.** `project_staff_state()` live par
+  sirf purani 10 collections blank karta tha. Jab se naye feature modules aaye
+  (Smart Restock, Staff Incentive Tracker, Security Audit Log, LAPU wallets,
+  Extra Income), unhe kabhi add hi nahi kiya gaya — aur
+  `RestockPurchaseOrderItem` mein `purchasePrice`/`totalCost` hota hai. Yaani
+  har staff device ko asli purchase cost bheja ja raha tha. Ye bilkul wahi
+  cheez hai jise rokne ke liye ye poora projection layer banaya gaya tha.
+  Saath mein ek staff ko doosre staff ki incentive, aur staff ke *upar* ke
+  security alerts bhi dikh rahe the.
+- **🔴 `settings.ownerPasscode` bhi staff device par jaa raha tha** — Owner
+  Confidential Area ka PIN, plaintext mein, staff snapshot ke andar. Abhi
+  khaali hai isliye **abhi tak kuch leak nahi hua**, par jis din owner passcode
+  set karta, wo sab staff devices par pahunch jaata.
+  - Dono fix ek migration mein
+    (`20260917064827_phase16_staff_projection_cover_new_feature_collections.sql`),
+    exactly wahi pattern use karke jo `moneyLenders` ke liye already tha: staff
+    read par blank, aur staff write par owner ki current value se wapas restore
+    — taaki staff device owner ka data blank bhi na kar sake.
+  - **Khaali array se prove nahi kiya** (usse kuch sabit nahi hota) —
+    `project_staff_state()` ko asli data ke saath call kiya: passcode `7391` →
+    `''`, purchase order `purchasePrice` 450 / `totalCost` 9000 → `[]`, aur
+    `settings.shopName` waise ka waisa bacha raha.
+- **🔴 Phase 9 adhoora tha** — live scan mein 30 `SECURITY DEFINER` functions
+  abhi bhi bina login (`anon`) callable mile, jinme `save_store_state_for_user`,
+  `upsert_product_catalog`, `publish_app_version` aur
+  `admin_force_logout_profile` shaamil the. Is baar hand-written list ki jagah
+  `pg_proc` par **sweep** likha (kyunki pichhli baar hand-written list ne hi gap
+  chhoda tha), `PUBLIC` se revoke kiya (sirf `anon` se revoke karna no-op hai —
+  ye seekh Phase 9 mein already likhi hui thi), `get_live_app_versions` ko
+  jaan-boojh ke anon-callable rakha (update check login se pehle chalta hai),
+  aur `handle_new_user` par `supabase_auth_admin` grant wapas diya taaki signup
+  na toote. **Verify:** anon-callable 30 → 1, kisi function ka
+  `authenticated` execute nahi gaya, `supabase_auth_admin` grant intact.
+- **🔴 Owner ke reports mein ₹880 ki bikri dikh hi nahi rahi thi.** Relational
+  `sales` ledger mein 12 sale (DSM-000009…000020), par `store_state.sales`
+  mein sirf 3. Saare reports JSON snapshot se padhte hain (`SalesHistoryView`,
+  `ProfitLossDashboardView`, `OwnerReportsView` — teeno `db.sales` se) — isliye
+  12 mein se 9 sale Sales History, P&L aur Owner Reports teeno mein gayab thi.
+  Ledger hamesha sahi tha; snapshot kisi point par reset ho gaya tha.
+  - Repair migration ne sirf missing invoices ko ledger se reconstruct kiya,
+    `invoiceNo` par match karke (dobara chalane par kuch nahi hoga), aur
+    `reconstructedFromLedger: true` tag ke saath — taaki hamesha pata rahe
+    kaunse rows reconstruct hue. Pehle dry-run: 9 sale, ₹880, koi bhi apne
+    line items ke bina nahi.
+  - **Verify:** ledger 12 / ₹1,200 == snapshot 12 / ₹1,200, aur staff
+    projection trigger naye rows par bhi sahi chala (staff view mein 12 sale,
+    kisi item par `purchasePrice` nahi).
+- **`defaultDB()` naye collections initialize hi nahi karta tha** —
+  `staffIncentives`, `securityAlerts`, `staffAttendance`, `purchaseOrders`,
+  `poSeq`. Type par optional the aur har jagah `|| []` guard tha isliye crash
+  nahi hota tha, par key synced snapshot mein hoti hi nahi thi jab tak feature
+  ek baar use na ho (live `store_state` mein 32 keys thi, inme se ek bhi nahi).
+- **Phase 1–15 ka live re-verification bhi kiya** — poori table
+  `PROJECT_PLAN.md` mein hai. 3 cheezein jo claim se match nahi karti:
+  (a) plan doc kehta hai `profile_pins` fork abhi bhi live hai — wo **already
+  drop ho chuka hai**, ye sawaal band; (b) Phase 10 ka `category_quotes` table
+  **orphan** hai — 0 rows, repo mein koi code use hi nahi karta, aur grants
+  sirf `select` dete hain to usme kabhi kuch likha hi nahi ja sakta (feature
+  khud offline heuristics se chal raha hai, isliye dead table hai, toota
+  feature nahi); (c) Phase 13 "startup speed" ke baawajood main chunk abhi bhi
+  **1,516 kB** hai, to lazy boundaries effective nahi hain.
+- **Owner ke liye 2 cheezein bachi hain** jo koi AI nahi kar sakta: Supabase
+  Dashboard mein leaked-password protection ON karna, aur `app_versions` mein
+  pehla version publish karna (abhi 0 rows hain, isliye OTA update check ke
+  paas compare karne ko kuch hai hi nahi).
+- Verify (local): `tsc --noEmit` clean, `vitest` 32/32, `npm run build` clean,
+  `static-audit` 16/16 — change ke baad dobara chalaye gaye.

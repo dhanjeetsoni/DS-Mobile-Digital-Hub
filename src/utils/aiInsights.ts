@@ -18,27 +18,45 @@ export interface BusinessInsightsSummary {
   lowStockProducts: { name: string; stock: number; minStock: number }[];
 }
 
-// Calls the Gemini-powered /api/business-insights endpoint with an aggregated,
+// Calls the Gemini-powered business-insights endpoint with an aggregated,
 // non-sensitive numeric summary (no raw customer/IMEI/personal data is sent).
 export async function getBusinessInsights(summary: BusinessInsightsSummary): Promise<string> {
-  if (!AI_GATEWAY_URL) throw new Error("AI insights unavailable — cloud not configured.");
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData?.session?.access_token;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 
-  const res = await fetchWithRetry(`${AI_GATEWAY_URL}/business-insights`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ summary }),
-  });
-
-  const json = await res.json().catch(() => null);
-  if (!res.ok || !json?.success) {
-    throw new Error(json?.error || "AI insights unavailable. Please try again.");
+  // Try local server first
+  try {
+    const res = await fetchWithRetry(`/api/business-insights`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ summary }),
+    });
+    if (res.ok) {
+      const json = await res.json().catch(() => null);
+      if (json?.success && json?.insights) return json.insights;
+    }
+  } catch {
+    // try edge gateway
   }
-  return json.insights as string;
+
+  if (AI_GATEWAY_URL) {
+    const res = await fetchWithRetry(`${AI_GATEWAY_URL}/business-insights`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ summary }),
+    });
+
+    const json = await res.json().catch(() => null);
+    if (res.ok && json?.success) {
+      return json.insights as string;
+    }
+  }
+
+  throw new Error("AI insights unavailable. Please verify API configuration.");
 }
 
 export interface StaffAdviceSummary {
@@ -52,22 +70,40 @@ export interface StaffAdviceSummary {
 // sends or asks for profit/margin/cost/expense figures — only sales-count and
 // stock-level data a staff member is already allowed to see.
 export async function getStaffAdvice(summary: StaffAdviceSummary): Promise<string> {
-  if (!AI_GATEWAY_URL) throw new Error("AI advice unavailable — cloud not configured.");
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData?.session?.access_token;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 
-  const res = await fetchWithRetry(`${AI_GATEWAY_URL}/staff-advice`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ summary }),
-  });
-
-  const json = await res.json().catch(() => null);
-  if (!res.ok || !json?.success) {
-    throw new Error(json?.error || "AI advice unavailable. Please try again.");
+  // Try local server first
+  try {
+    const res = await fetchWithRetry(`/api/staff-advice`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ summary }),
+    });
+    if (res.ok) {
+      const json = await res.json().catch(() => null);
+      if (json?.success && json?.advice) return json.advice;
+    }
+  } catch {
+    // try edge gateway
   }
-  return json.advice as string;
+
+  if (AI_GATEWAY_URL) {
+    const res = await fetchWithRetry(`${AI_GATEWAY_URL}/staff-advice`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ summary }),
+    });
+
+    const json = await res.json().catch(() => null);
+    if (res.ok && json?.success) {
+      return json.advice as string;
+    }
+  }
+
+  throw new Error("AI advice unavailable. Please verify API configuration.");
 }

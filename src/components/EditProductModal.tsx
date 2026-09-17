@@ -53,6 +53,11 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   const [warrantyEnabled, setWarrantyEnabled] = useState(false);
   const [warrantyMonths, setWarrantyMonths] = useState<number>(6);
   const [requireCustomerDetails, setRequireCustomerDetails] = useState(false);
+  const [compatibleModels, setCompatibleModels] = useState<string[]>([]);
+  const [newModelInput, setNewModelInput] = useState("");
+  const [screenSizeInches, setScreenSizeInches] = useState<number>(0);
+  const [screenSizeMaxInches, setScreenSizeMaxInches] = useState<number>(0);
+  const isScreenAccessory = category === "Tempered Glass" || category === "Curved Glass" || category === "Back Covers";
   // Phase 7 gap fix (2026-09-09): specifications/highlights could only ever
   // be set when a product was first added (AddProductModal) — there was no
   // way to edit them afterwards. Same fields, same AI-fill flow, now here too.
@@ -103,6 +108,9 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
       setFeatureHighlights(product.featureHighlights || []);
       setCustomTerms(product.customTerms || []);
       setCustomQuote(product.customQuote || "");
+      setCompatibleModels(product.compatibleModels || []);
+      setScreenSizeInches(product.screenSizeInches || 0);
+      setScreenSizeMaxInches(product.screenSizeMaxInches || 0);
       setPhoto(product.photo || "");
       originalPhotoRef.current = product.photo || "";
       setPhoto2((product.photos && product.photos[1]) || "");
@@ -420,6 +428,12 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
     product.requireCustomerDetails = warrantyEnabled ? true : requireCustomerDetails;
     product.specifications = specifications.length ? specifications : undefined;
     product.featureHighlights = featureHighlights.length ? featureHighlights : undefined;
+    product.compatibleModels = compatibleModels.length ? compatibleModels : undefined;
+    product.screenSizeInches = isScreenAccessory && screenSizeInches ? screenSizeInches : undefined;
+    product.screenSizeMaxInches =
+      isScreenAccessory && screenSizeMaxInches && screenSizeMaxInches > screenSizeInches
+        ? screenSizeMaxInches
+        : undefined;
     product.customTerms = customTerms.length ? customTerms.filter((t) => t.trim()) : undefined;
     product.customQuote = customQuote.trim() ? customQuote.trim() : undefined;
     product.photo = photo;
@@ -587,6 +601,103 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
               <label>Category</label>
               <input value={category} onChange={(e) => setCategory(e.target.value)} />
             </div>
+
+            {(isScreenAccessory || compatibleModels.length > 0) && (
+              <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
+                <div style={{ fontWeight: 700, fontSize: "13px", marginBottom: "4px" }}>
+                  📱 Compatible Phone Models &amp; Display Size
+                </div>
+                <div className="hint" style={{ marginBottom: "8px" }}>
+                  Ye product jin phone models pe fit hota hai (Tempered Glass, Covers, etc.). Search aur AI auto-match ke liye use hota hai.
+                </div>
+
+                <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                  <input
+                    value={newModelInput}
+                    onChange={(e) => setNewModelInput(e.target.value)}
+                    placeholder="e.g. Realme 7 ya iPhone 13 (Enter dabayein)"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const val = newModelInput.trim();
+                        if (val && !compatibleModels.includes(val)) {
+                          setCompatibleModels([...compatibleModels, val]);
+                          setNewModelInput("");
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={() => {
+                      const val = newModelInput.trim();
+                      if (val && !compatibleModels.includes(val)) {
+                        setCompatibleModels([...compatibleModels, val]);
+                        setNewModelInput("");
+                      }
+                    }}
+                  >
+                    <Plus size={13} /> Add
+                  </button>
+                </div>
+
+                {compatibleModels.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "10px" }}>
+                    {compatibleModels.map((m, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          padding: "2px 8px",
+                          borderRadius: "12px",
+                          background: "var(--brand)",
+                          color: "var(--brand-fg)",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {m}
+                        <button
+                          type="button"
+                          onClick={() => setCompatibleModels(compatibleModels.filter((_, i) => i !== idx))}
+                          style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", padding: "0 2px" }}
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ marginTop: "6px" }}>
+                  <label style={{ fontSize: "12px" }}>Display Size (inches) — optional, for smart size fallback matching</label>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "4px" }}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={screenSizeInches || ""}
+                      onChange={(e) => setScreenSizeInches(Number(e.target.value) || 0)}
+                      placeholder="e.g. 6.5"
+                      style={{ maxWidth: "110px" }}
+                    />
+                    <span style={{ fontSize: "12px", color: "var(--ink-soft)" }}>se</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={screenSizeMaxInches || ""}
+                      onChange={(e) => setScreenSizeMaxInches(Number(e.target.value) || 0)}
+                      placeholder="e.g. 6.7 (agar range)"
+                      style={{ maxWidth: "140px" }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>

@@ -1,15 +1,18 @@
 import React, { useState } from "react";
-import { DollarSign, Printer, CheckCircle2, ChevronDown, ChevronUp, Smartphone } from "lucide-react";
+import { DollarSign, Printer, CheckCircle2, ChevronDown, ChevronUp, Smartphone, MessageCircle, Send, Check, Coffee } from "lucide-react";
 import { Database, DailyGallaClosing } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { uid, todayStr, nowTimeStr } from "../utils/fifoEngine";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
+import { buildDailyGallaEodMessage, openWhatsApp } from "../services/whatsapp";
+import { sendTelegramReport } from "../services/telegram";
 
 interface DailyGallaModalProps {
   db: Database;
   onClose: () => void;
   onSaveGalla: (closing: DailyGallaClosing) => void;
   selectedDate?: string;
+  onOpenPettyCash?: () => void;
 }
 
 const DENOMS = [500, 200, 100, 50, 20, 10, 5, 2, 1];
@@ -20,6 +23,7 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
   onClose,
   onSaveGalla,
   selectedDate = todayStr(),
+  onOpenPettyCash,
 }) => {
   // Auto-carry-forward: yesterday's cash left in the drawer is today's
   // opening balance automatically — owner/staff no longer has to
@@ -42,7 +46,36 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
   });
   const [isSaved, setIsSaved] = useState(false);
   const [savedRecord, setSavedRecord] = useState<DailyGallaClosing | null>(null);
+  const [tgSending, setTgSending] = useState(false);
+  const [tgSent, setTgSent] = useState(false);
   const { closing, requestClose } = useAnimatedClose(onClose);
+
+  const handleSendWhatsApp = () => {
+    if (!savedRecord) return;
+    const msg = buildDailyGallaEodMessage(savedRecord, db.settings);
+    let ownerPhone = (db.settings.phone || "").replace(/\D/g, "");
+    if (!ownerPhone || ownerPhone.length < 10) {
+      const promptPhone = window.prompt("Enter Owner WhatsApp Number (10 digits):", db.settings.phone || "");
+      if (!promptPhone) return;
+      ownerPhone = promptPhone.replace(/\D/g, "");
+    }
+    openWhatsApp(ownerPhone, msg);
+  };
+
+  const handleSendTelegram = async () => {
+    if (!savedRecord || tgSending) return;
+    setTgSending(true);
+    try {
+      const msg = buildDailyGallaEodMessage(savedRecord, db.settings);
+      await sendTelegramReport(msg);
+      setTgSent(true);
+      setTimeout(() => setTgSent(false), 4000);
+    } catch (err: any) {
+      window.alert(`Telegram send error: ${err?.message || "Failed to send"}`);
+    } finally {
+      setTgSending(false);
+    }
+  };
 
   // ---- Everything below is calculated automatically from today's sales,
   // khata collections, xerox, repairs & expenses. Owner/staff never has
@@ -223,6 +256,30 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
                 <div className="kv" style={{ fontSize: "13px" }}><span>Today's Cash Expenses/Payments Subtracted</span><b style={{ color: "var(--red)" }}>-{inr(totalCashOut)}</b></div>
                 <div className="kv" style={{ fontSize: "13px" }}><span>= Expected Closing Balance</span><b style={{ color: "var(--navy)" }}>{inr(expectedCashInGalla)}</b></div>
               </div>
+              {onOpenPettyCash && (
+                <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    onClick={onOpenPettyCash}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "8px",
+                      background: "rgba(245, 158, 11, 0.15)",
+                      border: "1px solid rgba(245, 158, 11, 0.3)",
+                      color: "#b45309",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Coffee size={14} />
+                    <span>+ Quick Chai / Petty Cash Expense (₹20/50/100)</span>
+                  </button>
+                </div>
+              )}
               {!previousClosing && (
                 <div className="field" style={{ marginTop: "8px", maxWidth: "220px" }}>
                   <label style={{ fontSize: "11px" }}>First time? Set today's opening balance manually</label>
@@ -310,12 +367,21 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
           </div>
         )}
 
-        <div className="modal-actions" style={{ marginTop: "16px" }}>
+        <div className="modal-actions" style={{ marginTop: "16px", display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button className="btn" onClick={requestClose}>{isSaved ? "Done" : "Cancel"}</button>
           {isSaved ? (
-            <button className="btn primary" onClick={() => window.print()}>
-              <Printer size={14} /> Print Closing Slip
-            </button>
+            <>
+              <button className="btn" onClick={handleSendWhatsApp} style={{ color: "#25D366", borderColor: "rgba(37, 211, 102, 0.4)" }}>
+                <MessageCircle size={14} /> Send on Owner WhatsApp
+              </button>
+              <button className="btn" onClick={handleSendTelegram} disabled={tgSending} style={{ color: "#229ED9", borderColor: "rgba(34, 158, 217, 0.4)" }}>
+                {tgSent ? <Check size={14} style={{ color: "var(--green)" }} /> : <Send size={14} />}
+                {tgSent ? "Sent to Telegram!" : tgSending ? "Sending..." : "Send to Telegram"}
+              </button>
+              <button className="btn primary" onClick={() => window.print()}>
+                <Printer size={14} /> Print Closing Slip
+              </button>
+            </>
           ) : (
             <button
               className="btn primary"
@@ -326,6 +392,7 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
             </button>
           )}
         </div>
+
       </div>
     </div>
   );

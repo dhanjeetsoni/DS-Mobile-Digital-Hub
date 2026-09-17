@@ -1,10 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Smartphone, Plus, Search, Sparkles, CheckCircle2, Shield, Calendar, Receipt, User, QrCode, Lock } from "lucide-react";
 import { Database, IMEIUnit, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { uid, todayStr, genSku, addStockBatch } from "../utils/fifoEngine";
 import { BoxOcrModal } from "./BoxOcrModal";
 import { OcrPhoneResult } from "../utils/aiOcr";
+import { ModelAutoSuggestInput } from "./ModelAutoSuggestInput";
+import { PasteButton } from "./PasteButton";
 
 interface ImeiAuditViewProps {
   db: Database;
@@ -293,12 +295,18 @@ export const ImeiAuditView: React.FC<ImeiAuditViewProps> = ({
 
         {/* Filters */}
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "14px" }}>
-          <div style={{ flex: 1, minWidth: "240px" }}>
+          <div style={{ flex: 1, minWidth: "260px", display: "flex", alignItems: "center", gap: "6px" }}>
             <input
               placeholder="Search by 15-digit IMEI, Model, Brand, Serial Number or Invoice #..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ width: "100%", padding: "9px 12px", border: "1px solid var(--line)", borderRadius: "8px" }}
+              onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
+              style={{ width: "100%", padding: "9px 12px", border: "1px solid var(--line)", borderRadius: "8px", textTransform: "uppercase" }}
+            />
+            <PasteButton
+              cleanType="imei"
+              onPaste={(val) => setSearchQuery(val.toUpperCase())}
+              toast={toast}
+              title="Paste IMEI / S/N (1-Click)"
             />
           </div>
           <div>
@@ -423,43 +431,80 @@ export const ImeiAuditView: React.FC<ImeiAuditViewProps> = ({
                   <input
                     value={phoneForm.brand}
                     onChange={(e) => setPhoneForm({ ...phoneForm, brand: e.target.value })}
-                    placeholder="e.g. Samsung, Xiaomi, Apple, Realme, Vivo"
+                    placeholder="e.g. Vivo, Samsung, Xiaomi, Apple, Realme"
                     required
                   />
                 </div>
                 <div className="field">
-                  <label>Model Name <span className="req">*</span></label>
-                  <input
+                  <label>Model Name (Auto-Suggest on 1 letter) <span className="req">*</span></label>
+                  <ModelAutoSuggestInput
                     value={phoneForm.modelName}
-                    onChange={(e) => setPhoneForm({ ...phoneForm, modelName: e.target.value })}
-                    placeholder="e.g. Galaxy A15 5G / Redmi Note 13"
+                    onChange={(val) => setPhoneForm({ ...phoneForm, modelName: val })}
+                    onSelectModel={(model, detectedBrand) => {
+                      setPhoneForm((prev) => ({
+                        ...prev,
+                        modelName: model,
+                        brand: detectedBrand || prev.brand || "",
+                      }));
+                    }}
+                    storeModels={Array.from(new Set(allUnits.map((u) => u.productName).filter(Boolean) as string[]))}
+                    placeholder="e.g. Type 'V' for Vivo Y20/V29, 'Redmi Note 13', 'S24'…"
                     required
+                    showPasteButton={true}
+                    toast={toast}
                   />
                 </div>
                 <div className="field">
                   <label>Primary IMEI 1 (15-Digit) <span className="req">*</span></label>
-                  <input
-                    value={phoneForm.imei1}
-                    onChange={(e) => setPhoneForm({ ...phoneForm, imei1: e.target.value })}
-                    placeholder="15-digit number"
-                    required
-                  />
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      value={phoneForm.imei1}
+                      onChange={(e) => setPhoneForm({ ...phoneForm, imei1: e.target.value.toUpperCase() })}
+                      placeholder="15-digit IMEI number"
+                      style={{ textTransform: "uppercase", flex: 1 }}
+                      required
+                    />
+                    <PasteButton
+                      cleanType="imei"
+                      onPaste={(val) => setPhoneForm({ ...phoneForm, imei1: val.toUpperCase() })}
+                      toast={toast}
+                      title="Paste IMEI 1 (1-Click)"
+                    />
+                  </div>
                 </div>
                 <div className="field">
                   <label>Secondary IMEI 2 (If Dual SIM)</label>
-                  <input
-                    value={phoneForm.imei2}
-                    onChange={(e) => setPhoneForm({ ...phoneForm, imei2: e.target.value })}
-                    placeholder="Secondary IMEI"
-                  />
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      value={phoneForm.imei2}
+                      onChange={(e) => setPhoneForm({ ...phoneForm, imei2: e.target.value.toUpperCase() })}
+                      placeholder="Secondary IMEI"
+                      style={{ textTransform: "uppercase", flex: 1 }}
+                    />
+                    <PasteButton
+                      cleanType="imei"
+                      onPaste={(val) => setPhoneForm({ ...phoneForm, imei2: val.toUpperCase() })}
+                      toast={toast}
+                      title="Paste IMEI 2 (1-Click)"
+                    />
+                  </div>
                 </div>
                 <div className="field">
                   <label>Serial Number (S/N)</label>
-                  <input
-                    value={phoneForm.serialNo}
-                    onChange={(e) => setPhoneForm({ ...phoneForm, serialNo: e.target.value })}
-                    placeholder="e.g. R58N..."
-                  />
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      value={phoneForm.serialNo}
+                      onChange={(e) => setPhoneForm({ ...phoneForm, serialNo: e.target.value.toUpperCase() })}
+                      placeholder="e.g. R58N..."
+                      style={{ textTransform: "uppercase", flex: 1 }}
+                    />
+                    <PasteButton
+                      cleanType="imei"
+                      onPaste={(val) => setPhoneForm({ ...phoneForm, serialNo: val.toUpperCase() })}
+                      toast={toast}
+                      title="Paste Serial Number (1-Click)"
+                    />
+                  </div>
                 </div>
                 <div className="field">
                   <label>RAM &amp; Storage</label>

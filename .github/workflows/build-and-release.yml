@@ -131,6 +131,18 @@ jobs:
 
       - name: Setup Android SDK/NDK
         uses: android-actions/setup-android@v4
+        with:
+          # Google removed the legacy standalone "tools" package from the
+          # Android SDK repository (~2026-09-14) -- this action's `packages`
+          # input defaults to "tools platform-tools", so an unconfigured run
+          # now hard-fails at "Failed to find package 'tools'" before any
+          # build step even starts. Not an app-code issue: every project
+          # using this action broke on the same day. platform-tools alone is
+          # enough -- AGP/Gradle downloads whichever platform + build-tools
+          # version this project needs on demand during `npm run
+          # android:*:build` (this action already accepts the SDK licenses),
+          # so nothing else needs to be listed here.
+          packages: "platform-tools"
 
       - name: Install deps
         run: npm ci

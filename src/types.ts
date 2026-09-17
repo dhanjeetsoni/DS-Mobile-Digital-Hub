@@ -14,23 +14,6 @@ export interface Settings {
   gstPercent: number;
   upiId: string;
   invoiceTerms: string;
-  // Phase 10 — "Invoice shows only the rules relevant to what was actually
-  // sold on that invoice, not a single generic rules block for
-  // everything". Key is a product category name (e.g. "Tempered Glass",
-  // "Second-Hand Mobile"); a rule under a category only ever prints on an
-  // invoice that actually contains an item from that category. The
-  // special key "_universal" always prints regardless of what was sold
-  // (e.g. "preserve this invoice for any claim"). `invoiceTerms` above is
-  // kept as the pre-Phase-10 fallback for any store that hasn't split
-  // theirs into categories yet — never deleted, never silently
-  // overwritten, so nothing breaks for an existing store mid-upgrade.
-  categoryInvoiceRules?: Record<string, string>;
-  // Same per-category idea for the feel-good/motivational line (Phase 10
-  // item 3) — each category can have its own small pool of lines to
-  // rotate through (stable per invoice number, not re-randomized on every
-  // reprint); "_universal" is the fallback pool used when nothing sold on
-  // this invoice has a category-specific pool configured.
-  categoryInvoiceQuotes?: Record<string, string[]>;
   thermalDefault: boolean;
   // Phase 4 — 58mm is the far more common cheap counter-printer size in
   // India; 80mm optional for shops with the wider roll. Drives both the
@@ -79,6 +62,15 @@ export interface Settings {
   // the other 7 checklist items (there's no natural "pricing understood"
   // signal), so this is the one explicit owner-acknowledged flag.
   pricingTutorialSeen?: boolean;
+  // Phase 10: Category-specific invoice terms and customer-facing quotes.
+  // When an invoice is printed/viewed, only the rules and quotes matching
+  // the categories of items actually sold on that bill are rendered.
+  categoryInvoiceRules?: {
+    [categoryName: string]: {
+      terms: string[];
+      quote: string;
+    };
+  };
 }
 
 export interface StockBatch {
@@ -206,6 +198,10 @@ export interface Product {
   // photoStorage.ts's cleanupStaleOutOfStockPhotos(). Undefined/null means
   // "currently in stock" or "never tracked yet" (pre-7.2 products).
   outOfStockSince?: string | null;
+  // Phase 10: Product-specific terms/rules (warranty, return conditions, exclusions)
+  customTerms?: string[];
+  // Phase 10: Product-specific feel-good line / quote printed on the invoice
+  customQuote?: string;
 }
 
 export interface CartItem {
@@ -220,6 +216,9 @@ export interface CartItem {
   requireCustomerDetails: boolean;
   selectedImeis?: string[];
   isMobilePhone?: boolean;
+  // Phase 10: Optional product-level custom terms/quote snapshots
+  customTerms?: string[];
+  customQuote?: string;
   // Step 5.1 — snapshot of the product's MRP at the moment this line was
   // added, so the auto-calculated discount % shown on the invoice/report
   // reflects what MRP actually was at sale time even if it's edited later.
@@ -257,6 +256,9 @@ export interface SaleItem {
   mrp?: number | null;
   isGift?: boolean;
   giftSellingPrice?: number | null;
+  // Phase 10: Product-specific terms/quote snapshot
+  customTerms?: string[];
+  customQuote?: string;
 }
 
 export interface Customer {

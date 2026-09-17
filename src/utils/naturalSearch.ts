@@ -57,5 +57,64 @@ export function naturalMatch(haystack: string, query: string): boolean {
   if (!q) return true;
   const hay = haystack.toLowerCase();
   if (hay.includes(q)) return true;
-  return expandSearchTerms(q).some((t) => t.length > 1 && hay.includes(t));
+  if (expandSearchTerms(q).some((t) => t.length > 1 && hay.includes(t))) return true;
+  return fuzzyMatch(hay, q);
+}
+
+// Phase 8 — typo-tolerant search: shop staff typing fast under pressure at
+// the counter will misspell brand/model names ("reelme" for "Realme",
+// "iphon" for "iPhone"). Deliberately kept as plain JS Levenshtein
+// distance, not an AI/network call — same reasoning as the rest of this
+// file's header comment: a search box needs this on every keystroke, so it
+// has to be instant and free.
+//
+// Every query word must find SOME word in the haystack within its
+// length-scaled edit-distance budget (order-independent, so "p4 reelme"
+// still matches "Realme P4"). Short words (<=3 chars) require an exact
+// match — fuzzy-matching "p4"/"s24"-style short model suffixes would
+// produce far more false positives than it fixes typos.
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  const al = a.length, bl = b.length;
+  if (al === 0) return bl;
+  if (bl === 0) return al;
+  // Two-row DP — these are short catalog words, no need for the full matrix.
+  let prev = new Array(bl + 1);
+  let curr = new Array(bl + 1);
+  for (let j = 0; j <= bl; j++) prev[j] = j;
+  for (let i = 1; i <= al; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= bl; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[bl];
+}
+
+function fuzzyBudgetForLength(len: number): number {
+  if (len <= 3) return 0; // exact only — e.g. "p4", "s24"
+  if (len <= 6) return 1; // e.g. "realme"/"reelme", "iphone"/"iphon"
+  return 2; // longer brand/model words can absorb 2 typos
+}
+
+function fuzzyMatch(haystack: string, query: string): boolean {
+  const queryWords = query.split(/\s+/).filter(Boolean);
+  if (queryWords.length === 0) return false;
+  const haystackWords = haystack.split(/[\s,/()-]+/).filter(Boolean);
+  if (haystackWords.length === 0) return false;
+
+  return queryWords.every((qw) => {
+    const budget = fuzzyBudgetForLength(qw.length);
+    if (budget === 0) return false; // exact substring/word match already failed above
+    return haystackWords.some((hw) => {
+      // Skip pairs whose length gap alone already exceeds the budget —
+      // avoids wasted DP work and prevents e.g. "app" fuzzy-matching a
+      // completely different 8-letter word just because budget=1 isn't
+      // enough anyway once you account for the length difference.
+      if (Math.abs(hw.length - qw.length) > budget) return false;
+      return editDistance(hw, qw) <= budget;
+    });
+  });
 }

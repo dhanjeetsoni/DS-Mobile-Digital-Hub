@@ -3,6 +3,7 @@ import { Printer, MessageCircle, RotateCcw, RefreshCw, X, ShieldCheck, Sparkles,
 import { Database, Sale, ReturnRecord, ExchangeRecord } from "../types";
 import { inr, numberToWordsIndian, computeDiscountPercent } from "../utils/indianCurrency";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
+import { resolveInvoiceRules } from "../utils/invoiceRulesEngine";
 import {
   buildEscPosReceipt,
   printViaBluetooth,
@@ -30,67 +31,6 @@ function seededPick(arr: string[], seed: string): string {
 
 function motivationalLineFor(seed: string) {
   return seededPick(MOTIVATIONAL_LINES, seed);
-}
-
-// Phase 10 — "Invoice shows only the rules relevant to what was actually
-// sold on that invoice, not a single generic rules block for everything".
-// Collects every category actually present on this sale, pulls each
-// category's own rules text (categoryInvoiceRules), plus the always-shown
-// "_universal" block, dedupes identical lines, and falls back to the old
-// flat invoiceTerms parse for any store that hasn't configured
-// category-specific rules yet (never breaks an existing store mid-upgrade).
-function computeInvoiceRuleLines(sale: Sale | null | undefined, settings: Database["settings"]): string[] {
-  const catRules = settings.categoryInvoiceRules;
-  if (!catRules || Object.keys(catRules).length === 0) {
-    return (settings.invoiceTerms || "")
-      .split("\n")
-      .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").trim())
-      .filter(Boolean);
-  }
-  const categories = Array.from(new Set((sale?.items || []).map((i) => i.category).filter(Boolean)));
-  const seen = new Set<string>();
-  const lines: string[] = [];
-  const addBlock = (text?: string) => {
-    if (!text) return;
-    text
-      .split("\n")
-      .map((l) => l.replace(/^\s*\d+[.)]\s*/, "").trim())
-      .filter(Boolean)
-      .forEach((l) => {
-        if (!seen.has(l)) { seen.add(l); lines.push(l); }
-      });
-  };
-  categories.forEach((cat) => addBlock(catRules[cat]));
-  addBlock(catRules._universal);
-  // A brand-new store or a category with nothing configured at all yet
-  // (including no _universal) should still show *something* rather than a
-  // blank Terms box — fall back to the flat invoiceTerms text in that one
-  // edge case only.
-  if (lines.length === 0) {
-    return (settings.invoiceTerms || "")
-      .split("\n")
-      .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").trim())
-      .filter(Boolean);
-  }
-  return lines;
-}
-
-// Phase 10 item 3 — same per-category idea for the feel-good/motivational
-// line: the first category on the sale (in item order) that has its own
-// quote pool wins; falls back to "_universal", then to the original fixed
-// MOTIVATIONAL_LINES pool for a store that hasn't configured any yet.
-// Seeded on the invoice number so a reprint always shows the same line
-// rather than re-rolling it.
-function computeInvoiceQuote(sale: Sale | null | undefined, settings: Database["settings"]): string {
-  const seed = sale?.invoiceNo || "invoice";
-  const catQuotes = settings.categoryInvoiceQuotes;
-  if (!catQuotes) return motivationalLineFor(seed);
-  const categories = Array.from(new Set((sale?.items || []).map((i) => i.category).filter(Boolean)));
-  for (const cat of categories) {
-    if (catQuotes[cat]?.length) return seededPick(catQuotes[cat], seed);
-  }
-  const pool = catQuotes._universal?.length ? catQuotes._universal : MOTIVATIONAL_LINES;
-  return seededPick(pool, seed);
 }
 
 interface InvoiceViewerModalProps {
@@ -136,6 +76,12 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
 
   if (!sale && !creditNote && !exchange) return null;
 
+  const resolvedInvoiceRules = sale
+    ? resolveInvoiceRules(sale, db)
+    : exchange
+    ? resolveInvoiceRules({ items: exchange.replacementItems }, db)
+    : null;
+
   const handlePrint = () => {
     window.print();
   };
@@ -158,6 +104,8 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
         total: sale.total,
         amountPaid: sale.amountPaid,
         dueAmount: sale.dueAmount,
+        terms: resolvedInvoiceRules?.flatTerms || [],
+        quote: resolvedInvoiceRules?.feelGoodQuote,
       },
       paperWidth
     );
@@ -467,12 +415,34 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
 
                 <div className="invoice-foot-grid">
                   <div className="terms">
-                    <b><ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Terms &amp; Conditions:</b>
-                    <ol>
-                      {computeInvoiceRuleLines(sale, db.settings).map((line, idx) => (
-                        <li key={idx}>{line}</li>
-                      ))}
-                    </ol>
+                    <b><ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Terms &amp; Conditions (Applicable to Items on this Bill):</b>
+                    {resolvedInvoiceRules && resolvedInvoiceRules.groupedRules.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px" }}>
+                        {resolvedInvoiceRules.groupedRules.map((group) => (
+                          <div key={group.categoryKey} style={{ fontSize: "11px", lineHeight: "1.4" }}>
+                            <div style={{ fontWeight: 700, color: "var(--inv-navy)", display: "flex", alignItems: "center", gap: "4px", marginBottom: "2px" }}>
+                              <span>{group.icon}</span>
+                              <span>{group.badge || group.categoryName}:</span>
+                            </div>
+                            <ul style={{ margin: "0 0 2px 14px", padding: 0, listStyleType: "disc" }}>
+                              {group.rules.map((rule, idx) => (
+                                <li key={idx} style={{ marginBottom: "2px", color: "var(--inv-ink)" }}>{rule}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <ol>
+                        {(db.settings.invoiceTerms || "")
+                          .split("\n")
+                          .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").trim())
+                          .filter(Boolean)
+                          .map((line, idx) => (
+                            <li key={idx}>{line}</li>
+                          ))}
+                      </ol>
+                    )}
                   </div>
 
                   {db.settings.upiId && (
@@ -501,7 +471,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
                 </div>
 
                 <div className="motivational-strip">
-                  <Sparkles size={13} /> {computeInvoiceQuote(sale, db.settings)}
+                  <Sparkles size={13} /> {resolvedInvoiceRules?.feelGoodQuote || motivationalLineFor(sale.invoiceNo || sale.date)}
                 </div>
 
                 <p className="inv-footer-msg">

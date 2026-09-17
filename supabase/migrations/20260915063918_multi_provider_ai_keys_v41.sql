@@ -133,13 +133,4 @@ $$;
 
 revoke all on function public.get_gemini_key_status() from public;
 grant execute on function public.get_gemini_key_status() to authenticated;
--- FIXED: this line originally read `revoke ... TO anon`, which is not valid
--- PostgreSQL (REVOKE takes FROM), so it silently failed to apply as written.
-revoke execute on function public.get_gemini_key_status() from anon;
-
--- Also lock down the helper, which the original migration never revoked at
--- all. Note anon holds a DIRECT grant on new functions under Supabase's
--- default privileges, so revoking PUBLIC alone is not enough here.
-revoke execute on function public.detect_ai_provider(text, text) from public;
-revoke execute on function public.detect_ai_provider(text, text) from anon;
-grant execute on function public.detect_ai_provider(text, text) to authenticated, service_role;
+revoke execute on function public.get_gemini_key_status() to anon;

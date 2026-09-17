@@ -1,9 +1,13 @@
 import React, { useState } from "react";
-import { Printer, MessageCircle, RotateCcw, RefreshCw, X, ShieldCheck, Sparkles, Gift, Bluetooth, Usb } from "lucide-react";
+import { Printer, MessageCircle, RotateCcw, RefreshCw, X, ShieldCheck, Sparkles, Gift, Bluetooth, Usb, QrCode, Image as ImageIcon, Download } from "lucide-react";
 import { Database, Sale, ReturnRecord, ExchangeRecord } from "../types";
 import { inr, numberToWordsIndian, computeDiscountPercent } from "../utils/indianCurrency";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 import { resolveInvoiceRules } from "../utils/invoiceRulesEngine";
+import { buildInvoiceMessage, openWhatsApp } from "../services/whatsapp";
+import { getUpiQrImageUrl } from "../utils/upiQr";
+import { generateReceiptImageCard, downloadReceiptImage } from "../utils/receiptImageGenerator";
+import { WhatsAppPreviewBubble } from "./WhatsAppPreviewBubble";
 import {
   buildEscPosReceipt,
   printViaBluetooth,
@@ -69,20 +73,9 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
   // threading a new settings-write callback through every caller of this
   // modal just for this one field.
   const [paperWidth, setPaperWidth] = useState<"58mm" | "80mm">(db.settings.thermalPaperWidth === "80mm" ? "80mm" : "58mm");
-
-  // Phase 10 — NOTE: a live-AI-call-per-category-quote approach
-  // (categoryQuote/lookupCategoryQuote, an async Gemini call + Supabase
-  // cache) was built here in parallel with resolveInvoiceRules below
-  // (static, curated, legally-precise per-category terms AND quote in one
-  // coherent engine, already wired into both the on-screen invoice and
-  // the thermal receipt). resolveInvoiceRules is strictly better for this
-  // — no AI latency/failure risk, no async loading state, covers rules
-  // too, not just the quote — so this component now uses ONLY
-  // resolvedInvoiceRules.feelGoodQuote below. The ai-gateway
-  // /category-quote route and category_quotes cache table are still live
-  // on Supabase but are now unused dead code from this component's
-  // perspective — left in place rather than torn out solo (same call as
-  // was made for the earlier profile_pins vs profiles.pin_hash fork).
+  const [imageCardUrl, setImageCardUrl] = useState<string | null>(null);
+  const [showWhatsAppPreview, setShowWhatsAppPreview] = useState(false);
+  const [isGeneratingImg, setIsGeneratingImg] = useState(false);
 
   if (!sale && !creditNote && !exchange) return null;
 
@@ -147,40 +140,28 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
 
   const handleWhatsAppShare = () => {
     if (!sale) return;
-    const s = db.settings;
-    const phone = (sale.customer?.phone || "").replace(/\D/g, "");
-    const itemsList = sale.items
-      .map((i) => `• ${i.name} (Qty: ${i.qty}) - ${inr(i.price * i.qty)}`)
-      .join("\n");
-    const imeiDetails = sale.items
-      .filter((i) => i.selectedImeis && i.selectedImeis.length > 0)
-      .map((i) => `IMEI: ${i.selectedImeis?.join(", ")}`)
-      .join("\n");
-
-    const text = `*${s.shopName}*\n🧾 Invoice: *${sale.invoiceNo}*\n📅 Date: ${sale.date}\n👤 Customer: ${
-      sale.customer?.name || "Customer"
-    }\n\n*Items:*\n${itemsList}\n${imeiDetails ? `\n${imeiDetails}\n` : ""}\n💰 Total Amount: *${inr(
-      sale.total
-    )}*\n💳 Payment: ${sale.payment}${
-      sale.dueAmount > 0.005 ? `\n⚠️ Balance Due: *${inr(sale.dueAmount)}*` : "\n✔ Status: Paid in Full"
-    }\n\nThank you for shopping with us! Visit again.`;
-
-    const targetUrl = `https://wa.me/${phone ? "91" + phone.slice(-10) : ""}?text=${encodeURIComponent(
-      text
-    )}`;
-    window.open(targetUrl, "_blank");
+    const msg = buildInvoiceMessage(sale, db.settings);
+    let phone = (sale.customer?.phone || "").replace(/\D/g, "");
+    if (!phone || phone.length < 10) {
+      const promptPhone = window.prompt(
+        "Enter Customer WhatsApp Mobile Number (10 digits):",
+        sale.customer?.phone || ""
+      );
+      if (!promptPhone) return;
+      phone = promptPhone.replace(/\D/g, "");
+    }
+    openWhatsApp(phone, msg);
   };
 
   // Helper for UPI QR
   const getUpiQrUrl = (amount: number, refNo: string) => {
-    const s = db.settings;
-    if (!s.upiId) return "";
-    const upiString = `upi://pay?pa=${encodeURIComponent(s.upiId)}&pn=${encodeURIComponent(
-      s.shopName
-    )}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(refNo)}`;
-    return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
-      upiString
-    )}`;
+    return getUpiQrImageUrl({
+      upiId: db.settings.upiId,
+      payeeName: db.settings.shopName,
+      amount,
+      invoiceNo: refNo,
+      note: `Bill ${refNo}`,
+    }, 220);
   };
 
   // Step 8.2 — "Discount & Gift info properly formatted": a single honest
@@ -203,6 +184,28 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
     : 0;
 
   const hasWarrantyItem = !!sale?.items.some((i) => i.warrantyEnabled);
+
+  const handleOpenImageCard = async () => {
+    if (!sale) return;
+    setIsGeneratingImg(true);
+    try {
+      const url = await generateReceiptImageCard({ sale, db });
+      setImageCardUrl(url);
+    } catch (e) {
+      console.error("Image generation error:", e);
+    } finally {
+      setIsGeneratingImg(false);
+    }
+  };
+
+  const handleDownloadImage = async () => {
+    if (!sale) return;
+    try {
+      await downloadReceiptImage(sale, db);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   return (
     <div className={`overlay show ${closing ? "closing" : ""}`}>
@@ -634,12 +637,34 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
           )}
         </div>
 
-        <div className="modal-actions" style={{ marginTop: "16px" }}>
+        <div className="modal-actions" style={{ marginTop: "16px", flexWrap: "wrap" }}>
           <button className="btn" onClick={requestClose}>Close</button>
           {sale && (
-            <button className="btn success" onClick={handleWhatsAppShare}>
-              <MessageCircle size={14} /> WhatsApp Invoice
-            </button>
+            <>
+              <button
+                className="btn success"
+                onClick={() => setShowWhatsAppPreview((v) => !v)}
+                style={{ fontWeight: 800 }}
+              >
+                <MessageCircle size={14} /> WhatsApp Bill Preview
+              </button>
+              <button
+                className="btn sm ghost"
+                onClick={handleOpenImageCard}
+                disabled={isGeneratingImg}
+                style={{
+                  fontWeight: 800,
+                  color: "#2563eb",
+                  border: "1.5px solid #93c5fd",
+                  background: "#eff6ff",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                }}
+              >
+                <ImageIcon size={14} /> {isGeneratingImg ? "Generating..." : "🖼️ Share Bill as Image Card"}
+              </button>
+            </>
           )}
           <button className="btn primary" onClick={handlePrint}>
             <Printer size={14} /> Print Document
@@ -665,6 +690,79 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
             </button>
           )}
         </div>
+
+        {/* WhatsApp Message Preview Bubble Section */}
+        {sale && showWhatsAppPreview && (
+          <div style={{ marginTop: "16px", borderTop: "1px solid var(--line)", paddingTop: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--ink)" }}>
+                💬 Real WhatsApp Chat Preview (What customer receives)
+              </span>
+              <button
+                type="button"
+                className="btn sm ghost"
+                onClick={() => setShowWhatsAppPreview(false)}
+                style={{ fontSize: "11px", padding: "2px 6px" }}
+              >
+                Hide Preview
+              </button>
+            </div>
+            <WhatsAppPreviewBubble
+              recipientPhone={sale.customer?.phone || ""}
+              recipientName={sale.customer?.name || "Customer"}
+              messageText={buildInvoiceMessage(sale, db.settings)}
+              shopName={db.settings.shopName}
+              onSent={() => setShowWhatsAppPreview(false)}
+            />
+          </div>
+        )}
+
+        {/* Image Card Modal */}
+        {sale && imageCardUrl && (
+          <div className="overlay show" style={{ zIndex: 10001 }}>
+            <div className="modal" style={{ maxWidth: "520px" }}>
+              <div className="modal-head">
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <ImageIcon size={18} style={{ color: "var(--brand)" }} />
+                  <h3 style={{ margin: 0 }}>Digital Bill Card (Clean Image)</h3>
+                </div>
+                <button onClick={() => setImageCardUrl(null)}>&times;</button>
+              </div>
+
+              <div style={{ padding: "8px 0 14px", textAlign: "center" }}>
+                <div style={{ maxHeight: "380px", overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "8px", background: "#f8fafc", padding: "8px" }}>
+                  <img
+                    src={imageCardUrl}
+                    alt="Digital Receipt Card"
+                    style={{ width: "100%", height: "auto", borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
+                  />
+                </div>
+
+                <div style={{ fontSize: "12px", color: "var(--ink-soft)", marginTop: "10px" }}>
+                  ✨ High-resolution digital bill image for WhatsApp sharing (No PDF viewer needed)
+                </div>
+
+                <div className="modal-actions" style={{ marginTop: "14px", justifyContent: "center" }}>
+                  <button className="btn" onClick={() => setImageCardUrl(null)}>Close</button>
+                  <button
+                    className="btn primary"
+                    onClick={handleDownloadImage}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <Download size={14} /> Download PNG Card
+                  </button>
+                  <button
+                    className="btn success"
+                    onClick={handleWhatsAppShare}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: 800 }}
+                  >
+                    <MessageCircle size={14} /> Share on WhatsApp
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {(btStatus.error || btStatus.ok || serialStatus.error || serialStatus.ok) && (
           <div style={{ marginTop: "8px", fontSize: "12.5px" }}>
             {btStatus.error && <div style={{ color: "var(--red)" }}>Bluetooth: {btStatus.error}</div>}

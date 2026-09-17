@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Activity, Bot, Cloud, Cpu, Database as DbIcon, RefreshCw, Send, Users } from "lucide-react";
+import { Activity, Bot, Cloud, Cpu, Database as DbIcon, RefreshCw, Send, Users, CheckCircle, AlertTriangle, Play, ShieldCheck } from "lucide-react";
 import { getGeminiKeyStatus, GeminiKeySlotStatus } from "../services/geminiKeys";
 import { pollTelegramConnection, describeFunctionsError } from "../services/telegram";
 import { listStaffAccounts, StaffProfile } from "../services/staffAuth";
 import { getSupabaseUsage, getCloudflareUsage } from "../services/storageUsage";
 import { StorageUsageMeter } from "./StorageUsageMeter";
+import { runSystemSelfTests, SelfTestResult } from "../services/systemSelfTest";
 
 // STEP 9.1 — Full System Status Dashboard (Owner-only).
 // One screen, six services, each with a green/red (sometimes amber) dot —
@@ -300,6 +301,115 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
         cloudflareLimitMb={storageLimitCloudflareMb}
         onSaveLimits={onSaveStorageLimits}
       />
+
+      {/* Phase 14: Automated System Diagnostic & Self-Test Suite */}
+      <DiagnosticSelfTestPanel />
+    </div>
+  );
+};
+
+const DiagnosticSelfTestPanel: React.FC = () => {
+  const [running, setRunning] = useState(false);
+  const [testReport, setTestReport] = useState<{
+    results: SelfTestResult[];
+    allPassed: boolean;
+    totalDurationMs: number;
+  } | null>(null);
+
+  const handleRunTests = async () => {
+    setRunning(true);
+    try {
+      const res = await runSystemSelfTests();
+      setTestReport(res);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 24, padding: 18, borderRadius: 12, background: "var(--card)", border: "1px solid var(--line)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", gap: 8, color: "var(--ink)" }}>
+            <ShieldCheck size={18} color="var(--brand)" /> Core Logic Automated Self-Test (Phase 14)
+          </h3>
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--ink-soft)" }}>
+            Instant sanity check for FIFO stock calculations, Indian GST & Currency math, offline queues, and indexing before shipping updates.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn primary sm"
+          onClick={handleRunTests}
+          disabled={running}
+          style={{ display: "flex", alignItems: "center", gap: 6 }}
+        >
+          {running ? <RefreshCw size={13} className="spin" /> : <Play size={13} />}
+          {running ? "Running Tests..." : "Run Sanity Checks"}
+        </button>
+      </div>
+
+      {testReport && (
+        <div style={{ background: "var(--paper)", borderRadius: 8, padding: 14, border: "1px solid var(--line)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+              {testReport.allPassed ? (
+                <span style={{ color: "var(--ok)", display: "flex", alignItems: "center", gap: 4 }}>
+                  <CheckCircle size={15} /> All Tests Passed ({testReport.results.length}/{testReport.results.length})
+                </span>
+              ) : (
+                <span style={{ color: "var(--danger)", display: "flex", alignItems: "center", gap: 4 }}>
+                  <AlertTriangle size={15} /> Test Failures Detected
+                </span>
+              )}
+            </span>
+            <span style={{ fontSize: 11, color: "var(--ink-soft)" }}>
+              Executed in {testReport.totalDurationMs}ms
+            </span>
+          </div>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            {testReport.results.map((t) => (
+              <div
+                key={t.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  background: "var(--card)",
+                  fontSize: 12.5,
+                  border: "1px solid var(--line)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      fontSize: 10,
+                      fontWeight: 800,
+                      background: t.status === "PASS" ? "var(--ok-soft)" : "var(--danger-soft)",
+                      color: t.status === "PASS" ? "var(--ok)" : "var(--danger)",
+                    }}
+                  >
+                    {t.status}
+                  </span>
+                  <div>
+                    <b style={{ color: "var(--ink)" }}>{t.name}</b>
+                    <div style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 2 }}>{t.message}</div>
+                  </div>
+                </div>
+                <span style={{ fontSize: 11, color: "var(--ink-soft)", whiteSpace: "nowrap" }}>{t.durationMs} ms</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -30,7 +30,14 @@ self.addEventListener("activate", (event) => {
 });
 
 function isPhotoRequest(url) {
-  return url.pathname.includes(STORAGE_OBJECT_PATH);
+  return (
+    url.pathname.includes(STORAGE_OBJECT_PATH) ||
+    url.pathname.includes("/product/") ||
+    url.pathname.includes("/r2-storage") ||
+    url.hostname.includes("r2.cloudflarestorage.com") ||
+    url.hostname.includes("workers.dev") ||
+    url.pathname.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i) !== null
+  );
 }
 
 self.addEventListener("fetch", (event) => {

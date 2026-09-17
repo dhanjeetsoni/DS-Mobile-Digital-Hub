@@ -137,8 +137,96 @@ export const SimTrackerView: React.FC<SimTrackerViewProps> = ({ db, onUpdate, to
     toast(`Lapu Wallet reconciled for ${lapuForm.operator}`, diff === 0 ? "green" : "amber");
   };
 
+  // Calculate latest balance for each LAPU operator
+  const lapuLatestMap = React.useMemo(() => {
+    const map: Record<string, { balance: number; date: string }> = {
+      "Airtel Mitra": { balance: 0, date: "" },
+      "JioPOS Plus": { balance: 0, date: "" },
+      "Vi Smart Lapu": { balance: 0, date: "" },
+    };
+    (db.lapuWallets || []).forEach((rec) => {
+      map[rec.operator] = { balance: rec.actualBalance, date: rec.date };
+    });
+    return map;
+  }, [db.lapuWallets]);
+
+  const lowBalanceWallets = (Object.entries(lapuLatestMap) as [string, { balance: number; date: string }][]).filter(([_, data]) => Boolean(data.date && data.balance < 500));
+
   return (
     <div>
+      {/* LAPU Multi-Balance Low Alert */}
+      {lowBalanceWallets.length > 0 && (
+        <div
+          style={{
+            background: "#fef2f2",
+            border: "2px solid #ef4444",
+            borderRadius: "10px",
+            padding: "12px 16px",
+            marginBottom: "16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "10px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <AlertCircle size={22} color="#dc2626" />
+            <div>
+              <div style={{ fontWeight: 800, color: "#991b1b", fontSize: "14px" }}>
+                ⚠️ LAPU WALLET LOW BALANCE ALERT (&lt; ₹500)
+              </div>
+              <div style={{ fontSize: "12px", color: "#b91c1c" }}>
+                {lowBalanceWallets.map(([op, d]) => `${op}: ${inr(d.balance)}`).join(" • ")} — Recharge fail hone se pehle distributor se balance load karwayein!
+              </div>
+            </div>
+          </div>
+          <button
+            className="btn primary sm"
+            onClick={() => {
+              setActiveTab("lapu");
+              setIsAddLapuModalOpen(true);
+            }}
+            style={{ fontWeight: 800 }}
+          >
+            Record Balance Top-Up
+          </button>
+        </div>
+      )}
+
+      {/* Operator Live Balance Strip */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px", marginBottom: "16px" }}>
+        {(Object.entries(lapuLatestMap) as [string, { balance: number; date: string }][]).map(([operator, data]) => {
+          const isLow = Boolean(data.date && data.balance < 500);
+          return (
+            <div
+              key={operator}
+              style={{
+                background: isLow ? "#fff1f2" : "var(--paper)",
+                border: isLow ? "1px solid #fecdd3" : "1px solid var(--line)",
+                borderRadius: "10px",
+                padding: "10px 14px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-soft)" }}>{operator}</div>
+                <div style={{ fontSize: "18px", fontWeight: 900, color: isLow ? "#e11d48" : "var(--ink)", marginTop: "2px" }}>
+                  {data.date ? inr(data.balance) : "No Entry Yet"}
+                </div>
+              </div>
+              {isLow && (
+                <span style={{ fontSize: "10px", fontWeight: 800, background: "#f43f5e", color: "#fff", padding: "2px 6px", borderRadius: "10px" }}>
+                  LOW &lt; ₹500
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
       <div className="grid cols-3" style={{ marginBottom: "16px" }}>
         <div className="card">
           <h3>Total SIMs Activated</h3>

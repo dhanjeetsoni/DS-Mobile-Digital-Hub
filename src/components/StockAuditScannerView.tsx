@@ -2,6 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Product } from "../types";
 import { ClipboardCheck, Barcode, Camera, Download, RotateCcw, AlertTriangle, CheckCircle2, Search, ArrowRight } from "lucide-react";
 import { playScanPip, playAlertTone } from "../utils/counterAudio";
+import { PasteButton } from "./PasteButton";
 
 interface StockAuditScannerViewProps {
   products: Product[];
@@ -225,12 +226,12 @@ export const StockAuditScannerView: React.FC<StockAuditScannerViewProps> = ({
           <div style={{ fontSize: "13px", fontWeight: 700, color: "#94a3b8", marginBottom: "4px" }}>
             RAPID SCANNER LISTENING (USB Barcode Gun / Keyboard Input)
           </div>
-          <form onSubmit={handleBarcodeSubmit} style={{ display: "flex", gap: "8px" }}>
+          <form onSubmit={handleBarcodeSubmit} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
             <input
               ref={inputRef}
               type="text"
               value={barcodeInput}
-              onChange={(e) => setBarcodeInput(e.target.value)}
+              onChange={(e) => setBarcodeInput(e.target.value.toUpperCase())}
               placeholder="Shelf ka barcode scan karein (Press Enter to count)..."
               style={{
                 flex: 1,
@@ -241,7 +242,14 @@ export const StockAuditScannerView: React.FC<StockAuditScannerViewProps> = ({
                 color: "#fff",
                 fontSize: "15px",
                 fontWeight: 600,
+                textTransform: "uppercase",
               }}
+            />
+            <PasteButton
+              cleanType="imei"
+              onPaste={(val) => setBarcodeInput(val.toUpperCase())}
+              toast={showToast}
+              title="Paste Barcode / SKU (1-Click)"
             />
             <button type="submit" className="btn primary" style={{ fontWeight: 800, padding: "0 20px" }}>
               Count (+1)

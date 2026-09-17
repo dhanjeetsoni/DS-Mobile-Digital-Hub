@@ -75,27 +75,6 @@ export async function lookupScreenSize(modelName: string): Promise<number> {
   return 0;
 }
 
-// Phase 10 — per-category, AI-generated customer-facing "quote"/feel-good
-// line for the invoice footer, replacing the old fixed-set-of-8-generic-
-// lines-picked-by-hash approach. Server-side cached per store+category
-// (category_quotes table), same "ask once, cache forever" shape as
-// lookupScreenSize above — categories are open-ended (a shop can add its
-// own), so this can't be a static lookup table.
-export async function lookupCategoryQuote(category: string): Promise<string> {
-  if (!AI_GATEWAY_URL || !category.trim()) return "";
-  const res = await fetchWithRetry(`${AI_GATEWAY_URL}/category-quote`, {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({ category: category.trim() }),
-  });
-  if (res.ok) {
-    const json = await res.json();
-    if (json.success) return String(json.quote || "").trim();
-  }
-  return "";
-}
-
-
 // Step 2026-09-05: batch version used by the Add Product form's Compatible
 // Models flow. A tempered-glass/cover item can list many models at once
 // (e.g. from a photo scan), and the earlier approach of trusting the

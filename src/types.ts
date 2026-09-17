@@ -304,15 +304,13 @@ export interface Sale {
   total: number;
   amountPaid: number;
   dueAmount: number;
-  status: "Paid" | "Partial" | "Due" | "Cancelled";
-  // Split payment across multiple methods in one sale (e.g. part cash, part
-  // UPI). Optional — most sales still use the single `payment` field above.
   splitPayments?: {
     cash: number;
     upi: number;
     card: number;
     credit: number;
   };
+  status: "Paid" | "Partial" | "Due" | "Cancelled";
   // Part 3: owner correction trail. Editing/cancelling is only allowed
   // inside the store's `saleCorrectionWindowDays` window (from `createdAt`);
   // once that passes the sale is permanently locked.
@@ -676,6 +674,10 @@ export interface Database {
   warrantyClaims?: WarrantyClaim[];
   moneyLenders: MoneyLender[];
   lenderTransactions: LenderTransaction[];
+  staffIncentives?: StaffIncentiveRecord[];
+  securityAlerts?: SecurityAuditAlert[];
+  staffAttendance?: StaffAttendanceRecord[];
+  purchaseOrders?: RestockPurchaseOrder[];
   invoiceSeq: number;
   jobSeq: number;
   returnSeq: number;
@@ -683,14 +685,6 @@ export interface Database {
   warrantyClaimSeq?: number;
   simSeq: number;
   kycSeq: number;
-  // New feature-set added 2026-09-13 (staff attendance, incentive tracking,
-  // security audit log, smart restock purchase orders) — all optional so
-  // existing saved states keep loading without a migration, same pattern
-  // as warrantyClaims above.
-  staffIncentives?: StaffIncentiveRecord[];
-  securityAlerts?: SecurityAuditAlert[];
-  staffAttendance?: StaffAttendanceRecord[];
-  purchaseOrders?: RestockPurchaseOrder[];
   poSeq?: number;
 }
 

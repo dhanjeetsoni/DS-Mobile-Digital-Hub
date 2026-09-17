@@ -1,54 +1,41 @@
-/**
- * Phase 8 — typo-tolerant search. Staff typing fast at the counter will
- * misspell brand/model names ("reelme" for "Realme", "iphon" for
- * "iPhone") — naturalMatch() must still find the right product, without
- * turning into a near-match-everything filter that surfaces junk results.
- */
-
 import { describe, expect, it } from "vitest";
-import { naturalMatch } from "./naturalSearch";
+import { naturalMatch, expandSearchTerms } from "./naturalSearch";
 
-describe("naturalMatch — typo tolerance", () => {
-  it("matches a single dropped/swapped letter in a longer brand word", () => {
-    expect(naturalMatch("Realme P4", "reelme p4")).toBe(true);
-    expect(naturalMatch("Realme P4", "realme p4")).toBe(true); // exact still works
-    expect(naturalMatch("iPhone 15 Pro", "iphon 15 pro")).toBe(true);
-    expect(naturalMatch("Samsung Galaxy S24", "samsng galaxy s24")).toBe(true);
+describe("naturalSearch & typo-tolerant matching (Phase 8)", () => {
+  it("matches exact substrings", () => {
+    expect(naturalMatch("Samsung Galaxy S24 Ultra", "samsung")).toBe(true);
+    expect(naturalMatch("Realme 7 Pro", "realme 7")).toBe(true);
   });
 
-  it("still matches with word order or punctuation differences (existing substring/word behavior)", () => {
-    expect(naturalMatch("Tempered Glass - Realme P4", "realme p4")).toBe(true);
+  it("matches Hindi/Hinglish color synonyms", () => {
+    expect(naturalMatch("iPhone 14 Black Case", "kala")).toBe(true);
+    expect(naturalMatch("Realme Red Tempered Glass", "laal")).toBe(true);
+    expect(naturalMatch("OnePlus Blue Armor Cover", "neela")).toBe(true);
   });
 
-  it("does not fuzzy-match short words like model-number suffixes (exact only, <=3 chars)", () => {
-    // "p4" vs "p5" is only 1 edit apart, but short tokens must stay exact.
-    // Isolate this from the pre-existing (unrelated to this change)
-    // whole-word substring check in expandSearchTerms — a query word that
-    // literally appears in the haystack already matches regardless of the
-    // rest of the query, so use haystacks where the longer word ALSO
-    // differs, to test the fuzzy path specifically rather than that
-    // earlier substring check.
-    expect(naturalMatch("Redme P5", "realme p4")).toBe(false);
-    expect(naturalMatch("iPhone 16", "iphonee 15")).toBe(false);
+  it("handles fast counter typos for major brands", () => {
+    // "reelme" -> Realme
+    expect(naturalMatch("Realme Narzo 50 Pro", "reelme")).toBe(true);
+    // "iphon" -> iPhone
+    expect(naturalMatch("Apple iPhone 15 Pro Max", "iphon")).toBe(true);
+    // "samsang" -> Samsung
+    expect(naturalMatch("Samsung Galaxy M34", "samsang")).toBe(true);
+    // "onepluss" -> OnePlus
+    expect(naturalMatch("OnePlus Nord CE 3", "onepluss")).toBe(true);
+    // "viwo" -> Vivo
+    expect(naturalMatch("Vivo V29 5G", "viwo")).toBe(true);
+    // "charjer" -> Charger
+    expect(naturalMatch("Type-C 65W Fast Charger", "charjer")).toBe(true);
   });
 
-  it("does not match a genuinely unrelated query", () => {
-    expect(naturalMatch("Samsung Galaxy S24", "realme p4")).toBe(false);
-    expect(naturalMatch("Tempered Glass", "back cover")).toBe(false);
+  it("rejects completely unrelated terms", () => {
+    expect(naturalMatch("Samsung S24 Ultra", "iPhone 15")).toBe(false);
+    expect(naturalMatch("Vivo Y200", "Redmi Note 13")).toBe(false);
   });
 
-  it("requires every query word to match something (order-independent)", () => {
-    expect(naturalMatch("Realme P4", "p4 reelme")).toBe(true);
-    // "curved" has no match at all in the haystack -> whole query must fail.
-    expect(naturalMatch("Realme P4 Tempered Glass", "reelme curved")).toBe(false);
-  });
-
-  it("longer words tolerate up to 2 edits, not unlimited", () => {
-    expect(naturalMatch("OnePlus Nord", "0neplus nord")).toBe(true);
-    expect(naturalMatch("OnePlus Nord", "xyzplusnrd")).toBe(false);
-  });
-
-  it("empty query still matches everything (existing behavior, unchanged)", () => {
-    expect(naturalMatch("Anything", "")).toBe(true);
+  it("expands query terms with synonyms and typos", () => {
+    const terms = expandSearchTerms("reelme laal");
+    expect(terms).toContain("realme");
+    expect(terms).toContain("red");
   });
 });

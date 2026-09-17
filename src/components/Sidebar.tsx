@@ -12,6 +12,7 @@ import {
   Tag,
   Calendar,
   TrendingUp,
+  TrendingDown,
   DollarSign,
   User,
   Shield,
@@ -35,7 +36,6 @@ import {
   Rocket,
   ClipboardList,
   Award,
-  TrendingDown,
   ShieldCheck,
   Clock,
   Calculator,
@@ -51,7 +51,6 @@ interface SidebarProps {
   ownerMode: boolean;
   onToggleOwnerMode: () => void;
   onOpenQuickScan: () => void;
-  /** Optional: opens the Counter GST & Margin calculator modal. */
   onOpenCalculator?: () => void;
   onOpenWindowsModal?: () => void;
   /** 2026-09-04: narrow-screen (Android/small window) off-canvas drawer state — see index.css's 900px breakpoint. Both no-ops on desktop widths. */
@@ -300,7 +299,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Quick Camera Barcode & AI Scan Button (+ Counter Calculator) */}
+      {/* Quick Camera Barcode & AI Scan and Calculator */}
       <div style={{ padding: "10px 14px 4px 14px", display: "flex", gap: "6px" }}>
         <button
           className="btn primary sm"
@@ -308,13 +307,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
             flex: 1,
             justifyContent: "center",
             background: "var(--accent)",
-            padding: "9px",
-            fontSize: "12.5px",
+            padding: "9px 6px",
+            fontSize: "12px",
             fontWeight: 800,
           }}
           onClick={onOpenQuickScan}
+          title="Scan barcode or product box with camera"
         >
-          <Camera size={15} /> 1-Tap Barcode / Box Scan
+          <Camera size={14} /> Scan
         </button>
         {onOpenCalculator && (
           <button

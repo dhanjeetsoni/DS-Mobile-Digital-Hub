@@ -7,6 +7,15 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.g
 const GEMINI_MODEL_VISION = Deno.env.get("GEMINI_MODEL_VISION") || Deno.env.get("GEMINI_MODEL") || "gemini-3.7-flash";
 const GEMINI_MODEL_TEXT = Deno.env.get("GEMINI_MODEL_TEXT") || "gemini-3.5-flash-lite";
 const GEMINI_TIMEOUT_MS = Number(Deno.env.get("GEMINI_TIMEOUT_MS")) || 20_000;
+// 2026-09-08 root-cause fix (live-verified against Google's API directly,
+// not just reasoned about): gemini-3.5-flash-lite now hard-rejects a
+// thinkingConfig param with 400 INVALID_ARGUMENT — every text-based AI
+// feature (business insights, staff advice, screen-size lookup, customer
+// reply draft, demand forecast, churn risk, the daily digest) was silently
+// failing on every single call because of this. FAST_MODE_CONFIG (which
+// sets thinkingConfig) stays ONLY on the 4 vision/OCR routes below, which
+// use gemini-3.7-flash and were never affected. Every text route now uses
+// TEXT_MODE_CONFIG (empty) instead.
 const FAST_MODE_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
 const TEXT_MODE_CONFIG = {};
 
@@ -75,7 +84,30 @@ const ENV_GEMINI_KEYS: string[] = (() => {
   return keys;
 })();
 
-interface KeyEntry { slot: number; apiKey: string }
+type AiProvider = "gemini" | "openai" | "anthropic" | "groq" | "openrouter";
+
+interface KeyEntry {
+  slot: number;
+  apiKey: string;
+  provider: AiProvider;
+}
+
+function detectProvider(key: string, explicit?: string | null, label?: string | null): AiProvider {
+  if (explicit && ["gemini", "openai", "anthropic", "groq", "openrouter"].includes(explicit.toLowerCase())) {
+    return explicit.toLowerCase() as AiProvider;
+  }
+  if (label) {
+    const m = String(label).match(/\[(gemini|openai|anthropic|groq|openrouter)\]/i);
+    if (m) return m[1].toLowerCase() as AiProvider;
+  }
+  const clean = (key || "").trim();
+  if (clean.startsWith("sk-ant-")) return "anthropic";
+  if (clean.startsWith("gsk_")) return "groq";
+  if (clean.startsWith("sk-or-")) return "openrouter";
+  if (clean.startsWith("AIza")) return "gemini";
+  if (clean.startsWith("sk-")) return "openai";
+  return "gemini";
+}
 
 const storeKeyPoolCache = new Map<string, { keys: KeyEntry[]; at: number }>();
 const KEY_POOL_CACHE_MS = 20_000;
@@ -83,14 +115,18 @@ const KEY_POOL_CACHE_MS = 20_000;
 async function loadKeyPool(storeId: string | null): Promise<KeyEntry[]> {
   const poolId = storeId && supabaseAdmin ? storeId : ENV_POOL_ID;
   if (poolId === ENV_POOL_ID) {
-    return ENV_GEMINI_KEYS.map((apiKey, i) => ({ slot: i + 1, apiKey }));
+    return ENV_GEMINI_KEYS.map((apiKey, i) => ({
+      slot: i + 1,
+      apiKey,
+      provider: detectProvider(apiKey),
+    }));
   }
   const cached = storeKeyPoolCache.get(poolId);
   if (cached && Date.now() - cached.at < KEY_POOL_CACHE_MS) return cached.keys;
 
   const { data, error } = await supabaseAdmin!
     .from("gemini_api_keys")
-    .select("slot, api_key, status, cooldown_until")
+    .select("slot, api_key, status, cooldown_until, provider, label")
     .eq("store_id", poolId)
     .not("api_key", "is", null)
     .neq("status", "invalid")
@@ -101,13 +137,25 @@ async function loadKeyPool(storeId: string | null): Promise<KeyEntry[]> {
     const now = Date.now();
     keys = data
       .filter((row: any) => !row.cooldown_until || new Date(row.cooldown_until).getTime() <= now)
-      .map((row: any) => ({ slot: row.slot, apiKey: row.api_key }));
+      .map((row: any) => ({
+        slot: row.slot,
+        apiKey: row.api_key,
+        provider: detectProvider(row.api_key, row.provider, row.label),
+      }));
     if (keys.length === 0) {
-      keys = data.map((row: any) => ({ slot: row.slot, apiKey: row.api_key }));
+      keys = data.map((row: any) => ({
+        slot: row.slot,
+        apiKey: row.api_key,
+        provider: detectProvider(row.api_key, row.provider, row.label),
+      }));
     }
   }
   if (keys.length === 0 && ENV_GEMINI_KEYS.length > 0) {
-    keys = ENV_GEMINI_KEYS.map((apiKey, i) => ({ slot: i + 1, apiKey }));
+    keys = ENV_GEMINI_KEYS.map((apiKey, i) => ({
+      slot: i + 1,
+      apiKey,
+      provider: detectProvider(apiKey),
+    }));
   }
   storeKeyPoolCache.set(poolId, { keys, at: Date.now() });
   return keys;
@@ -175,6 +223,189 @@ function clientForKey(key: string): GoogleGenAI {
   return c;
 }
 
+// Multi-provider execution adapter for OpenAI, Anthropic, Groq, OpenRouter
+async function executeProviderCall(
+  provider: AiProvider,
+  apiKey: string,
+  params: any
+): Promise<{ text: string }> {
+  if (provider === "gemini") {
+    const client = clientForKey(apiKey);
+    const res = await client.models.generateContent(params);
+    return { text: res.text || "" };
+  }
+
+  let prompt = "";
+  let imageBase64: string | undefined;
+  let imageMimeType: string | undefined;
+
+  const rawContents = params?.contents;
+  if (typeof rawContents === "string") {
+    prompt = rawContents;
+  } else if (Array.isArray(rawContents)) {
+    for (const c of rawContents) {
+      if (typeof c === "string") prompt += (prompt ? "\n" : "") + c;
+      else if (Array.isArray(c?.parts)) {
+        for (const p of c.parts) {
+          if (p?.text) prompt += (prompt ? "\n" : "") + p.text;
+          if (p?.inlineData?.data) {
+            imageBase64 = p.inlineData.data;
+            imageMimeType = p.inlineData.mimeType || "image/jpeg";
+          }
+        }
+      }
+    }
+  } else if (rawContents?.parts && Array.isArray(rawContents.parts)) {
+    for (const p of rawContents.parts) {
+      if (p?.text) prompt += (prompt ? "\n" : "") + p.text;
+      if (p?.inlineData?.data) {
+        imageBase64 = p.inlineData.data;
+        imageMimeType = p.inlineData.mimeType || "image/jpeg";
+      }
+    }
+  }
+
+  let systemInstruction = "";
+  const rawSys = params?.config?.systemInstruction;
+  if (typeof rawSys === "string") {
+    systemInstruction = rawSys;
+  } else if (rawSys?.parts && Array.isArray(rawSys.parts)) {
+    systemInstruction = rawSys.parts.map((p: any) => p.text || "").join("\n");
+  }
+
+  const isJson = params?.config?.responseMimeType === "application/json";
+  if (isJson) {
+    prompt += "\n\nCRITICAL: Respond ONLY with a valid, raw JSON object. Do not wrap in markdown code blocks or backticks.";
+  }
+
+  const temperature = params?.config?.temperature ?? 0.3;
+
+  if (provider === "openai" || provider === "groq" || provider === "openrouter") {
+    let endpoint = "https://api.openai.com/v1/chat/completions";
+    let defaultModel = "gpt-4o-mini";
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    };
+
+    if (provider === "groq") {
+      endpoint = "https://api.groq.com/openai/v1/chat/completions";
+      defaultModel = imageBase64 ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
+    } else if (provider === "openrouter") {
+      endpoint = "https://openrouter.ai/api/v1/chat/completions";
+      defaultModel = "google/gemini-2.5-flash";
+      headers["HTTP-Referer"] = "https://dsmobile.local";
+      headers["X-Title"] = "DS Mobile Gateway";
+    }
+
+    const messages: any[] = [];
+    if (systemInstruction) {
+      messages.push({ role: "system", content: systemInstruction });
+    }
+
+    if (imageBase64) {
+      messages.push({
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          {
+            type: "image_url",
+            image_url: { url: `data:${imageMimeType || "image/jpeg"};base64,${imageBase64}` },
+          },
+        ],
+      });
+    } else {
+      messages.push({ role: "user", content: prompt });
+    }
+
+    const reqBody: any = {
+      model: defaultModel,
+      messages,
+      temperature,
+    };
+    if (isJson && provider !== "groq") {
+      reqBody.response_format = { type: "json_object" };
+    }
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(reqBody),
+    });
+
+    if (!res.ok) {
+      const errTxt = await res.text().catch(() => "");
+      const err: any = new Error(`${provider} API failed (${res.status}): ${errTxt}`);
+      err.status = res.status;
+      throw err;
+    }
+
+    const data = await res.json();
+    let text = data?.choices?.[0]?.message?.content || "";
+    if (isJson) {
+      text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    }
+    return { text };
+  }
+
+  if (provider === "anthropic") {
+    const endpoint = "https://api.anthropic.com/v1/messages";
+    const messages: any[] = [];
+    if (imageBase64) {
+      messages.push({
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: imageMimeType || "image/jpeg",
+              data: imageBase64,
+            },
+          },
+          { type: "text", text: prompt },
+        ],
+      });
+    } else {
+      messages.push({ role: "user", content: prompt });
+    }
+
+    const reqBody: any = {
+      model: "claude-3-5-haiku-20241022",
+      messages,
+      max_tokens: 2048,
+      temperature,
+    };
+    if (systemInstruction) reqBody.system = systemInstruction;
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(reqBody),
+    });
+
+    if (!res.ok) {
+      const errTxt = await res.text().catch(() => "");
+      const err: any = new Error(`Anthropic API failed (${res.status}): ${errTxt}`);
+      err.status = res.status;
+      throw err;
+    }
+
+    const data = await res.json();
+    let text = data?.content?.[0]?.text || "";
+    if (isJson) {
+      text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    }
+    return { text };
+  }
+
+  throw new Error(`Unsupported AI provider: ${provider}`);
+}
+
 const activeKeyIndexByPool = new Map<string, number>();
 
 function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | null {
@@ -188,7 +419,9 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | 
     msg.includes("429") ||
     msg.includes("quota") ||
     msg.includes("resource_exhausted") ||
-    msg.includes("rate limit")
+    msg.includes("rate limit") ||
+    msg.includes("tokens per min") ||
+    msg.includes("requests per min")
   ) {
     return "quota";
   }
@@ -198,6 +431,8 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | 
     status === 403 ||
     msg.includes("permission_denied") ||
     msg.includes("unauthenticated") ||
+    msg.includes("invalid_api_key") ||
+    msg.includes("authentication") ||
     msg.includes("api key not valid") ||
     msg.includes("api_key_invalid") ||
     msg.includes("invalid api key") ||
@@ -212,7 +447,11 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | 
     msg.includes("503") ||
     msg.includes("unavailable") ||
     msg.includes("overloaded") ||
-    msg.includes("high demand")
+    msg.includes("high demand") ||
+    status === 500 ||
+    status === 502 ||
+    status === 504 ||
+    msg.includes("bad gateway")
   ) {
     return "unavailable";
   }
@@ -247,7 +486,7 @@ const FAILOVER_TIME_BUDGET_MS = 22_000;
 async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
   const poolId = storeId && supabaseAdmin ? storeId : ENV_POOL_ID;
   const keys = await loadKeyPool(storeId);
-  if (keys.length === 0) throw new Error("AI unavailable — no Gemini API keys configured. Owner: add keys in Settings.");
+  if (keys.length === 0) throw new Error("AI unavailable — no AI API keys configured. Owner: add keys in Settings.");
 
   const startedAt = Date.now();
   let activeIdx = activeKeyIndexByPool.get(poolId) || 0;
@@ -267,7 +506,17 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
       const idx = (activeIdx + attempt) % keys.length;
       const entry = keys[idx];
       try {
-        const result = await callWithTimeout(fn(clientForKey(entry.apiKey)), GEMINI_TIMEOUT_MS);
+        let result: T;
+        if (entry.provider === "gemini") {
+          result = await callWithTimeout(fn(clientForKey(entry.apiKey)), GEMINI_TIMEOUT_MS);
+        } else {
+          const clientProxy: any = {
+            models: {
+              generateContent: (params: any) => executeProviderCall(entry.provider, entry.apiKey, params),
+            },
+          };
+          result = await callWithTimeout(fn(clientProxy), GEMINI_TIMEOUT_MS);
+        }
         activeKeyIndexByPool.set(poolId, idx);
         void markKeyResult(storeId, entry.slot, true);
         return result;
@@ -280,14 +529,14 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
           continue;
         }
         console.warn(
-          `Gemini key (store=${poolId}, slot=${entry.slot}) failed (${failure}) — ` +
+          `AI key (store=${poolId}, slot=${entry.slot}, provider=${entry.provider}) failed (${failure}) — ` +
             (failure === "invalid" ? "marking invalid, removing from rotation." : "cooling down, rotating to next key.")
         );
         void markKeyResult(storeId, entry.slot, false, err?.message || (err instanceof GeminiTimeoutError ? "Timed out" : String(err)), failure === "invalid" ? "invalid" : "exhausted");
       }
     }
   }
-  throw lastError || new Error("All Gemini API keys exhausted");
+  throw lastError || new Error("All AI API keys exhausted or on cooldown.");
 }
 
 const storeIdByUserCache = new Map<string, { storeId: string | null; at: number }>();
@@ -454,45 +703,19 @@ Never invent a model that is not printed on the pack.`;
 const screenSizeCache = new Map<string, { size: number; at: number }>();
 const SCREEN_SIZE_CACHE_MS = 24 * 60 * 60 * 1000;
 
-// Phase 8: exact-key lookup first (fast path, unchanged); if that misses,
-// try a typo-tolerant fuzzy match against the SAME cache table via
-// search_screen_size_cache() (pg_trgm) before ever falling through to a
-// fresh AI call — so "reelme p4" benefits from a prior "Realme P4" lookup
-// (by this store or any other) instead of re-spending an AI call just
-// because of a misspelling. Conservative similarity floor (0.45, above
-// the RPC's own 0.25 listing floor) since this substitution happens with
-// no human confirming it — a wrong fuzzy match here silently returns the
-// wrong phone's screen size.
-async function getScreenSizeFromSupabase(key: string, originalName: string): Promise<{ size: number; matchedName: string } | null> {
+async function getScreenSizeFromSupabase(key: string): Promise<number | null> {
   if (!supabaseAdmin) return null;
   try {
     const { data, error } = await supabaseAdmin
       .from("phone_screen_size_cache")
-      .select("screen_size_inches, model_name")
+      .select("screen_size_inches")
       .eq("model_key", key)
       .maybeSingle();
-    if (!error && data) {
-      const size = Number(data.screen_size_inches) || 0;
-      if (size) return { size, matchedName: data.model_name };
-    }
+    if (error || !data) return null;
+    return Number(data.screen_size_inches) || null;
   } catch {
-    // fall through to fuzzy match
+    return null;
   }
-
-  try {
-    const { data: fuzzyRows, error: fuzzyErr } = await supabaseAdmin
-      .rpc("search_screen_size_cache", { p_query: originalName, p_limit: 1 });
-    if (!fuzzyErr && Array.isArray(fuzzyRows) && fuzzyRows.length > 0) {
-      const top = fuzzyRows[0];
-      const size = Number(top.screen_size_inches) || 0;
-      if (size && Number(top.similarity) >= 0.45) {
-        return { size, matchedName: top.model_name };
-      }
-    }
-  } catch {
-    // Best-effort only.
-  }
-  return null;
 }
 
 async function saveScreenSizeToSupabase(key: string, modelName: string, size: number): Promise<void> {
@@ -507,90 +730,16 @@ async function saveScreenSizeToSupabase(key: string, modelName: string, size: nu
   }
 }
 
-// Phase 10 — "Same per-category logic for the customer-facing 'quote'/
-// feel-good line printed on the invoice". Categories are open-ended (a
-// shop can add its own), so this can't be a static lookup table — same
-// shape of problem as screen-size lookup above: ask AI once per
-// store+category, cache in Supabase (category_quotes), never call AI
-// again for that category. In-memory cache mirrors screenSizeCache for
-// the same reason (avoid hitting Supabase on every single invoice print
-// within one Edge Function instance's lifetime).
-const categoryQuoteCache = new Map<string, { quote: string; at: number }>();
-const CATEGORY_QUOTE_CACHE_MS = 24 * 60 * 60 * 1000;
-
-async function getCategoryQuoteFromSupabase(storeId: string, category: string): Promise<string | null> {
-  if (!supabaseAdmin) return null;
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("category_quotes")
-      .select("quote_text")
-      .eq("store_id", storeId)
-      .eq("category", category)
-      .maybeSingle();
-    if (error || !data) return null;
-    return data.quote_text || null;
-  } catch {
-    return null;
-  }
-}
-
-async function saveCategoryQuoteToSupabase(storeId: string, category: string, quote: string): Promise<void> {
-  if (!supabaseAdmin || !quote) return;
-  try {
-    await supabaseAdmin
-      .from("category_quotes")
-      .upsert({ store_id: storeId, category, quote_text: quote, generated_at: new Date().toISOString() });
-  } catch {
-    // Best-effort only — next invoice just asks AI again.
-  }
-}
-
-async function runCategoryQuote(storeId: string | null, category: string): Promise<string> {
-  const cacheKey = `${storeId || ENV_POOL_ID}:${category.toLowerCase()}`;
-  const cached = categoryQuoteCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < CATEGORY_QUOTE_CACHE_MS) return cached.quote;
-
-  if (storeId) {
-    const fromDb = await getCategoryQuoteFromSupabase(storeId, category);
-    if (fromDb) {
-      categoryQuoteCache.set(cacheKey, { quote: fromDb, at: Date.now() });
-      return fromDb;
-    }
-  }
-
-  if (!hasAI()) return "";
-  const prompt = `You are writing ONE short, warm, customer-facing "thank you" line to print at
-the bottom of a retail invoice for a small Indian mobile phone & digital accessories shop, for a
-customer who just bought an item in the category "${category}".
-Make it feel specific to that category (e.g. a phone purchase feels different from buying a
-tempered glass, a repair service, or an accessory) — not a generic one-size-fits-all line.
-Simple English (a little Hinglish warmth is fine), under 20 words, no quotation marks, no emoji,
-one line only.`;
-  const response = await runWithGeminiFailover(storeId, (ai) =>
-    ai.models.generateContent({
-      model: GEMINI_MODEL_TEXT,
-      contents: { parts: [{ text: prompt }] },
-      config: TEXT_MODE_CONFIG,
-    })
-  );
-  const quote = String(response.text || "").trim().replace(/^["']|["']$/g, "").slice(0, 200);
-  if (quote) {
-    categoryQuoteCache.set(cacheKey, { quote, at: Date.now() });
-    if (storeId) await saveCategoryQuoteToSupabase(storeId, category, quote);
-  }
-  return quote;
-}
-
 async function runScreenSizeLookup(storeId: string | null, modelName: string): Promise<number> {
   const key = modelName.trim().toLowerCase();
 
   const cached = screenSizeCache.get(key);
   if (cached && Date.now() - cached.at < SCREEN_SIZE_CACHE_MS) return cached.size;
 
-  const fromDb = await getScreenSizeFromSupabase(key, modelName);
+  const fromDb = await getScreenSizeFromSupabase(key);
   if (fromDb) {
-    screenSizeCache.set(key, { size: fromDb.size, at: Date.now() });
-    return fromDb.size;
+    screenSizeCache.set(key, { size: fromDb, at: Date.now() });
+    return fromDb;
   }
 
   if (!hasAI()) return 0;
@@ -625,10 +774,10 @@ async function runScreenSizeRangeLookup(
       results.push({ modelName: m, size: cached.size });
       continue;
     }
-    const fromDb = await getScreenSizeFromSupabase(key, m);
+    const fromDb = await getScreenSizeFromSupabase(key);
     if (fromDb) {
-      screenSizeCache.set(key, { size: fromDb.size, at: Date.now() });
-      results.push({ modelName: m, size: fromDb.size });
+      screenSizeCache.set(key, { size: fromDb, at: Date.now() });
+      results.push({ modelName: m, size: fromDb });
       continue;
     }
     uncached.push(m);
@@ -853,55 +1002,6 @@ SHOP NAME: ${String(input.shopName || "our shop")}`;
     ai.models.generateContent({ model: GEMINI_MODEL_TEXT, contents: { parts: [{ text: prompt }] }, config: TEXT_MODE_CONFIG })
   );
   return (response.text || "").trim();
-}
-
-async function runCatalogSearch(
-  storeId: string | null,
-  query: string,
-  products: { id: string; name: string; brand?: string; category?: string; compatibleModels?: string[] }[]
-): Promise<{ matchedIds: string[]; note: string }> {
-  if (!hasAI()) throw new Error("AI unavailable");
-  const prompt = `You are a semantic search layer for a small Indian mobile phone & digital
-accessories shop's product catalog, running ALONGSIDE a plain keyword search (not replacing it —
-the shop already shows literal keyword matches; your job is to find additional genuinely relevant
-items that keyword matching alone would miss because the customer's wording doesn't literally
-appear in the product name/brand/category, e.g. "cracked screen protector" should surface a
-"Tempered Glass" product, or a phone model name should surface glass/covers whose
-compatibleModels list includes it even if that model isn't in the product's own name).
-
-Return ONLY product ids from the CATALOG list below that are genuinely relevant to the SEARCH
-QUERY. Be conservative — an irrelevant suggestion is worse than no suggestion. If nothing in the
-catalog is a good semantic match beyond plain keywords, return an empty array; do not force a
-match. Respond ONLY as compact JSON: { "matchedIds": string[], "note": a short Hinglish phrase
-(under 15 words) explaining the connection if you found matches, or empty string if you didn't }.
-
-SEARCH QUERY: ${JSON.stringify(query)}
-
-CATALOG (id, name, brand, category, compatibleModels):
-${JSON.stringify(products.slice(0, 300))}`;
-  const response = await runWithGeminiFailover(storeId, (ai) =>
-    ai.models.generateContent({
-      model: GEMINI_MODEL_TEXT,
-      contents: { parts: [{ text: prompt }] },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            matchedIds: { type: Type.ARRAY, items: { type: Type.STRING } },
-            note: { type: Type.STRING },
-          },
-        },
-      },
-    })
-  );
-  const parsed = JSON.parse(response.text || "{}");
-  const validIds = new Set(products.map((p) => p.id));
-  const matchedIds = (Array.isArray(parsed.matchedIds) ? parsed.matchedIds : [])
-    .map((id: unknown) => String(id))
-    .filter((id: string) => validIds.has(id))
-    .slice(0, 20);
-  return { matchedIds, note: String(parsed.note || "").trim() };
 }
 
 async function runDemandForecast(storeId: string | null, products: unknown[]) {
@@ -1229,27 +1329,6 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      case "category-quote": {
-        const ctx = await requireUserAndStore(req);
-        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
-        if (!checkRateLimit(`category-quote:${ip}`, 60_000, 30)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
-
-        const body = await req.json().catch(() => ({}));
-        const category = body?.category;
-        if (!category || typeof category !== "string" || category.trim().length < 2) {
-          return json({ success: false, error: "No category provided." }, 400);
-        }
-
-        try {
-          const quote = await runCategoryQuote(ctx.storeId, category.trim().slice(0, 60));
-          if (!quote) return json({ success: false, error: "Could not generate a quote for this category." }, 503);
-          return json({ success: true, category: category.trim(), quote });
-        } catch (error) {
-          console.error("Category quote error", error);
-          return json({ success: false, error: "Lookup failed." }, 500);
-        }
-      }
-
       case "screen-size-lookup": {
         const ctx = await requireUserAndStore(req);
         if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
@@ -1385,26 +1464,6 @@ Deno.serve(async (req: Request) => {
         } catch (error) {
           console.error("Customer reply draft error", error);
           return json({ success: false, error: friendlyAiError(error, "AI reply draft failed. Write manually.") }, 500);
-        }
-      }
-
-      case "catalog-search": {
-        const ctx = await requireUserAndStore(req);
-        if (!ctx) return json({ success: false, error: "Authentication required." }, 401);
-        if (!checkRateLimit(`catalog-search:${ip}`, 60_000, 20)) return json({ success: false, error: "Too many requests. Please try again shortly." }, 429);
-
-        const body = await req.json().catch(() => ({}));
-        const query = typeof body?.query === "string" ? body.query.trim() : "";
-        const products = Array.isArray(body?.products) ? body.products : null;
-        if (query.length < 2) return json({ success: false, error: "Query too short." }, 400);
-        if (!products || products.length === 0) return json({ success: true, matchedIds: [], note: "" });
-
-        try {
-          const result = await runCatalogSearch(ctx.storeId, query, products);
-          return json({ success: true, ...result });
-        } catch (error) {
-          console.error("Catalog search error", error);
-          return json({ success: false, error: "AI search unavailable." }, 503);
         }
       }
 

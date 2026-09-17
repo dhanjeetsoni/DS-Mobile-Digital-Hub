@@ -21,6 +21,7 @@ import { Database, Sale, RepairJob, SecondHandKYC, IMEIUnit } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { todayStr } from "../utils/fifoEngine";
 import { openWhatsApp } from "../services/whatsapp";
+import { PasteButton } from "./PasteButton";
 
 interface ImeiWarrantyLookupViewProps {
   db: Database;
@@ -226,17 +227,23 @@ export const ImeiWarrantyLookupView: React.FC<ImeiWarrantyLookupViewProps> = ({
         </div>
 
         {/* Search Bar */}
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           <div className="searchbar" style={{ flex: 1, margin: 0 }}>
             <Search size={18} style={{ color: "var(--ink-soft)" }} />
             <input
               placeholder="🔍 Type 15-digit IMEI, last 4 digits, Mobile No., or Invoice No..."
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => setQuery(e.target.value.toUpperCase())}
               autoFocus
-              style={{ fontSize: "16px", padding: "10px 12px" }}
+              style={{ fontSize: "16px", padding: "10px 12px", textTransform: "uppercase" }}
             />
           </div>
+          <PasteButton
+            cleanType="imei"
+            onPaste={(val) => setQuery(val.toUpperCase())}
+            toast={(msg, kind) => showToast(msg, (kind as any) || "green")}
+            title="Paste IMEI / S/N (1-Click)"
+          />
           {query && (
             <button className="btn ghost sm" onClick={() => setQuery("")}>
               Clear

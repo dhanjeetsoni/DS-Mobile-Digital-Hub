@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Shield, Sparkles, Printer, CheckCircle2, User, Camera, FileText, Upload, X, IdCard } from "lucide-react";
+import { Shield, Sparkles, Printer, CheckCircle2, User, Camera, FileText, Upload, X, IdCard, CheckSquare, TrendingUp, AlertTriangle } from "lucide-react";
 import { Database, SecondHandKYC } from "../types";
 import { inr, numberToWordsIndian } from "../utils/indianCurrency";
 import { uid, todayStr, genSku, addStockBatch } from "../utils/fifoEngine";
@@ -7,6 +7,9 @@ import { BoxOcrModal } from "./BoxOcrModal";
 import { OcrPhoneResult } from "../utils/aiOcr";
 import { uploadKycPhotoOrFallback, getKycPhotoSignedUrl, isKycStoragePath, KycPhotoKind } from "../services/kycPhotoStorage";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
+import { getSecondHandValuation, SecondHandValuationResult } from "../services/aiOps";
+import { ModelAutoSuggestInput } from "./ModelAutoSuggestInput";
+import { PasteButton } from "./PasteButton";
 
 interface SecondHandKycModalProps {
   db: Database;
@@ -170,6 +173,42 @@ export const SecondHandKycModal: React.FC<SecondHandKycModalProps> = ({
 
   const [errorMsg, setErrorMsg] = useState("");
   const isViewing = !!viewingKyc;
+  const [valuationLoading, setValuationLoading] = useState(false);
+  const [valuationResult, setValuationResult] = useState<SecondHandValuationResult | null>(null);
+  const [checkedChecklist, setCheckedChecklist] = useState<Record<number, boolean>>({});
+
+  const handleAiValuation = async () => {
+    if (!formData.brand.trim() || !formData.modelName.trim()) {
+      toast?.("Pehle Brand aur Model Name bharein", "amber");
+      return;
+    }
+    setValuationLoading(true);
+    try {
+      const res = await getSecondHandValuation({
+        brand: formData.brand,
+        modelName: formData.modelName,
+        storage: formData.ramStorage,
+        cosmeticCondition: formData.conditionGrade,
+        hasBoxAndBill: true,
+      });
+      setValuationResult(res);
+      toast?.("AI Market Valuation ready!", "green");
+    } catch (err: any) {
+      toast?.(err?.message || "AI Valuation fail hua", "red");
+    } finally {
+      setValuationLoading(false);
+    }
+  };
+
+  const applyValuationPrices = () => {
+    if (!valuationResult) return;
+    setFormData((prev) => ({
+      ...prev,
+      purchaseAmountPaid: valuationResult.recommendedBuybackPrice || prev.purchaseAmountPaid,
+      expectedSellingPrice: valuationResult.resaleTargetPrice || prev.expectedSellingPrice,
+    }));
+    toast?.("AI Prices update ho gaye!", "green");
+  };
 
   // Compresses (any phone camera size, stays readable — see imageCompress.ts)
   // then uploads to the private kyc-photos bucket, optimistically previewing
@@ -389,15 +428,19 @@ export const SecondHandKycModal: React.FC<SecondHandKycModalProps> = ({
         {isViewing ? (
           <div id="print-area">
             <div className="invoice-paper" style={{ padding: "20px" }}>
-              <div className="status-strip ok">OFFICIAL USED DEVICE BUYBACK KYC &amp; LEGAL PURCHASE VOUCHER</div>
+              <div className="status-strip ok" style={{ fontSize: "11px", fontWeight: 800, letterSpacing: "0.05em", textAlign: "center" }}>
+                FORM B: USED SMARTPHONE PURCHASE &amp; LOCAL POLICE VERIFICATION RECORD (CEIR &amp; SANCHAR SAATHI COMPLIANT)
+              </div>
               <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: "12px", marginTop: "12px" }}>
                 <div>
                   <h2 style={{ margin: 0, color: "var(--navy)", fontSize: "18px" }}>{db.settings.shopName}</h2>
                   <div style={{ fontSize: "12px", color: "var(--ink-soft)" }}>{db.settings.address} • Ph: {db.settings.phone}</div>
+                  <div style={{ fontSize: "11px", color: "var(--ink-soft)", marginTop: "2px" }}>Dealer GSTIN: <b>{db.settings.gstin || "N/A"}</b> • Buyback Register Folio No: <b>{viewingKyc.voucherNo}</b></div>
                 </div>
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontWeight: 800, fontSize: "15px" }}>{viewingKyc.voucherNo}</div>
-                  <div style={{ fontSize: "12px" }}>Date: {viewingKyc.date}</div>
+                  <div style={{ fontWeight: 900, fontSize: "16px", color: "var(--navy)" }}>{viewingKyc.voucherNo}</div>
+                  <div style={{ fontSize: "12px", fontWeight: 700 }}>Date: {viewingKyc.date}</div>
+                  <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>Police Jurisdiction: Local Thana</div>
                 </div>
               </div>
 
@@ -412,17 +455,17 @@ export const SecondHandKycModal: React.FC<SecondHandKycModalProps> = ({
                 <thead>
                   <tr>
                     <th>Device Details</th>
-                    <th>IMEI 1</th>
+                    <th>Primary IMEI 1</th>
                     <th>IMEI 2 / S/N</th>
-                    <th>Grade</th>
-                    <th>Amount Paid</th>
+                    <th>Physical Grade</th>
+                    <th>Valuation Paid</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
                     <td><b>{viewingKyc.brand} {viewingKyc.modelName}</b><br/><span className="hint">{viewingKyc.ramStorage} {viewingKyc.color}</span></td>
-                    <td><b>{viewingKyc.imei1}</b></td>
-                    <td>{viewingKyc.imei2 || viewingKyc.serialNo || "—"}</td>
+                    <td><b style={{ fontFamily: "var(--font-mono)", fontSize: "13px" }}>{viewingKyc.imei1}</b></td>
+                    <td><span style={{ fontFamily: "var(--font-mono)" }}>{viewingKyc.imei2 || viewingKyc.serialNo || "—"}</span></td>
                     <td><span className="badge ok">{viewingKyc.conditionGrade}</span></td>
                     <td><b>{inr(viewingKyc.purchaseAmountPaid)}</b></td>
                   </tr>
@@ -435,22 +478,28 @@ export const SecondHandKycModal: React.FC<SecondHandKycModalProps> = ({
 
               {(viewingKyc.docPhoto || viewingKyc.sellerPhoto) && (
                 <div style={{ display: "flex", gap: "16px", marginTop: "14px" }}>
-                  {viewingKyc.docPhoto && <KycPhotoThumb value={viewingKyc.docPhoto} label="ID Proof Photo" />}
-                  {viewingKyc.sellerPhoto && <KycPhotoThumb value={viewingKyc.sellerPhoto} label="Seller Photo" />}
+                  {viewingKyc.docPhoto && <KycPhotoThumb value={viewingKyc.docPhoto} label="ID Proof Photo (Aadhaar / Voter / DL)" />}
+                  {viewingKyc.sellerPhoto && <KycPhotoThumb value={viewingKyc.sellerPhoto} label="Seller Live Photo" />}
                 </div>
               )}
 
-              <div style={{ marginTop: "16px", background: "var(--paper)", padding: "12px", borderRadius: "8px", fontSize: "11.5px", lineHeight: "1.6", color: "var(--ink-soft)" }}>
-                <b>Seller Legal Undertaking &amp; Declaration:</b><br />
-                I, <b>{viewingKyc.sellerName}</b>, hereby declare that I am the sole legal owner of the smartphone with IMEI <b>{viewingKyc.imei1}</b>. I confirm that all iCloud, Google FRP, and personal accounts have been permanently unlinked and formatted. This phone is not stolen, blacklisted, or tied to active unresolved finance disputes.
+              <div style={{ marginTop: "16px", background: "var(--paper)", padding: "12px", borderRadius: "8px", fontSize: "11px", lineHeight: "1.6", color: "var(--ink-soft)", border: "1px solid var(--line)" }}>
+                <b>LEGAL OWNER UNDERTAKING &amp; POLICE VERIFICATION DECLARATION:</b><br />
+                I, <b>{viewingKyc.sellerName}</b>, resident of <b>{viewingKyc.sellerAddress || "Recorded Address"}</b>, hereby declare and solemnly affirm that I am the sole lawful owner of the smartphone described above (IMEI: <b>{viewingKyc.imei1}</b>). I confirm that this handset was purchased legally by me and is free from all encumbrances, hire purchase, EMI defaults, or dispute. I have voluntarily formatted and removed all personal Google / Apple accounts, passcodes, and FRP locks. This device is NOT stolen, lost, or subject to any FIR / police inquiry under BNS / IPC. If this device is ever found to be stolen or disputed on CEIR / Sanchar Saathi portal, I take complete criminal and legal liability.
               </div>
 
-              <div className="invoice-foot-grid" style={{ marginTop: "24px" }}>
-                <div className="sign-box">
-                  <div className="sign-line">Seller Signature</div>
+              <div className="invoice-foot-grid" style={{ marginTop: "24px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px", textAlign: "center" }}>
+                <div className="sign-box" style={{ border: "1px dashed var(--line)", padding: "20px 10px 10px", borderRadius: "8px" }}>
+                  <div style={{ height: "40px" }}></div>
+                  <div className="sign-line" style={{ borderTop: "1px solid #000", paddingTop: "4px", fontSize: "11px", fontWeight: 700 }}>Seller Signature</div>
                 </div>
-                <div className="sign-box">
-                  <div className="sign-line">Store Authorized Signatory</div>
+                <div className="sign-box" style={{ border: "1px dashed var(--line)", padding: "20px 10px 10px", borderRadius: "8px" }}>
+                  <div style={{ height: "40px" }}></div>
+                  <div className="sign-line" style={{ borderTop: "1px solid #000", paddingTop: "4px", fontSize: "11px", fontWeight: 700 }}>Seller Left Thumb Impression (LTI)</div>
+                </div>
+                <div className="sign-box" style={{ border: "1px dashed var(--line)", padding: "20px 10px 10px", borderRadius: "8px" }}>
+                  <div style={{ height: "40px" }}></div>
+                  <div className="sign-line" style={{ borderTop: "1px solid #000", paddingTop: "4px", fontSize: "11px", fontWeight: 700 }}>Store Seal &amp; Authorized Signature</div>
                 </div>
               </div>
             </div>
@@ -464,21 +513,39 @@ export const SecondHandKycModal: React.FC<SecondHandKycModalProps> = ({
                 <div className="formgrid">
                   <div className="field">
                     <label>Seller Full Name <span className="req">*</span></label>
-                    <input
-                      value={formData.sellerName}
-                      onChange={(e) => setFormData({ ...formData, sellerName: e.target.value })}
-                      placeholder="e.g. Ramesh Kumar"
-                      required
-                    />
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <input
+                        value={formData.sellerName}
+                        onChange={(e) => setFormData({ ...formData, sellerName: e.target.value })}
+                        placeholder="e.g. Ramesh Kumar"
+                        style={{ flex: 1 }}
+                        required
+                      />
+                      <PasteButton
+                        cleanType="text"
+                        onPaste={(val) => setFormData((prev) => ({ ...prev, sellerName: val }))}
+                        toast={toast}
+                        title="Paste Seller Name"
+                      />
+                    </div>
                   </div>
                   <div className="field">
                     <label>Mobile Number <span className="req">*</span></label>
-                    <input
-                      value={formData.sellerPhone}
-                      onChange={(e) => setFormData({ ...formData, sellerPhone: e.target.value })}
-                      placeholder="10-digit phone number"
-                      required
-                    />
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <input
+                        value={formData.sellerPhone}
+                        onChange={(e) => setFormData({ ...formData, sellerPhone: e.target.value })}
+                        placeholder="10-digit phone number"
+                        style={{ flex: 1 }}
+                        required
+                      />
+                      <PasteButton
+                        cleanType="phone"
+                        onPaste={(val) => setFormData((prev) => ({ ...prev, sellerPhone: val }))}
+                        toast={toast}
+                        title="Paste Phone from WhatsApp"
+                      />
+                    </div>
                   </div>
                   <div className="field">
                     <label>ID Proof Type</label>
@@ -494,19 +561,37 @@ export const SecondHandKycModal: React.FC<SecondHandKycModalProps> = ({
                   </div>
                   <div className="field">
                     <label>ID / Aadhaar Number</label>
-                    <input
-                      value={formData.aadhaarNumber}
-                      onChange={(e) => setFormData({ ...formData, aadhaarNumber: e.target.value })}
-                      placeholder="XXXX-XXXX-XXXX"
-                    />
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <input
+                        value={formData.aadhaarNumber}
+                        onChange={(e) => setFormData({ ...formData, aadhaarNumber: e.target.value.toUpperCase() })}
+                        placeholder="XXXX-XXXX-XXXX"
+                        style={{ flex: 1, textTransform: "uppercase" }}
+                      />
+                      <PasteButton
+                        cleanType="text"
+                        onPaste={(val) => setFormData((prev) => ({ ...prev, aadhaarNumber: val.toUpperCase() }))}
+                        toast={toast}
+                        title="Paste ID Number"
+                      />
+                    </div>
                   </div>
                   <div className="field full">
                     <label>Seller Complete Address</label>
-                    <input
-                      value={formData.sellerAddress}
-                      onChange={(e) => setFormData({ ...formData, sellerAddress: e.target.value })}
-                      placeholder="Village / Town / City"
-                    />
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <input
+                        value={formData.sellerAddress}
+                        onChange={(e) => setFormData({ ...formData, sellerAddress: e.target.value })}
+                        placeholder="Village / Town / City"
+                        style={{ flex: 1 }}
+                      />
+                      <PasteButton
+                        cleanType="text"
+                        onPaste={(val) => setFormData((prev) => ({ ...prev, sellerAddress: val }))}
+                        toast={toast}
+                        title="Paste Address"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -538,38 +623,73 @@ export const SecondHandKycModal: React.FC<SecondHandKycModalProps> = ({
                 <div className="formgrid">
                   <div className="field">
                     <label>Brand <span className="req">*</span></label>
-                    <input
-                      value={formData.brand}
-                      onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
-                      placeholder="e.g. Apple, Samsung, Realme"
-                      required
-                    />
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <input
+                        value={formData.brand}
+                        onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
+                        placeholder="e.g. Apple, Samsung, Vivo, Realme"
+                        style={{ flex: 1 }}
+                        required
+                      />
+                      <PasteButton
+                        cleanType="text"
+                        onPaste={(val) => setFormData((prev) => ({ ...prev, brand: val }))}
+                        toast={toast}
+                        title="Paste Brand"
+                      />
+                    </div>
                   </div>
                   <div className="field">
                     <label>Model Name <span className="req">*</span></label>
-                    <input
+                    <ModelAutoSuggestInput
                       value={formData.modelName}
-                      onChange={(e) => setFormData({ ...formData, modelName: e.target.value })}
-                      placeholder="e.g. iPhone 12 / Redmi Note 11"
+                      onChange={(val) => setFormData({ ...formData, modelName: val })}
+                      onSelectModel={(model, brand) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          modelName: model,
+                          brand: brand || prev.brand,
+                        }));
+                      }}
+                      placeholder="Type model (e.g. 'V' for Vivo Y20/V29, 'S24'…)"
+                      toast={toast}
                       required
                     />
                   </div>
                   <div className="field">
                     <label>Primary IMEI 1 (15-Digit) <span className="req">*</span></label>
-                    <input
-                      value={formData.imei1}
-                      onChange={(e) => setFormData({ ...formData, imei1: e.target.value })}
-                      placeholder="15-digit IMEI"
-                      required
-                    />
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <input
+                        value={formData.imei1}
+                        onChange={(e) => setFormData({ ...formData, imei1: e.target.value.toUpperCase().replace(/\s/g, "") })}
+                        placeholder="15-digit IMEI"
+                        style={{ flex: 1, fontFamily: "var(--font-mono)", textTransform: "uppercase" }}
+                        required
+                      />
+                      <PasteButton
+                        cleanType="imei"
+                        onPaste={(val) => setFormData((prev) => ({ ...prev, imei1: val.toUpperCase().replace(/\s/g, "") }))}
+                        toast={toast}
+                        title="Paste IMEI 1 from WhatsApp / Message"
+                      />
+                    </div>
                   </div>
                   <div className="field">
                     <label>Secondary IMEI 2 (Optional)</label>
-                    <input
-                      value={formData.imei2}
-                      onChange={(e) => setFormData({ ...formData, imei2: e.target.value })}
-                      placeholder="IMEI 2"
-                    />
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <input
+                        value={formData.imei2}
+                        onChange={(e) => setFormData({ ...formData, imei2: e.target.value.toUpperCase().replace(/\s/g, "") })}
+                        placeholder="IMEI 2"
+                        style={{ flex: 1, fontFamily: "var(--font-mono)", textTransform: "uppercase" }}
+                      />
+                      <PasteButton
+                        cleanType="imei"
+                        onPaste={(val) => setFormData((prev) => ({ ...prev, imei2: val.toUpperCase().replace(/\s/g, "") }))}
+                        toast={toast}
+                        title="Paste IMEI 2"
+                      />
+                    </div>
                   </div>
                   <div className="field">
                     <label>RAM &amp; Storage</label>
@@ -601,18 +721,117 @@ export const SecondHandKycModal: React.FC<SecondHandKycModalProps> = ({
                   </div>
                   <div className="field">
                     <label>Serial Number (S/N)</label>
-                    <input
-                      value={formData.serialNo}
-                      onChange={(e) => setFormData({ ...formData, serialNo: e.target.value })}
-                      placeholder="Optional S/N"
-                    />
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <input
+                        value={formData.serialNo}
+                        onChange={(e) => setFormData({ ...formData, serialNo: e.target.value.toUpperCase().replace(/\s/g, "") })}
+                        placeholder="Optional S/N"
+                        style={{ flex: 1, fontFamily: "var(--font-mono)", textTransform: "uppercase" }}
+                      />
+                      <PasteButton
+                        cleanType="imei"
+                        onPaste={(val) => setFormData((prev) => ({ ...prev, serialNo: val.toUpperCase().replace(/\s/g, "") }))}
+                        toast={toast}
+                        title="Paste Serial Number (S/N)"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Purchase Pricing & Legal Verification */}
               <div className="section" style={{ gridColumn: "1/-1", padding: "14px", boxShadow: "none" }}>
-                <div className="section-head"><h2 style={{ fontSize: "14px" }}>3. Purchase Valuation &amp; Legal Undertaking</h2></div>
+                <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                  <h2 style={{ fontSize: "14px", margin: 0 }}>3. Purchase Valuation &amp; Legal Undertaking</h2>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={handleAiValuation}
+                    disabled={valuationLoading}
+                    style={{ background: "#f5f3ff", color: "#6d28d9", borderColor: "#ddd6fe", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  >
+                    <Sparkles size={13} className={valuationLoading ? "animate-spin" : ""} />
+                    {valuationLoading ? "Calculating Valuation..." : "🤖 AI Market Valuation & Margin"}
+                  </button>
+                </div>
+
+                {valuationResult && (
+                  <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "8px", padding: "12px", marginTop: "10px", marginBottom: "12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "10px" }}>
+                      <div>
+                        <div style={{ fontSize: "12px", color: "#6b21a8", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                          AI Indian Market Benchmarked Pricing
+                        </div>
+                        <div style={{ display: "flex", gap: "16px", marginTop: "4px", flexWrap: "wrap" }}>
+                          <div>
+                            <span style={{ fontSize: "12px", color: "#6b7280" }}>Recommended Buyback: </span>
+                            <strong style={{ fontSize: "15px", color: "#16a34a" }}>{inr(valuationResult.recommendedBuybackPrice)}</strong>
+                          </div>
+                          <div>
+                            <span style={{ fontSize: "12px", color: "#6b7280" }}>Target Resale: </span>
+                            <strong style={{ fontSize: "15px", color: "#2563eb" }}>{inr(valuationResult.resaleTargetPrice)}</strong>
+                          </div>
+                          <div>
+                            <span style={{ fontSize: "12px", color: "#6b7280" }}>Expected Margin: </span>
+                            <strong style={{ fontSize: "14px", color: "#7c3aed" }}>{inr(valuationResult.profitMargin)} ({valuationResult.profitMarginPercent}%)</strong>
+                          </div>
+                        </div>
+                        {valuationResult.conditionSummary && (
+                          <div style={{ fontSize: "12px", color: "#4b5563", marginTop: "4px" }}>
+                            {valuationResult.conditionSummary}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn sm primary"
+                        onClick={applyValuationPrices}
+                        style={{ fontSize: "12px", padding: "4px 10px" }}
+                      >
+                        <CheckCircle2 size={13} /> Apply Prices to Form
+                      </button>
+                    </div>
+
+                    {valuationResult.counterNegotiationPitch && (
+                      <div style={{ marginTop: "8px", padding: "6px 10px", background: "#f3e8ff", borderRadius: "6px", fontSize: "12px", color: "#581c87" }}>
+                        💬 <b>Customer Pitch:</b> "{valuationResult.counterNegotiationPitch}"
+                      </div>
+                    )}
+
+                    {valuationResult.hardwareChecklist?.length > 0 && (
+                      <div style={{ marginTop: "10px", paddingTop: "8px", borderTop: "1px dashed #e9d5ff" }}>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#6b21a8", textTransform: "uppercase", marginBottom: "6px" }}>
+                          Bench Hardware Testing Checklist:
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "4px" }}>
+                          {valuationResult.hardwareChecklist.map((item, idx) => (
+                            <label
+                              key={idx}
+                              style={{
+                                display: "flex",
+                                alignItems: "flex-start",
+                                gap: "6px",
+                                fontSize: "12px",
+                                color: checkedChecklist[idx] ? "#15803d" : "#374151",
+                                textDecoration: checkedChecklist[idx] ? "line-through" : "none",
+                                cursor: "pointer"
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!checkedChecklist[idx]}
+                                onChange={(e) => setCheckedChecklist({ ...checkedChecklist, [idx]: e.target.checked })}
+                                style={{ marginTop: "2px" }}
+                              />
+                              <span>{item}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="formgrid">
                   <div className="field">
                     <label>Buyback Amount Paid to Customer (₹) <span className="req">*</span></label>

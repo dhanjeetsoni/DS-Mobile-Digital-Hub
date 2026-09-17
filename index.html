@@ -2,6 +2,37 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      /* Phase 12: Instant startup theme loader - prevents flash of wrong theme */
+      (function () {
+        try {
+          var raw = localStorage.getItem("ds-nexus.appearance");
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            var state = parsed && (parsed.state || parsed);
+            if (state) {
+              var root = document.documentElement;
+              if (state.themeId) root.dataset.theme = state.themeId;
+              if (state.mode) {
+                var mode = state.mode;
+                if (state.followSystem && window.matchMedia) {
+                  mode = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+                }
+                root.dataset.mode = mode;
+              }
+              var densities = { compact: "0.85", cosy: "1", spacious: "1.15" };
+              var textSizes = { sm: "0.9", md: "1", lg: "1.125" };
+              if (state.density && densities[state.density]) {
+                root.style.setProperty("--density", densities[state.density]);
+              }
+              if (state.textSize && textSizes[state.textSize]) {
+                root.style.setProperty("--text-scale", textSizes[state.textSize]);
+              }
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DS Mobile & Digital Hub Pro</title>
     <meta name="description" content="Comprehensive Mobile Store & Digital Hub Management with AI Box/IMEI OCR Scanner, 2nd-Hand Buyback KYC, SIM Activation Tracker, Xerox 1-Tap Grid, Mobile Finance EMI Ledger, Repair Ticketing & Daily Galla Closing." />

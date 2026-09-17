@@ -13,6 +13,8 @@ import { enhanceProductPhoto } from "../services/photoEnhance";
 import { generateProductPhoto } from "../services/phase6";
 import { generateProductInvoiceRules } from "../services/aiInvoiceRules";
 import { synthesizeProductRules, DEFAULT_CATEGORY_INVOICE_RULES } from "../utils/invoiceRulesEngine";
+import { ModelAutoSuggestInput } from "./ModelAutoSuggestInput";
+import { PasteButton } from "./PasteButton";
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -957,21 +959,42 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 
               <div className="field">
                 <label>1. Brand / Company <span className="req">*</span></label>
-                <input
-                  value={brand}
-                  onChange={(e) => { setBrand(e.target.value); setPriceAutoFilledHint(""); }}
-                  onBlur={() => tryAutoFillPriceFromBrand(brand, category)}
-                  placeholder="e.g. Super X"
-                  required
-                />
+                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                  <input
+                    value={brand}
+                    onChange={(e) => { setBrand(e.target.value); setPriceAutoFilledHint(""); }}
+                    onBlur={() => tryAutoFillPriceFromBrand(brand, category)}
+                    placeholder="e.g. Super X / Samsung"
+                    style={{ flex: 1 }}
+                    required
+                  />
+                  <PasteButton
+                    cleanType="text"
+                    onPaste={(val) => { setBrand(val); setPriceAutoFilledHint(""); }}
+                    toast={toast}
+                    title="Paste Brand from Clipboard"
+                  />
+                </div>
                 <div className="hint">
                   Same Brand + Category ka pehle se koi product ho (e.g. "Super X" Tempered Glass, jisme har model ka price same rehta hai), to niche 4-Tier Pricing khud bhar jayegi.
                 </div>
               </div>
 
               <div className="field">
-                <label>2. Model <span className="req">*</span></label>
-                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Edge to Edge Tempered Glass" required />
+                <label>2. Model / Product Name <span className="req">*</span></label>
+                <ModelAutoSuggestInput
+                  value={name}
+                  onChange={(val) => setName(val)}
+                  onSelectModel={(selectedModel, detectedBrand) => {
+                    setName(selectedModel);
+                    if (detectedBrand && !brand) {
+                      setBrand(detectedBrand);
+                    }
+                  }}
+                  placeholder="e.g. Type 'V' for Vivo Y20, 'R' for Redmi Note 13, Edge Glass..."
+                  required
+                  toast={toast}
+                />
               </div>
 
               <div className="field">
@@ -1052,17 +1075,32 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                   stays hidden until `photo` is set (by upload or AI scan). */}
               {isScreenAccessory && photo && (
                 <div className="field full" style={{ background: "var(--paper)", padding: "10px 12px", borderRadius: "8px" }}>
-                  <label>Compatible Phone Models ({compatibleModels.length})</label>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <input
-                      value={modelInput}
-                      onChange={(e) => setModelInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") { e.preventDefault(); addModelFromInput(); }
-                      }}
-                      placeholder="Type a model and press Enter — ya comma se kai models ek saath paste karein"
-                    />
-                    <button type="button" className="btn sm" onClick={addModelFromInput}>
+                  <label>Compatible Phone Models ({compatibleModels.length}) — Smart Auto-Suggest</label>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
+                      <ModelAutoSuggestInput
+                        value={modelInput}
+                        onChange={(val) => setModelInput(val)}
+                        onSelectModel={(model) => {
+                          const merged = [...compatibleModels];
+                          if (!merged.some((m) => m.toLowerCase() === model.toLowerCase())) {
+                            merged.push(model);
+                            setCompatibleModels(merged);
+                            void autoFillDisplaySizeFromModels(merged);
+                          }
+                          setModelInput("");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addModelFromInput();
+                          }
+                        }}
+                        placeholder="Type model (e.g. 'V' for Vivo Y20/V29, 'Redmi Note 13', 'S24'…) or paste multiple"
+                        toast={toast}
+                      />
+                    </div>
+                    <button type="button" className="btn sm" onClick={addModelFromInput} style={{ marginTop: "1px" }}>
                       <Plus size={13} /> Add
                     </button>
                   </div>

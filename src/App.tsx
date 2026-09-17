@@ -18,78 +18,97 @@ import { uid, todayStr, nowTimeStr, genSku, backfillMissingSkus, addStockBatch, 
 import { naturalMatch } from "./utils/naturalSearch";
 import { Sidebar, SECONDARY_NAV_ITEMS } from "./components/Sidebar";
 import BottomTabBar from "./components/BottomTabBar";
-import AppearanceStudioView from "./components/AppearanceStudioView";
-import { LoanTrackerView } from "./components/LoanTrackerView";
-import { CameraScannerModal } from "./components/CameraScannerModal";
+// Phase 16: was a static import, which pulled the whole @zxing/browser barcode
+// engine into the main entry chunk for every user on every cold start -- even
+// though this modal is already only rendered behind `isCameraScannerOpen`.
+// Lazy so ZXing is fetched the first time someone actually opens the scanner.
+const CameraScannerModal = React.lazy(() =>
+  import("./components/CameraScannerModal").then((m) => ({ default: m.CameraScannerModal }))
+);
 import { AddProductModal } from "./components/AddProductModal";
 import { EditProductModal } from "./components/EditProductModal";
 import { ProductThumb } from "./components/ProductThumb";
 import { SecondHandKycModal } from "./components/SecondHandKycModal";
-import { SupplierKhataView } from "./components/SupplierKhataView";
 import { XeroxGrid, DEFAULT_CYBERCAFE_SERVICES } from "./components/XeroxGrid";
-import { SimTrackerView } from "./components/SimTrackerView";
-import { FinanceTrackerView } from "./components/FinanceTrackerView";
 import { DailyGallaModal } from "./components/DailyGallaModal";
-import { BarcodeTagStudio } from "./components/BarcodeTagStudio";
-import { ImeiAuditView } from "./components/ImeiAuditView";
 import { InvoiceViewerModal } from "./components/InvoiceViewerModal";
 import { ModelSearchView } from "./components/ModelSearchView";
-import { PhotoStockFinderView } from "./components/PhotoStockFinderView";
 import { AiAdviceCard } from "./components/AiAdviceCard";
-import { ReturnsExchangesView } from "./components/ReturnsExchangesView";
-import { StockAdjustView } from "./components/StockAdjustView";
-import { PurchasesView } from "./components/PurchasesView";
-import { SalesHistoryView } from "./components/SalesHistoryView";
-import { DailyReviewView } from "./components/DailyReviewView";
-import { MonthlyReviewView } from "./components/MonthlyReviewView";
-import { ShopExpensesView } from "./components/ShopExpensesView";
-import { ExtraIncomeView } from "./components/ExtraIncomeView";
-import { PersonalDrawingsView } from "./components/PersonalDrawingsView";
-import { OwnerReportsView } from "./components/OwnerReportsView";
-import { WindowsAppModal } from "./components/WindowsAppModal";
-import { LowStockAlertsView } from "./components/LowStockAlertsView";
-import { AuditLogView } from "./components/AuditLogView";
 import { ProductDetailView } from "./components/ProductDetailView";
-import { StaffPerformanceView } from "./components/StaffPerformanceView";
-import { StaffIncentiveTrackerView } from "./components/StaffIncentiveTrackerView";
-import { SecurityAuditLogView } from "./components/SecurityAuditLogView";
-import { OfflineSyncCenterView } from "./components/OfflineSyncCenterView";
-import { SmartRestockPredictorView } from "./components/SmartRestockPredictorView";
-import { DeadStockHeatmapView } from "./components/DeadStockHeatmapView";
-import { StockAuditScannerView } from "./components/StockAuditScannerView";
-import { ImeiWarrantyLookupView } from "./components/ImeiWarrantyLookupView";
-import { StaffAttendanceView } from "./components/StaffAttendanceView";
-import { CounterCalculatorModal } from "./components/CounterCalculatorModal";
-import { LoyaltyRewardsView } from "./components/LoyaltyRewardsView";
-import { DownloadAreaView } from "./components/DownloadAreaView";
-import { ProfitLossDashboardView } from "./components/ProfitLossDashboardView";
 import { CloudAuthPanel } from "./components/CloudAuthPanel";
 import { AiKeyPoolPanel } from "./components/AiKeyPoolPanel";
-import { StatusDashboardView } from "./components/StatusDashboardView";
+import { OfflineCatalogDownload } from "./components/OfflineCatalogDownload";
 import { AppVersionsPanel } from "./components/AppVersionsPanel";
 import { UpdateAvailablePill } from "./components/UpdateAvailablePill";
 import { useAppUpdateCheck } from "./hooks/useAppUpdateCheck";
 import { MoneyAnimation } from "./components/MoneyAnimation";
-import { CustomerDirectoryView } from "./components/CustomerDirectoryView";
-import { StaffAccessView } from "./components/StaffAccessView";
-import { SetupWizardView } from "./components/SetupWizardView";
 import { ConfidentialPriceModal } from "./components/ConfidentialPriceModal";
 import { ConnectionStatusBadge } from "./components/ConnectionStatusBadge";
 import { AddGiftModal } from "./components/AddGiftModal";
+import { PasteButton } from "./components/PasteButton";
+import { ModelAutoSuggestInput } from "./components/ModelAutoSuggestInput";
+import { pickContactFromPhone, isContactPickerSupported } from "./utils/contactPicker";
+
+// Phase 13: Lazy loaded views for instant app startup & reduced initial bundle footprint
+const AppearanceStudioView = React.lazy(() => import("./components/AppearanceStudioView"));
+const LoanTrackerView = React.lazy(() => import("./components/LoanTrackerView").then((m) => ({ default: m.LoanTrackerView })));
+const SupplierKhataView = React.lazy(() => import("./components/SupplierKhataView").then((m) => ({ default: m.SupplierKhataView })));
+const SimTrackerView = React.lazy(() => import("./components/SimTrackerView").then((m) => ({ default: m.SimTrackerView })));
+const FinanceTrackerView = React.lazy(() => import("./components/FinanceTrackerView").then((m) => ({ default: m.FinanceTrackerView })));
+const BarcodeTagStudio = React.lazy(() => import("./components/BarcodeTagStudio").then((m) => ({ default: m.BarcodeTagStudio })));
+const ImeiAuditView = React.lazy(() => import("./components/ImeiAuditView").then((m) => ({ default: m.ImeiAuditView })));
+const PhotoStockFinderView = React.lazy(() => import("./components/PhotoStockFinderView").then((m) => ({ default: m.PhotoStockFinderView })));
+const ReturnsExchangesView = React.lazy(() => import("./components/ReturnsExchangesView").then((m) => ({ default: m.ReturnsExchangesView })));
+const StockAdjustView = React.lazy(() => import("./components/StockAdjustView").then((m) => ({ default: m.StockAdjustView })));
+const PurchasesView = React.lazy(() => import("./components/PurchasesView").then((m) => ({ default: m.PurchasesView })));
+const SalesHistoryView = React.lazy(() => import("./components/SalesHistoryView").then((m) => ({ default: m.SalesHistoryView })));
+const DailyReviewView = React.lazy(() => import("./components/DailyReviewView").then((m) => ({ default: m.DailyReviewView })));
+const MonthlyReviewView = React.lazy(() => import("./components/MonthlyReviewView").then((m) => ({ default: m.MonthlyReviewView })));
+const ShopExpensesView = React.lazy(() => import("./components/ShopExpensesView").then((m) => ({ default: m.ShopExpensesView })));
+const ExtraIncomeView = React.lazy(() => import("./components/ExtraIncomeView").then((m) => ({ default: m.ExtraIncomeView })));
+const PersonalDrawingsView = React.lazy(() => import("./components/PersonalDrawingsView").then((m) => ({ default: m.PersonalDrawingsView })));
+const OwnerReportsView = React.lazy(() => import("./components/OwnerReportsView").then((m) => ({ default: m.OwnerReportsView })));
+const WindowsAppModal = React.lazy(() => import("./components/WindowsAppModal").then((m) => ({ default: m.WindowsAppModal })));
+const LowStockAlertsView = React.lazy(() => import("./components/LowStockAlertsView").then((m) => ({ default: m.LowStockAlertsView })));
+const AuditLogView = React.lazy(() => import("./components/AuditLogView").then((m) => ({ default: m.AuditLogView })));
+const StaffPerformanceView = React.lazy(() => import("./components/StaffPerformanceView").then((m) => ({ default: m.StaffPerformanceView })));
+const LoyaltyRewardsView = React.lazy(() => import("./components/LoyaltyRewardsView").then((m) => ({ default: m.LoyaltyRewardsView })));
+const DownloadAreaView = React.lazy(() => import("./components/DownloadAreaView").then((m) => ({ default: m.DownloadAreaView })));
+const ProfitLossDashboardView = React.lazy(() => import("./components/ProfitLossDashboardView").then((m) => ({ default: m.ProfitLossDashboardView })));
+const StatusDashboardView = React.lazy(() => import("./components/StatusDashboardView").then((m) => ({ default: m.StatusDashboardView })));
+const CustomerDirectoryView = React.lazy(() => import("./components/CustomerDirectoryView").then((m) => ({ default: m.CustomerDirectoryView })));
+const StaffAccessView = React.lazy(() => import("./components/StaffAccessView").then((m) => ({ default: m.StaffAccessView })));
+const SetupWizardView = React.lazy(() => import("./components/SetupWizardView").then((m) => ({ default: m.SetupWizardView })));
+const ExportClearInvoicesView = React.lazy(() => import("./components/ExportClearInvoicesView").then((m) => ({ default: m.ExportClearInvoicesView })));
+const StaffIncentiveTrackerView = React.lazy(() => import("./components/StaffIncentiveTrackerView").then((m) => ({ default: m.StaffIncentiveTrackerView })));
+const SecurityAuditLogView = React.lazy(() => import("./components/SecurityAuditLogView").then((m) => ({ default: m.SecurityAuditLogView })));
+const OfflineSyncCenterView = React.lazy(() => import("./components/OfflineSyncCenterView").then((m) => ({ default: m.OfflineSyncCenterView })));
+const ImeiWarrantyLookupView = React.lazy(() => import("./components/ImeiWarrantyLookupView").then((m) => ({ default: m.ImeiWarrantyLookupView })));
+const SmartRestockPredictorView = React.lazy(() => import("./components/SmartRestockPredictorView").then((m) => ({ default: m.SmartRestockPredictorView })));
+const StaffAttendanceView = React.lazy(() => import("./components/StaffAttendanceView").then((m) => ({ default: m.StaffAttendanceView })));
+const DeadStockHeatmapView = React.lazy(() => import("./components/DeadStockHeatmapView").then((m) => ({ default: m.DeadStockHeatmapView })));
+const StockAuditScannerView = React.lazy(() => import("./components/StockAuditScannerView").then((m) => ({ default: m.StockAuditScannerView })));
+import { ParkedCartsModal } from "./components/ParkedCartsModal";
+import { QuickServiceModal } from "./components/QuickServiceModal";
+import { CounterCalculatorModal } from "./components/CounterCalculatorModal";
+import { FunMotionOverlay, AnimationType } from "./components/FunMotionOverlay";
+import { getParkedCarts, parkCart, ParkedCart } from "./services/parkedCartsService";
+import { playScanPip, playPaymentChime, playHoldTone } from "./utils/counterAudio";
+import { PettyCashExpenseModal } from "./components/PettyCashExpenseModal";
 import { staffSignIn, isAccessWindowExpired, isOutsideDailyWindow, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
 import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured, isBiometricEnabled, setBiometricEnabled } from "./services/pinAuth";
 import { biometricCheck, authenticateBiometric, getMyStaffAccessPolicy } from "./services/phase6";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
-import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, applyStockAdjustment, type LiveCatalogEntry } from "./services/repository";
+import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
-import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
 import { sqliteList } from "./services/localSqlite";
 import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert } from "./services/telegram";
-import { getRepairDiagnosis } from "./services/aiOps";
+import { getRepairDiagnosis, getDetailedRepairDiagnostics, DetailedRepairDiagnostics } from "./services/aiOps";
 import { findAiSearchMatches } from "./services/aiSearch";
 import { openWhatsApp, buildInvoiceMessage, buildDueReminderMessage } from "./services/whatsapp";
+import { sendInvoiceWhatsApp } from "./services/whatsappInvoice";
 import { exportStandaloneHtml } from "./utils/exportStandaloneHtml";
 import { celebrate } from "./utils/celebrate";
 import { compressImageToDataUrl, estimateDataUrlBytes, formatBytes } from "./utils/imageCompress";
@@ -126,6 +145,14 @@ import {
   Menu,
   LayoutGrid,
   Table as TableIcon,
+  Eye,
+  EyeOff,
+  PauseCircle,
+  Sun,
+  SunMedium,
+  Split,
+  Layers,
+  Calculator,
 } from "lucide-react";
 
 const LS_KEY = "dsmdh_db_v2";
@@ -201,6 +228,19 @@ function defaultDB(): Database {
     warrantyClaims: [],
     moneyLenders: [],
     lenderTransactions: [],
+    // Phase 16 (2026-09-17): the newer feature modules (Staff Incentive Tracker,
+    // Security Audit Log, Staff Attendance, Smart Restock purchase orders) were
+    // added to the Database type as optional fields but never initialised here.
+    // Every consumer guarded with `db.xyz || []`, so nothing crashed — but the
+    // keys were simply absent from the synced snapshot until a feature was used
+    // for the first time (confirmed against the live store_state, which had 32
+    // keys and none of these). Initialising them keeps the cloud snapshot shape
+    // stable and matches the server-side staff projection, which now expects
+    // these keys to exist.
+    staffIncentives: [],
+    securityAlerts: [],
+    staffAttendance: [],
+    purchaseOrders: [],
     invoiceSeq: 1,
     jobSeq: 1,
     returnSeq: 1,
@@ -208,6 +248,7 @@ function defaultDB(): Database {
     warrantyClaimSeq: 1,
     simSeq: 1,
     kycSeq: 1,
+    poSeq: 1,
   };
 }
 
@@ -286,24 +327,9 @@ export default function App() {
   // Read-only, display-ready product list — every screen that only lists/
   // shows products (not one that finds-then-mutates-then-saves) should
   // read from this instead of db.products directly.
-  //
-  // BUG FIX (2026-09-10): this used to only overlay catalog fields
-  // (photo/MRP/warranty/etc.) via catalogOf(), never stock — so every
-  // screen fed catalogDb was silently showing the potentially-stale
-  // blob's `.stock` regardless, the exact same class of bug already found
-  // and fixed individually in the backup export and PhotoStockFinderView.
-  // Auditing every catalogDb consumer turned up 5 more real instances:
-  // AiAdviceCard (AI advice about which items are low), BarcodeTagStudio
-  // (stock printed on tags), OwnerReportsView (stock VALUATION — a real
-  // number the owner reads as their inventory's worth), Sidebar (the
-  // low-stock count badge shown constantly in the nav), and AddGiftModal
-  // (which items are even eligible to gift). Overlaying stockOf() here
-  // once, at the source, closes all 5 (and any future catalogDb consumer)
-  // at once instead of requiring every call site to remember to do it
-  // individually.
   const catalogProducts = useMemo(
-    () => db.products.map((p) => ({ ...catalogOf(p), stock: stockOf(p) })),
-    [db.products, liveCatalogByClientId, liveCatalogBySku, liveStock]
+    () => db.products.map(catalogOf),
+    [db.products, liveCatalogByClientId, liveCatalogBySku]
   );
   // For child components confirmed to only ever READ db.products (list/
   // filter/display — never db.products.push/find-then-mutate-then-save).
@@ -320,7 +346,6 @@ export default function App() {
 
   // Modals
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
-  const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
   // 2026-09-04 — Android/narrow-screen nav drawer. Sidebar is fixed-width and
   // always in the document flow at desktop widths (unchanged); below the
   // 900px breakpoint (see index.css) it becomes an off-canvas drawer that
@@ -335,11 +360,13 @@ export default function App() {
   const [isKycModalOpen, setIsKycModalOpen] = useState(false);
   const [viewingKyc, setViewingKyc] = useState<SecondHandKYC | null>(null);
   const [isGallaModalOpen, setIsGallaModalOpen] = useState(false);
+  const [isPettyCashModalOpen, setIsPettyCashModalOpen] = useState(false);
   const [isInvoiceViewerOpen, setIsInvoiceViewerOpen] = useState(false);
   const [viewingSale, setViewingSale] = useState<Sale | null>(null);
   const [viewingCreditNote, setViewingCreditNote] = useState<ReturnRecord | null>(null);
   const [viewingExchange, setViewingExchange] = useState<ExchangeRecord | null>(null);
   const [isOwnerLoginOpen, setIsOwnerLoginOpen] = useState(false);
+  const [privacyMode, setPrivacyMode] = useState(false);
   // Phase 2: self-service "My PIN" form state (used by owner/manager in
   // Settings, and by anyone via the account menu — see myPinForm usage).
   const [myPinForm, setMyPinForm] = useState({ current: "", next: "", confirm: "", busy: false, msg: "" });
@@ -713,7 +740,40 @@ export default function App() {
         setIsOwnerLoginOpen(false);
         setIsWindowsModalOpen(false);
         setIsJobModalOpen(false);
+        setIsCalculatorOpen(false);
         setJobAiDiagnosis({ loading: false, text: "", error: "" });
+        return;
+      }
+
+      if ((e.altKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setIsCalculatorOpen((prev) => !prev);
+        return;
+      }
+
+      if ((e.altKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
+        e.preventDefault();
+        setPrivacyMode((prev) => {
+          const next = !prev;
+          showToast(next ? "🛡️ Privacy Shield Active (Cost Prices Hidden)" : "Privacy Shield Inactive", "green");
+          return next;
+        });
+        return;
+      }
+
+      if ((e.altKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        setSunlightMode((prev) => {
+          const next = !prev;
+          showToast(next ? "☀️ Sunlight Mode ON" : "Sunlight Mode OFF", "amber");
+          return next;
+        });
+        return;
+      }
+
+      if ((e.altKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+        e.preventDefault();
+        setIsQuickServiceOpen(true);
         return;
       }
 
@@ -727,8 +787,26 @@ export default function App() {
         showToast("Keyboard Shortcut: F3 -> Glass & Cover Finder", "green");
       } else if (e.key === "F4") {
         e.preventDefault();
-        setIsCameraScannerOpen(true);
-        showToast("Keyboard Shortcut: F4 -> Quick Barcode/Box Scan", "green");
+        if (cart.length > 0) {
+          parkCart({
+            customerName: checkoutCustomer.name || "Counter Customer",
+            customerPhone: checkoutCustomer.phone || "",
+            items: cart,
+            discount: customBillDiscount,
+            note: "Quick F4 Hold",
+          });
+          playHoldTone();
+          setCart([]);
+          refreshParkedCount();
+          showToast("Cart Held & Parked (F4)! Bill resumed slot open.", "amber");
+        } else {
+          setIsCameraScannerOpen(true);
+          showToast("Keyboard Shortcut: F4 -> Quick Barcode/Box Scan", "green");
+        }
+      } else if (e.key === "F5") {
+        e.preventDefault();
+        setIsParkedCartsOpen(true);
+        showToast("Keyboard Shortcut: F5 -> Held / Parked Carts Ledger", "green");
       } else if (e.key === "F6") {
         e.preventDefault();
         setCurrentPage("xeroxGrid");
@@ -792,7 +870,8 @@ export default function App() {
   // existing signature and the Sale record's `discount` field don't need to
   // change — Step 5.1 will later derive a real, auto-calculated discount %
   // from MRP vs. actual sold price for reporting/invoice display).
-  const cartDiscount = 0;
+  const [customBillDiscount, setCustomBillDiscount] = useState<number>(0);
+  const cartDiscount = customBillDiscount;
   const [paymentMode, setPaymentMode] = useState<string>("Cash");
   const [isFinanceMode, setIsFinanceMode] = useState<boolean>(false);
   const [financeForm, setFinanceForm] = useState({
@@ -804,12 +883,73 @@ export default function App() {
     dbdAmount: 0,
   });
 
+  // Parked Carts & Quick Service & Calculator
+  const [isParkedCartsOpen, setIsParkedCartsOpen] = useState(false);
+  const [isQuickServiceOpen, setIsQuickServiceOpen] = useState(false);
+  const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
+  const [funAnimation, setFunAnimation] = useState<{
+    type: AnimationType;
+    title?: string;
+    subtitle?: string;
+  }>({ type: "none" });
+  const [floatingMoney, setFloatingMoney] = useState<{ id: string; text: string; x: number; y: number }[]>([]);
+  const [parkedCartsCount, setParkedCartsCount] = useState(0);
+
+  const triggerFloatingMoney = (amount: number) => {
+    const id = "m_" + Date.now() + "_" + Math.random().toString(36).substr(2, 4);
+    const text = `+${inr(amount)}`;
+    const x = Math.floor(Math.random() * 60) - 30; // -30px to +30px drift
+    const y = window.innerHeight * 0.65;
+    setFloatingMoney((prev) => [...prev.slice(-4), { id, text, x, y }]);
+    setTimeout(() => {
+      setFloatingMoney((prev) => prev.filter((m) => m.id !== id));
+    }, 3200);
+  };
+
+  // Sunlight High-Contrast Mode
+  const [sunlightMode, setSunlightMode] = useState(() => {
+    try {
+      return localStorage.getItem("dsmdh_sunlight") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (sunlightMode) {
+      document.documentElement.setAttribute("data-sunlight", "true");
+    } else {
+      document.documentElement.removeAttribute("data-sunlight");
+    }
+    try {
+      localStorage.setItem("dsmdh_sunlight", String(sunlightMode));
+    } catch {}
+  }, [sunlightMode]);
+
+  const refreshParkedCount = () => {
+    try {
+      setParkedCartsCount(getParkedCarts().length);
+    } catch {}
+  };
+
+  useEffect(() => {
+    refreshParkedCount();
+  }, [isParkedCartsOpen]);
+
+  // Split Payment Matrix State
+  const [isSplitPayment, setIsSplitPayment] = useState(false);
+  const [splitCash, setSplitCash] = useState<number | "">("");
+  const [splitUpi, setSplitUpi] = useState<number | "">("");
+  const [splitCard, setSplitCard] = useState<number | "">("");
+  const [splitCredit, setSplitCredit] = useState<number | "">("");
+
+  // Customer Checkout WhatsApp & VIP Discount
+  const [autoSendWhatsApp, setAutoSendWhatsApp] = useState<boolean>(true);
+
   // Repair ticket states
   const [isJobModalOpen, setIsJobModalOpen] = useState(false);
-  // 2026-09-04: AI first-look diagnosis for the "Reported Issue" text — a
-  // suggestion only, never a substitute for the technician actually
-  // opening the device (the AI prompt itself says this explicitly too).
-  const [jobAiDiagnosis, setJobAiDiagnosis] = useState<{ loading: boolean; text: string; error: string }>({ loading: false, text: "", error: "" });
+  // AI first-look diagnosis for the "Reported Issue" text with rich diagnostics & bench checklist
+  const [jobAiDiagnosis, setJobAiDiagnosis] = useState<{ loading: boolean; text: string; detailed?: DetailedRepairDiagnostics; error: string }>({ loading: false, text: "", error: "" });
   const [jobForm, setJobForm] = useState({
     customerName: "",
     phone: "",
@@ -1625,6 +1765,7 @@ export default function App() {
         },
       ]);
     }
+    playScanPip();
     showToast(`Added to cart: ${product.name}`, "green");
   };
 
@@ -1763,8 +1904,22 @@ export default function App() {
     let customerId: string | null = null;
     let dueAmount = 0;
     let amountPaid = total;
+    let splitDetails: Sale["splitPayments"] | undefined = undefined;
 
-    if (paymentMode === "Credit / Udhaar") {
+    if (paymentMode === "Split Payment (Multi-Mode)" || isSplitPayment) {
+      const c = Number(splitCash) || 0;
+      const u = Number(splitUpi) || 0;
+      const cd = Number(splitCard) || 0;
+      const cr = Number(splitCredit) || 0;
+      splitDetails = {
+        cash: c,
+        upi: u,
+        card: cd,
+        credit: cr,
+      };
+      amountPaid = c + u + cd;
+      dueAmount = cr;
+    } else if (paymentMode === "Credit / Udhaar") {
       dueAmount = total;
       amountPaid = 0;
     } else if (isFinanceMode) {
@@ -2031,7 +2186,12 @@ export default function App() {
       time: nowTimeStr(),
       customer: customerData.phone ? customerData : null,
       customerId,
-      payment: isFinanceMode ? `Finance (${financeForm.company})` : paymentMode,
+      payment: isFinanceMode
+        ? `Finance (${financeForm.company})`
+        : isSplitPayment || paymentMode === "Split Payment (Multi-Mode)"
+        ? "Split Payment"
+        : paymentMode,
+      splitPayments: splitDetails,
       isFinance: isFinanceMode,
       financeDetails,
       items: saleItems,
@@ -2049,6 +2209,43 @@ export default function App() {
     saveState({ ...workingDb });
     setCart([]);
     setIsFinanceMode(false);
+    setIsSplitPayment(false);
+    setSplitCash("");
+    setSplitUpi("");
+    setSplitCard("");
+    setSplitCredit("");
+    setCustomBillDiscount(0);
+
+    // Counter Audio Chime & Fun Visual Celebration
+    playPaymentChime(total);
+    triggerFloatingMoney(total);
+    setFunAnimation({
+      type: "saleSuccess",
+      title: `🎉 ₹${total.toLocaleString("en-IN")} Sale Recorded!`,
+      subtitle: `Invoice #${invoiceNo} ready & cash galla updated`,
+    });
+    celebrate();
+
+    // Instant WhatsApp Bot Delivery
+    if (autoSendWhatsApp && customerData.phone) {
+      sendInvoiceWhatsApp({
+        customerPhone: customerData.phone,
+        customerName: customerData.name || "Valued Customer",
+        invoiceNo,
+        total,
+        amountPaid,
+        dueAmount,
+        shopName: db.settings.shopName || "Mobile Store Pro",
+        items: saleItems.map((i) => ({ name: i.name, qty: i.qty, price: i.price })),
+        storeId: cloudProfile?.store_id,
+      })
+        .then((res) => {
+          if (res.success) {
+            showToast(`⚡ WhatsApp Invoice sent to ${customerData.phone}!`, "green");
+          }
+        })
+        .catch((e) => console.error("WhatsApp delivery error:", e));
+    }
 
     showToast(`Invoice ${invoiceNo} generated!`, "green");
     setViewingSale(saleRecord);
@@ -2505,8 +2702,8 @@ export default function App() {
                   onClick={() => setCurrentPage("sell")}
                   style={{
                     padding: "16px",
-                    background: "linear-gradient(135deg, var(--blue), var(--navy))",
-                    color: "#ffffff",
+                    background: "linear-gradient(135deg, var(--brand), var(--brand-hi))",
+                    color: "var(--brand-fg)",
                     border: "none",
                     cursor: "pointer",
                     textAlign: "left",
@@ -2564,6 +2761,28 @@ export default function App() {
                   </div>
                   <div style={{ fontSize: "15px", fontWeight: 800 }}>Galla Closing</div>
                   <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "2px" }}>Cash note counter &amp; slips</div>
+                </button>
+
+                <button
+                  className="card fx-tilt"
+                  onClick={() => setIsCalculatorOpen(true)}
+                  style={{
+                    padding: "16px",
+                    background: "linear-gradient(135deg, #0284c7, #0369a1)",
+                    color: "#ffffff",
+                    border: "none",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+                    <span className="fx-icon-bounce" style={{ fontSize: "24px" }}>🧮</span>
+                    <span style={{ background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: "999px", fontSize: "10px", fontWeight: 800 }}>
+                      Alt+K
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "15px", fontWeight: 800 }}>Built-in Calculator</div>
+                  <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "2px" }}>Quick cash tally, GST &amp; margin calculation</div>
                 </button>
 
                 <button
@@ -2634,6 +2853,46 @@ export default function App() {
                     <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "2px" }}>Naya glass, cover ya item seedha yahin se add karein</div>
                   </button>
                 )}
+
+                <button
+                  className="card"
+                  onClick={() => setIsPettyCashModalOpen(true)}
+                  style={{ padding: "14px", cursor: "pointer", textAlign: "left" }}
+                >
+                  <div style={{ fontSize: "20px", marginBottom: "6px" }}>☕</div>
+                  <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--ink)" }}>Chai / Petty Cash Voucher</div>
+                  <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>₹10/₹20 quick expense from galla</div>
+                </button>
+
+                <button
+                  className="card"
+                  onClick={() => setCurrentPage("staffIncentives")}
+                  style={{ padding: "14px", cursor: "pointer", textAlign: "left" }}
+                >
+                  <div style={{ fontSize: "20px", marginBottom: "6px" }}>🏆</div>
+                  <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--ink)" }}>Staff Incentives &amp; Targets</div>
+                  <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>Commission &amp; bonus tracker</div>
+                </button>
+
+                <button
+                  className="card"
+                  onClick={() => setCurrentPage("securityAudit")}
+                  style={{ padding: "14px", cursor: "pointer", textAlign: "left" }}
+                >
+                  <div style={{ fontSize: "20px", marginBottom: "6px" }}>🚨</div>
+                  <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--ink)" }}>Anti-Theft Security Audit</div>
+                  <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>High discount &amp; suspicious logs</div>
+                </button>
+
+                <button
+                  className="card"
+                  onClick={() => setCurrentPage("offlineSync")}
+                  style={{ padding: "14px", cursor: "pointer", textAlign: "left" }}
+                >
+                  <div style={{ fontSize: "20px", marginBottom: "6px" }}>📴</div>
+                  <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--ink)" }}>Offline Sync Center</div>
+                  <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>100% SQLite cache &amp; cloud queue</div>
+                </button>
               </div>
             </div>
 
@@ -2937,7 +3196,45 @@ export default function App() {
             <div className="section" id="pos-cart-section">
               <div className="section-head">
                 <h2>Current Bill Cart ({cart.reduce((a, i) => a + i.qty, 0)} Items)</h2>
-                <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  <button
+                    className="btn sm"
+                    onClick={() => setIsQuickServiceOpen(true)}
+                    title="Quick-Add SIM cut, Data Transfer, Sanitization, or Custom Job (+)"
+                    style={{ background: "var(--paper)", border: "1px solid var(--line)", fontWeight: 700 }}
+                  >
+                    <Plus size={13} /> + Custom Service
+                  </button>
+                  {cart.length > 0 && (
+                    <button
+                      className="btn sm"
+                      onClick={() => {
+                        parkCart({
+                          customerName: checkoutCustomer.name || "Counter Customer",
+                          customerPhone: checkoutCustomer.phone || "",
+                          items: cart,
+                          discount: cartDiscount,
+                          note: "Quick Parked",
+                        });
+                        playHoldTone();
+                        setCart([]);
+                        refreshParkedCount();
+                        showToast("Bill parked to Hold Ledger! Click 'Held Carts' to resume.", "amber");
+                      }}
+                      title="Hold current cart to attend another customer (F4)"
+                      style={{ background: "var(--amber-light)", color: "var(--amber)", border: "1px solid var(--amber-border)", fontWeight: 700 }}
+                    >
+                      <PauseCircle size={13} /> Hold Cart (F4)
+                    </button>
+                  )}
+                  <button
+                    className="btn sm"
+                    onClick={() => setIsParkedCartsOpen(true)}
+                    title="View Parked &amp; Held Carts (F5)"
+                    style={{ background: parkedCartsCount > 0 ? "var(--amber-light)" : "var(--paper)", border: "1px solid var(--line)", fontWeight: 700 }}
+                  >
+                    <Layers size={13} /> Held ({parkedCartsCount})
+                  </button>
                   {cartHasPhone && (
                     <button className="btn sm" onClick={() => setIsAddGiftOpen(true)} title="Poore stock mein se koi bhi product search karke customer ko free gift ke roop mein add karein">
                       <Gift size={13} /> Add Gift
@@ -2970,7 +3267,7 @@ export default function App() {
                               </div>
                             )}
                             {item.selectedImeis && item.selectedImeis.length > 0 && (
-                              <div style={{ fontSize: "11px", color: "var(--navy)" }}>
+                              <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>
                                 IMEI: <b>{item.selectedImeis.join(", ")}</b>
                               </div>
                             )}
@@ -3049,6 +3346,13 @@ export default function App() {
                         onChange={(e) => {
                           setPaymentMode(e.target.value);
                           setIsFinanceMode(e.target.value === "Mobile Finance / EMI");
+                          setIsSplitPayment(e.target.value === "Split Payment (Multi-Mode)");
+                          if (e.target.value === "Split Payment (Multi-Mode)") {
+                            setSplitCash(total);
+                            setSplitUpi("");
+                            setSplitCard("");
+                            setSplitCredit("");
+                          }
                         }}
                       >
                         <option>Cash</option>
@@ -3057,12 +3361,115 @@ export default function App() {
                         <option>Bank Transfer</option>
                         <option>Credit / Udhaar</option>
                         <option>Mobile Finance / EMI</option>
+                        <option value="Split Payment (Multi-Mode)">⚡ Split Payment Matrix (Cash + UPI + Card + Credit)</option>
                       </select>
                     </div>
 
+                    {(paymentMode === "Split Payment (Multi-Mode)" || isSplitPayment) && (
+                      <div style={{ background: "var(--paper)", border: "1px solid var(--line)", padding: "12px", borderRadius: "8px", marginTop: "10px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                          <div style={{ fontWeight: 800, fontSize: "12.5px", color: "var(--ink)", display: "flex", alignItems: "center", gap: "6px" }}>
+                            <Split size={14} style={{ color: "var(--accent)" }} /> Split Payment Breakdown
+                          </div>
+                          <button
+                            type="button"
+                            className="btn sm"
+                            style={{ padding: "3px 8px", fontSize: "11px" }}
+                            onClick={() => {
+                              const alloc = (Number(splitCash) || 0) + (Number(splitUpi) || 0) + (Number(splitCard) || 0) + (Number(splitCredit) || 0);
+                              const rem = Math.max(0, total - alloc);
+                              if (rem > 0) {
+                                if (!splitCash) setSplitCash(rem);
+                                else if (!splitUpi) setSplitUpi(rem);
+                                else setSplitCredit(rem);
+                              }
+                            }}
+                          >
+                            Auto-Balance
+                          </button>
+                        </div>
+                        <div className="grid cols-2" style={{ gap: "8px" }}>
+                          <div className="field">
+                            <label style={{ fontSize: "11px", fontWeight: 700 }}>💵 Cash (₹)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={splitCash}
+                              placeholder="0"
+                              onChange={(e) => setSplitCash(e.target.value === "" ? "" : Number(e.target.value))}
+                              style={{ fontWeight: 700 }}
+                            />
+                          </div>
+                          <div className="field">
+                            <label style={{ fontSize: "11px", fontWeight: 700 }}>📱 UPI / PhonePe (₹)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={splitUpi}
+                              placeholder="0"
+                              onChange={(e) => setSplitUpi(e.target.value === "" ? "" : Number(e.target.value))}
+                              style={{ fontWeight: 700 }}
+                            />
+                          </div>
+                          <div className="field">
+                            <label style={{ fontSize: "11px", fontWeight: 700 }}>💳 Card Swipe (₹)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={splitCard}
+                              placeholder="0"
+                              onChange={(e) => setSplitCard(e.target.value === "" ? "" : Number(e.target.value))}
+                              style={{ fontWeight: 700 }}
+                            />
+                          </div>
+                          <div className="field">
+                            <label style={{ fontSize: "11px", fontWeight: 700, color: "var(--red)" }}>📒 Customer Due (₹)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={splitCredit}
+                              placeholder="0"
+                              onChange={(e) => setSplitCredit(e.target.value === "" ? "" : Number(e.target.value))}
+                              style={{ fontWeight: 700, borderColor: "var(--red)" }}
+                            />
+                          </div>
+                        </div>
+
+                        {(() => {
+                          const allocated = (Number(splitCash) || 0) + (Number(splitUpi) || 0) + (Number(splitCard) || 0) + (Number(splitCredit) || 0);
+                          const diff = total - allocated;
+                          const isBalanced = Math.abs(diff) < 0.5;
+                          return (
+                            <div
+                              style={{
+                                marginTop: "8px",
+                                padding: "6px 8px",
+                                borderRadius: "6px",
+                                fontSize: "11.5px",
+                                background: isBalanced ? "var(--green-light)" : "var(--amber-light)",
+                                border: `1px solid ${isBalanced ? "var(--green)" : "var(--amber)"}`,
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                            >
+                              <span>Total Allocated: <b>{inr(allocated)}</b> / {inr(total)}</span>
+                              {isBalanced ? (
+                                <span style={{ color: "var(--green)", fontWeight: 800 }}>✔ Balanced</span>
+                              ) : diff > 0 ? (
+                                <span style={{ color: "var(--amber)", fontWeight: 800 }}>Remaining: {inr(diff)}</span>
+                              ) : (
+                                <span style={{ color: "var(--red)", fontWeight: 800 }}>Over by {inr(Math.abs(diff))}</span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+
                     {isFinanceMode && (
                       <div style={{ background: "var(--blue-light)", padding: "10px", borderRadius: "6px", marginTop: "10px" }}>
-                        <div style={{ fontWeight: 800, fontSize: "12.5px", marginBottom: "6px", color: "var(--navy)" }}>
+                        <div style={{ fontWeight: 800, fontSize: "12.5px", marginBottom: "6px", color: "var(--ink)" }}>
                           💳 Mobile Finance (0% EMI) Breakdown
                         </div>
                         <div className="formgrid">
@@ -3201,7 +3608,7 @@ export default function App() {
                         <td><b>{k.sellerName}</b></td>
                         <td>{k.sellerPhone}</td>
                         <td>{k.brand} {k.modelName}</td>
-                        <td><b style={{ color: "var(--navy)" }}>{k.imei1}</b></td>
+                        <td><b style={{ color: "var(--ink)" }}>{k.imei1}</b></td>
                         <td><span className="badge ok">{k.conditionGrade}</span></td>
                         <td style={{ fontWeight: 800 }}>{inr(k.purchaseAmountPaid)}</td>
                         <td>
@@ -3902,9 +4309,12 @@ export default function App() {
         return (
           <StaffIncentiveTrackerView
             db={db}
-            onUpdateDb={(updater) => setDb((prev) => { const next = updater(prev); saveState(next); return next; })}
-            activeRole={isStaffIdentity ? "staff" : "owner"}
-            currentStaffName={cloudProfile?.staff_name || cloudProfile?.full_name || "Staff"}
+            onUpdateDb={(nextDb) => {
+              setDb(nextDb);
+              saveState(nextDb);
+            }}
+            activeRole={ownerMode ? "owner" : isStaffIdentity ? "staff" : "owner"}
+            currentStaffName={cloudProfile?.full_name || "Staff"}
           />
         );
 
@@ -3912,8 +4322,11 @@ export default function App() {
         return (
           <SecurityAuditLogView
             db={db}
-            onUpdateDb={(updater) => setDb((prev) => { const next = updater(prev); saveState(next); return next; })}
-            activeRole={isStaffIdentity ? "staff" : "owner"}
+            onUpdateDb={(nextDb) => {
+              setDb(nextDb);
+              saveState(nextDb);
+            }}
+            activeRole={ownerMode ? "owner" : isStaffIdentity ? "staff" : "owner"}
           />
         );
 
@@ -3923,81 +4336,10 @@ export default function App() {
             db={db}
             isOnline={typeof navigator !== "undefined" ? navigator.onLine : true}
             cloudStatus={isCloudConfigured ? "Connected" : "Local Only"}
-            onUpdateDb={(updater) => setDb((prev) => { const next = updater(prev); saveState(next); return next; })}
-          />
-        );
-
-      case "smartRestock":
-        return (
-          <SmartRestockPredictorView
-            db={catalogDb}
-            onUpdateDb={(nextDb) => { setDb(nextDb); saveState(nextDb); }}
-            showToast={showToast}
-          />
-        );
-
-      case "deadStock":
-        return (
-          <DeadStockHeatmapView
-            products={catalogProducts}
-            sales={db.sales}
-            onOpenEditProduct={(p) => { setEditingProduct(p); setIsEditProductOpen(true); }}
-            showToast={showToast}
-          />
-        );
-
-      case "stockAudit":
-        return (
-          <StockAuditScannerView
-            products={catalogProducts}
-            onApplyReconciliation={async (updates) => {
-              // The uploaded build mutated `product.stock` on the local JSON
-              // blob directly here. Since Phase 1 the relational
-              // products.stock_qty is the source of truth, so that would have
-              // left the server untouched and been silently reverted by the
-              // next reconcile/realtime sync -- an audit that appears to work
-              // and then quietly undoes itself. Route every line through the
-              // same atomic RPC path the manual Stock Adjust form uses, so
-              // each correction is a real, audited stock_movements entry.
-              if (!cloudProfile?.store_id) {
-                showToast("Stock audit ke liye cloud connection chahiye.", "red");
-                return;
-              }
-              let applied = 0;
-              for (const { productId, newStock } of updates) {
-                const product = db.products.find((p) => p.id === productId);
-                if (!product) continue;
-                try {
-                  await applyStockAdjustment(cloudProfile.store_id, product, newStock, "Physical stock audit");
-                  applied++;
-                } catch (err: any) {
-                  showToast(err?.message || `${product.name}: adjustment reject ho gaya`, "red");
-                }
-              }
-              if (applied > 0) showToast(`${applied} item ka physical stock audit ho gaya!`, "green");
+            onUpdateDb={(nextDb) => {
+              setDb(nextDb);
+              saveState(nextDb);
             }}
-            showToast={showToast}
-          />
-        );
-
-      case "warrantyLookup":
-        return (
-          <ImeiWarrantyLookupView
-            db={catalogDb}
-            onCreateJobForDevice={(deviceName, phone, customerName) => {
-              setJobForm((prev) => ({ ...prev, device: deviceName || prev.device, phone: phone || prev.phone, customerName: customerName || prev.customerName }));
-              setIsJobModalOpen(true);
-            }}
-            showToast={showToast}
-          />
-        );
-
-      case "staffAttendance":
-        return (
-          <StaffAttendanceView
-            db={db}
-            onUpdateDb={(nextDb) => { setDb(nextDb); saveState(nextDb); }}
-            showToast={showToast}
           />
         );
 
@@ -4517,6 +4859,8 @@ export default function App() {
               </div>
             </div>
 
+            <OfflineCatalogDownload storeId={cloudProfile?.store_id || null} />
+
             <AiKeyPoolPanel />
 
             <p className="hint" style={{ marginTop: "20px" }}>
@@ -4524,6 +4868,81 @@ export default function App() {
               system health ke saath ek hi jagah.
             </p>
           </div>
+        );
+
+      case "warrantyLookup":
+        return (
+          <ImeiWarrantyLookupView
+            db={catalogDb}
+            onOpenRepairJob={(prefill) => {
+              setJobForm((prev) => ({
+                ...prev,
+                device: prefill.device || prev.device,
+                customerName: prefill.customerName || prev.customerName,
+                phone: prefill.customerPhone || prev.phone,
+                issue: prefill.imei ? `IMEI: ${prefill.imei} | Warranty: ${prefill.warrantyStatus || ""}` : prev.issue,
+              }));
+              setIsJobModalOpen(true);
+            }}
+          />
+        );
+
+      case "smartRestock":
+        return (
+          <SmartRestockPredictorView
+            db={catalogDb}
+            onUpdateDb={(nextDb) => {
+              setDb(nextDb);
+              saveState(nextDb);
+            }}
+            showToast={showToast}
+          />
+        );
+
+      case "staffAttendance":
+        return (
+          <StaffAttendanceView
+            db={db}
+            onUpdateDb={(nextDb) => {
+              setDb(nextDb);
+              saveState(nextDb);
+            }}
+            showToast={showToast}
+            currentUser={cloudProfile?.full_name || (ownerMode ? "Store Owner" : "Staff")}
+          />
+        );
+
+      case "deadStock":
+        return (
+          <DeadStockHeatmapView
+            products={catalogProducts}
+            sales={db.sales}
+            onOpenEditProduct={(p) => {
+              setEditingProduct(p);
+              setIsEditProductOpen(true);
+            }}
+            showToast={showToast}
+          />
+        );
+
+      case "stockAudit":
+        return (
+          <StockAuditScannerView
+            products={catalogProducts}
+            onApplyReconciliation={(updates) => {
+              const workingDb: Database = structuredClone(db);
+              updates.forEach(({ productId, newStock }) => {
+                const prod = workingDb.products.find((p) => p.id === productId);
+                if (prod) {
+                  prod.stock = newStock;
+                }
+              });
+              setDb(workingDb);
+              saveState(workingDb);
+              showToast(`Audited and synchronized physical stock for ${updates.length} items!`, "green");
+            }}
+            showToast={showToast}
+          />
         );
 
       default:
@@ -4790,7 +5209,7 @@ export default function App() {
   const staffAllowedSections = isStaffIdentity ? (readCachedStaffSession()?.allowedSections ?? null) : null;
 
   return (
-    <div id="app">
+    <div id="app" className={privacyMode ? "privacy-shield-active" : ""}>
       <MoneyAnimation />
       <Sidebar
         db={catalogDb}
@@ -4979,6 +5398,78 @@ export default function App() {
             <button className="btn primary sm" onClick={() => { setCurrentPage("sell"); setIsCameraScannerOpen(true); }} title="Scan a barcode to sell instantly">
               <Barcode size={13} /> Barcode Sale
             </button>
+            <button
+              className="btn sm"
+              style={{
+                background: isCalculatorOpen ? "var(--accent)" : "var(--paper)",
+                color: isCalculatorOpen ? "#ffffff" : "var(--ink)",
+                border: "1px solid var(--line)",
+                fontWeight: 700,
+                fontSize: "11px",
+              }}
+              onClick={() => setIsCalculatorOpen(true)}
+              title="Counter Calculator (Alt+K) — Quick GST & Margins"
+            >
+              <Calculator size={13} />
+              <span>Calculator</span>
+            </button>
+            <button
+              className="btn sm"
+              style={{
+                background: sunlightMode ? "#fef08a" : "var(--paper)",
+                color: sunlightMode ? "#854d0e" : "var(--ink)",
+                border: sunlightMode ? "1px solid #ca8a04" : "1px solid var(--line)",
+                fontWeight: 700,
+                fontSize: "11px",
+              }}
+              onClick={() => {
+                setSunlightMode((prev) => {
+                  const next = !prev;
+                  showToast(next ? "☀️ Sunlight Ultra-Contrast Mode ON (Max Outdoor Visibility)" : "Standard Contrast Restored", "amber");
+                  return next;
+                });
+              }}
+              title="Sunlight Ultra-Contrast Mode — 100% optical contrast for bright shop fronts and direct sun"
+            >
+              <Sun size={13} />
+              <span>{sunlightMode ? "Sunlight ON" : "Sunlight"}</span>
+            </button>
+            <button
+              className="btn sm"
+              style={{
+                background: parkedCartsCount > 0 ? "var(--amber-light)" : "var(--paper)",
+                color: parkedCartsCount > 0 ? "var(--amber)" : "var(--ink)",
+                border: parkedCartsCount > 0 ? "1px solid var(--amber-border)" : "1px solid var(--line)",
+                fontWeight: 700,
+                fontSize: "11px",
+              }}
+              onClick={() => setIsParkedCartsOpen(true)}
+              title="Held / Parked Bills Ledger (F5)"
+            >
+              <Layers size={13} />
+              <span>Held ({parkedCartsCount})</span>
+            </button>
+            <button
+              className={`btn sm ${privacyMode ? "primary" : ""}`}
+              style={{
+                background: privacyMode ? "#0f172a" : "var(--paper)",
+                color: privacyMode ? "#38bdf8" : "var(--ink)",
+                border: privacyMode ? "1px solid #38bdf8" : "1px solid var(--line)",
+                fontWeight: 700,
+                fontSize: "11px",
+              }}
+              onClick={() => {
+                setPrivacyMode((p) => {
+                  const next = !p;
+                  showToast(next ? "🛡️ Privacy Shield Active (Cost & Margins Hidden)" : "Privacy Shield Inactive", "green");
+                  return next;
+                });
+              }}
+              title="Customer Privacy Shield (Alt+P) — Blurs purchase prices & profit margins when customers are near counter"
+            >
+              {privacyMode ? <EyeOff size={13} /> : <Eye size={13} />}
+              <span>{privacyMode ? "Shield ON" : "Margin Shield"}</span>
+            </button>
 
             {/* Store / role badge */}
             <div style={{ display: "flex", alignItems: "center", gap: "8px", borderLeft: "1px solid var(--line)", paddingLeft: "12px" }}>
@@ -5030,14 +5521,14 @@ export default function App() {
             ⚡ Counter:
           </span>
           {[
-            { key: "dashboard", label: "🏠 Dashboard", color: "var(--navy)" },
+            { key: "dashboard", label: "🏠 Dashboard", color: "var(--brand)" },
             { key: "sell", label: "🛒 New Bill ()", color: "var(--blue)" },
             { key: "xeroxGrid", label: "🖨️ 1-Tap Xerox ()", color: "var(--green)" },
             { key: "imeiTracker", label: "📱 Mobiles / IMEI", color: "var(--purple)" },
             { key: "gallaClosing", label: "💰 Galla ()", color: "var(--amber)" },
             { key: "jobs", label: "🔧 Repairs ()", color: "var(--purple)" },
             { key: "khata", label: "📒 Khata ()", color: "var(--red)" },
-            { key: "modelsearch", label: "🔍 Glass/Cover Finder", color: "var(--navy)" },
+            { key: "modelsearch", label: "🔍 Glass/Cover Finder", color: "var(--accent)" },
           ].map((tab) => {
             const isActive = currentPage === tab.key;
             return (
@@ -5065,7 +5556,18 @@ export default function App() {
           })}
         </div>
 
-        <div id="page">{renderCurrentPage()}</div>
+        <div id="page">
+          <React.Suspense
+            fallback={
+              <div className="section" style={{ padding: "48px 24px", textAlign: "center", color: "var(--ink-soft)" }}>
+                <div style={{ display: "inline-block", width: "24px", height: "24px", border: "2px solid var(--line)", borderTopColor: "var(--brand)", borderRadius: "50%", animation: "spin 0.6s linear infinite", marginBottom: "12px" }}></div>
+                <div style={{ fontSize: "13px", fontWeight: 600 }}>Loading view...</div>
+              </div>
+            }
+          >
+            {renderCurrentPage()}
+          </React.Suspense>
+        </div>
       </div>
 
       {/* Toasts */}
@@ -5078,14 +5580,14 @@ export default function App() {
       </div>
 
       {/* Modals */}
-      <CounterCalculatorModal isOpen={isCalculatorOpen} onClose={() => setIsCalculatorOpen(false)} />
-
       {isCameraScannerOpen && (
-        <CameraScannerModal
-          isOpen={isCameraScannerOpen}
-          onClose={() => setIsCameraScannerOpen(false)}
-          onScan={handleCameraScan}
-        />
+        <React.Suspense fallback={null}>
+          <CameraScannerModal
+            isOpen={isCameraScannerOpen}
+            onClose={() => setIsCameraScannerOpen(false)}
+            onScan={handleCameraScan}
+          />
+        </React.Suspense>
       )}
 
       {confidentialPriceProduct && (
@@ -5157,12 +5659,25 @@ export default function App() {
         <DailyGallaModal
           db={db}
           onClose={() => setIsGallaModalOpen(false)}
+          onOpenPettyCash={() => setIsPettyCashModalOpen(true)}
           onSaveGalla={(g) => {
             saveState({ ...db });
             showToast("Daily Galla verified and closed!", "green");
           }}
         />
       )}
+
+      <PettyCashExpenseModal
+        isOpen={isPettyCashModalOpen}
+        onClose={() => setIsPettyCashModalOpen(false)}
+        db={db}
+        onUpdateDb={(nextDb) => {
+          setDb(nextDb);
+          saveState(nextDb);
+        }}
+        recordedBy={cloudProfile?.full_name || (ownerMode ? "Owner" : "Staff")}
+        toast={showToast}
+      />
 
       {isInvoiceViewerOpen && (
         <InvoiceViewerModal
@@ -5235,30 +5750,198 @@ export default function App() {
               <div className="formgrid">
                 <div className="field">
                   <label>Customer Name</label>
-                  <input
-                    value={checkoutCustomer.name}
-                    onChange={(e) => setCheckoutCustomer({ ...checkoutCustomer, name: e.target.value })}
-                    placeholder="Customer name"
-                    autoFocus
-                  />
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      value={checkoutCustomer.name}
+                      onChange={(e) => setCheckoutCustomer({ ...checkoutCustomer, name: e.target.value })}
+                      placeholder="Customer name"
+                      style={{ flex: 1 }}
+                      autoFocus
+                    />
+                    <PasteButton
+                      cleanType="text"
+                      onPaste={(val) => setCheckoutCustomer((prev) => ({ ...prev, name: val }))}
+                      toast={showToast}
+                      title="Paste Customer Name"
+                    />
+                  </div>
                 </div>
                 <div className="field">
-                  <label>Mobile Number (For WhatsApp Bill &amp; Warranty)</label>
-                  <input
-                    value={checkoutCustomer.phone}
-                    onChange={(e) => setCheckoutCustomer({ ...checkoutCustomer, phone: e.target.value })}
-                    placeholder="10-digit mobile"
-                  />
+                  <label>Mobile Number (For Instant WhatsApp Bill)</label>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      value={checkoutCustomer.phone}
+                      onChange={(e) => {
+                        const cleanPhone = e.target.value;
+                        const existing = db.customers.find((c) => c.phone === cleanPhone);
+                        if (existing && !checkoutCustomer.name) {
+                          setCheckoutCustomer({
+                            ...checkoutCustomer,
+                            phone: cleanPhone,
+                            name: existing.name,
+                            address: existing.address || "",
+                          });
+                        } else {
+                          setCheckoutCustomer({ ...checkoutCustomer, phone: cleanPhone });
+                        }
+                      }}
+                      placeholder="10-digit mobile"
+                      style={{ flex: 1 }}
+                    />
+                    <PasteButton
+                      cleanType="phone"
+                      onPaste={(cleanPhone) => {
+                        const existing = db.customers.find((c) => c.phone === cleanPhone);
+                        if (existing && !checkoutCustomer.name) {
+                          setCheckoutCustomer({
+                            ...checkoutCustomer,
+                            phone: cleanPhone,
+                            name: existing.name,
+                            address: existing.address || "",
+                          });
+                        } else {
+                          setCheckoutCustomer((prev) => ({ ...prev, phone: cleanPhone }));
+                        }
+                      }}
+                      toast={showToast}
+                      title="Paste 10-digit Phone from WhatsApp"
+                    />
+                    {isContactPickerSupported() && (
+                      <button
+                        type="button"
+                        className="btn ghost sm"
+                        style={{ padding: "6px 8px", fontSize: "11px", fontWeight: 700 }}
+                        title="Pick contact from phone book"
+                        onClick={async () => {
+                          try {
+                            const picked = await pickContactFromPhone();
+                            if (picked && picked.phone) {
+                              setCheckoutCustomer((prev) => ({
+                                ...prev,
+                                phone: picked.phone || prev.phone,
+                                name: picked.name || prev.name,
+                                address: picked.address || prev.address,
+                              }));
+                              showToast(`Loaded contact: ${picked.name || picked.phone}`, "green");
+                            }
+                          } catch {
+                            showToast("Contact access cancelled or unavailable", "info");
+                          }
+                        }}
+                      >
+                        📇 Contacts
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="field full">
-                  <label>Customer Address</label>
-                  <input
-                    value={checkoutCustomer.address}
-                    onChange={(e) => setCheckoutCustomer({ ...checkoutCustomer, address: e.target.value })}
-                    placeholder="Village / Town / City"
-                  />
+                  <label>Customer Address (Optional)</label>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      value={checkoutCustomer.address}
+                      onChange={(e) => setCheckoutCustomer({ ...checkoutCustomer, address: e.target.value })}
+                      placeholder="Village / Town / City"
+                      style={{ flex: 1 }}
+                    />
+                    <PasteButton
+                      cleanType="text"
+                      onPaste={(val) => setCheckoutCustomer((prev) => ({ ...prev, address: val }))}
+                      toast={showToast}
+                      title="Paste Address"
+                    />
+                  </div>
                 </div>
               </div>
+
+              {/* VIP Customer Intelligence & Past Balance */}
+              {(() => {
+                if (!checkoutCustomer.phone) return null;
+                const pastCustomer = db.customers.find((c) => c.phone === checkoutCustomer.phone);
+                const pastSales = db.sales.filter((s) => s.customer?.phone === checkoutCustomer.phone);
+                const totalSpent = pastSales.reduce((sum, s) => sum + s.total, 0);
+                const isVip = totalSpent >= 20000 || pastSales.length >= 4;
+
+                const cartSubtotal = cart.reduce((a, i) => a + i.price * i.qty, 0);
+                const vipDiscountAmt = Math.round(cartSubtotal * 0.05);
+
+                return (
+                  <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {isVip && (
+                      <div style={{ background: "linear-gradient(135deg, #fef3c7, #fde68a)", border: "1px solid #f59e0b", padding: "10px 12px", borderRadius: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <div style={{ fontWeight: 800, fontSize: "12.5px", color: "#92400e", display: "flex", alignItems: "center", gap: "6px" }}>
+                            🌟 GOLD VIP CUSTOMER
+                          </div>
+                          <div style={{ fontSize: "11px", color: "#b45309" }}>
+                            {pastSales.length} visits • Lifetime Spend: <b>{inr(totalSpent)}</b>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn sm"
+                          style={{ background: "#d97706", color: "#ffffff", border: "none", fontWeight: 800, fontSize: "11px" }}
+                          onClick={() => {
+                            setCustomBillDiscount(vipDiscountAmt);
+                            showToast(`Applied 5% VIP Discount (${inr(vipDiscountAmt)})`, "green");
+                          }}
+                        >
+                          Apply 5% VIP ({inr(vipDiscountAmt)})
+                        </button>
+                      </div>
+                    )}
+
+                    {pastCustomer && (pastCustomer.totalDue || 0) > 0 && (
+                      <div
+                        style={{
+                          background: "#fff7ed",
+                          border: "1.5px solid #f97316",
+                          padding: "12px 14px",
+                          borderRadius: "8px",
+                          fontSize: "13px",
+                          color: "#9a3412",
+                          fontWeight: 800,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          boxShadow: "0 2px 8px rgba(249, 115, 22, 0.18)",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "17px" }}>⚠️</span>
+                          <span>
+                            Is customer ka <b>{inr(pastCustomer.totalDue || 0)}</b> purana baaki hai
+                          </span>
+                        </div>
+                        <span
+                          style={{
+                            background: "#ea580c",
+                            color: "#ffffff",
+                            padding: "3px 8px",
+                            borderRadius: "4px",
+                            fontSize: "11px",
+                            fontWeight: 800,
+                            letterSpacing: "0.02em",
+                          }}
+                        >
+                          Pending Khata
+                        </span>
+                      </div>
+                    )}
+
+                    {/* WhatsApp Bot Auto Delivery Checkbox */}
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", cursor: "pointer", marginTop: "4px", background: "var(--surface-2)", padding: "8px 10px", borderRadius: "6px", border: "1px solid var(--line)" }}>
+                      <input
+                        type="checkbox"
+                        checked={autoSendWhatsApp}
+                        onChange={(e) => setAutoSendWhatsApp(e.target.checked)}
+                      />
+                      <span style={{ fontWeight: 700, color: "var(--ink)" }}>
+                        ⚡ Instant WhatsApp Invoice Bot (Sends PDF invoice in 1 second without saving contact)
+                      </span>
+                    </label>
+                  </div>
+                );
+              })()}
               <div className="modal-actions" style={{ marginTop: "16px" }}>
                 <button type="button" className="btn" onClick={() => setIsCustomerModalOpen(false)}>
                   Cancel
@@ -5284,26 +5967,46 @@ export default function App() {
               <div className="formgrid">
                 <div className="field">
                   <label>Customer Full Name <span className="req">*</span></label>
-                  <input
-                    value={jobForm.customerName}
-                    onChange={(e) => setJobForm({ ...jobForm, customerName: e.target.value })}
-                    required
-                  />
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      value={jobForm.customerName}
+                      onChange={(e) => setJobForm({ ...jobForm, customerName: e.target.value })}
+                      style={{ flex: 1 }}
+                      required
+                    />
+                    <PasteButton
+                      cleanType="text"
+                      onPaste={(val) => setJobForm((prev) => ({ ...prev, customerName: val }))}
+                      toast={showToast}
+                      title="Paste Customer Name"
+                    />
+                  </div>
                 </div>
                 <div className="field">
                   <label>Mobile Number <span className="req">*</span></label>
-                  <input
-                    value={jobForm.phone}
-                    onChange={(e) => setJobForm({ ...jobForm, phone: e.target.value })}
-                    required
-                  />
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input
+                      value={jobForm.phone}
+                      onChange={(e) => setJobForm({ ...jobForm, phone: e.target.value })}
+                      style={{ flex: 1 }}
+                      required
+                    />
+                    <PasteButton
+                      cleanType="phone"
+                      onPaste={(cleanPhone) => setJobForm((prev) => ({ ...prev, phone: cleanPhone }))}
+                      toast={showToast}
+                      title="Paste Phone Number from WhatsApp"
+                    />
+                  </div>
                 </div>
                 <div className="field">
                   <label>Device Model <span className="req">*</span></label>
-                  <input
+                  <ModelAutoSuggestInput
                     value={jobForm.device}
-                    onChange={(e) => setJobForm({ ...jobForm, device: e.target.value })}
-                    placeholder="e.g. Redmi Note 10 / iPhone 11"
+                    onChange={(val) => setJobForm({ ...jobForm, device: val })}
+                    onSelectModel={(model) => setJobForm({ ...jobForm, device: model })}
+                    placeholder="Type model (e.g. 'V' for Vivo Y20/V29, Redmi Note 13…)"
+                    toast={showToast}
                     required
                   />
                 </div>
@@ -5348,31 +6051,109 @@ export default function App() {
                     required
                   />
                   <div style={{ marginTop: "6px" }}>
-                    {!jobAiDiagnosis.loading && !jobAiDiagnosis.text && (
+                    {!jobAiDiagnosis.loading && !jobAiDiagnosis.text && !jobAiDiagnosis.detailed && (
                       <button
                         type="button"
                         className="btn sm"
                         disabled={jobForm.issue.trim().length < 3}
+                        style={{ background: "#f5f3ff", color: "#6d28d9", borderColor: "#ddd6fe", display: "inline-flex", alignItems: "center", gap: "6px" }}
                         onClick={async () => {
                           setJobAiDiagnosis({ loading: true, text: "", error: "" });
                           try {
-                            const diagnosis = await getRepairDiagnosis({ device: jobForm.device, issue: jobForm.issue });
-                            setJobAiDiagnosis({ loading: false, text: diagnosis, error: "" });
+                            const detailed = await getDetailedRepairDiagnostics({ device: jobForm.device, issue: jobForm.issue });
+                            setJobAiDiagnosis({ loading: false, text: detailed.customerHinglishExplanation || detailed.likelyCauses.join(", "), detailed, error: "" });
+                            const totalPartCost = detailed.recommendedParts?.reduce((acc, p) => acc + (p.estimatedCost || 0), 0) || 0;
+                            if (totalPartCost > 0 && (!jobForm.estCost || jobForm.estCost === 0)) {
+                              setJobForm((prev) => ({ ...prev, estCost: totalPartCost + 300 }));
+                            }
                           } catch (e) {
-                            setJobAiDiagnosis({ loading: false, text: "", error: e instanceof Error ? e.message : "AI diagnosis failed." });
+                            try {
+                              const fallbackText = await getRepairDiagnosis({ device: jobForm.device, issue: jobForm.issue });
+                              setJobAiDiagnosis({ loading: false, text: fallbackText, error: "" });
+                            } catch (e2) {
+                              setJobAiDiagnosis({ loading: false, text: "", error: e instanceof Error ? e.message : "AI diagnosis failed." });
+                            }
                           }
                         }}
                       >
-                        <Sparkles size={13} /> AI Diagnosis Suggest karo
+                        <Sparkles size={13} /> 🤖 AI Hardware Diagnosis &amp; Bench Checklist
                       </button>
                     )}
                     {jobAiDiagnosis.loading && (
-                      <span className="hint">AI issue soch raha hai...</span>
+                      <span className="hint" style={{ color: "#6d28d9", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                        <Sparkles size={12} className="animate-spin" /> AI hardware diagnostic run ho raha hai...
+                      </span>
                     )}
                     {jobAiDiagnosis.error && (
                       <div className="hint" style={{ color: "var(--red)" }}>{jobAiDiagnosis.error}</div>
                     )}
-                    {jobAiDiagnosis.text && (
+                    {jobAiDiagnosis.detailed && (
+                      <div style={{ marginTop: "8px", padding: "12px", background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "8px", fontSize: "12px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "6px" }}>
+                          <strong style={{ color: "#581c87", fontSize: "13px" }}>🛠️ AI Technician Diagnostic Report</strong>
+                          <div style={{ display: "flex", gap: "6px" }}>
+                            {jobAiDiagnosis.detailed.difficulty && (
+                              <span className="badge" style={{ background: "#ede9fe", color: "#6d28d9", fontWeight: 600 }}>
+                                Difficulty: {jobAiDiagnosis.detailed.difficulty}
+                              </span>
+                            )}
+                            {jobAiDiagnosis.detailed.estimatedTurnaroundTime && (
+                              <span className="badge" style={{ background: "#dcfce7", color: "#15803d", fontWeight: 600 }}>
+                                ⏱️ {jobAiDiagnosis.detailed.estimatedTurnaroundTime}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {jobAiDiagnosis.detailed.likelyCauses?.length > 0 && (
+                          <div style={{ marginBottom: "6px" }}>
+                            <div style={{ fontWeight: 700, color: "#374151" }}>Probable Causes:</div>
+                            <ul style={{ margin: "2px 0 6px 16px", padding: 0, color: "#4b5563" }}>
+                              {jobAiDiagnosis.detailed.likelyCauses.map((c, i) => (
+                                <li key={i}>{c}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {jobAiDiagnosis.detailed.diagnosticChecklist?.length > 0 && (
+                          <div style={{ marginBottom: "6px" }}>
+                            <div style={{ fontWeight: 700, color: "#374151" }}>Bench Testing &amp; Repair Checklist:</div>
+                            <ol style={{ margin: "2px 0 6px 16px", padding: 0, color: "#4b5563" }}>
+                              {jobAiDiagnosis.detailed.diagnosticChecklist.map((step, i) => (
+                                <li key={i}>{step}</li>
+                              ))}
+                            </ol>
+                          </div>
+                        )}
+
+                        {jobAiDiagnosis.detailed.recommendedParts?.length > 0 && (
+                          <div style={{ marginBottom: "6px", background: "#fff", padding: "6px 10px", borderRadius: "6px", border: "1px solid #ddd6fe" }}>
+                            <div style={{ fontWeight: 700, color: "#6d28d9" }}>Recommended Spare Parts:</div>
+                            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "4px" }}>
+                              {jobAiDiagnosis.detailed.recommendedParts.map((p, i) => (
+                                <span key={i} className="badge" style={{ background: "#f3e8ff", color: "#581c87" }}>
+                                  {p.name} {p.estimatedCost ? `(~₹${p.estimatedCost})` : ""}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {jobAiDiagnosis.detailed.safetyPrecaution && (
+                          <div style={{ marginBottom: "6px", color: "#b45309", fontSize: "11px" }}>
+                            ⚠️ <b>Safety Note:</b> {jobAiDiagnosis.detailed.safetyPrecaution}
+                          </div>
+                        )}
+
+                        {jobAiDiagnosis.detailed.customerHinglishExplanation && (
+                          <div style={{ marginTop: "6px", padding: "6px 10px", background: "#fdf4ff", borderRadius: "6px", border: "1px solid #f5d0fe", color: "#701a75" }}>
+                            💬 <b>Customer ko bolne ke liye:</b> "{jobAiDiagnosis.detailed.customerHinglishExplanation}"
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {!jobAiDiagnosis.detailed && jobAiDiagnosis.text && (
                       <div className="notice" style={{ marginTop: "4px", fontSize: "12px", whiteSpace: "pre-line" }}>
                         🤖 {jobAiDiagnosis.text}
                       </div>
@@ -5582,6 +6363,57 @@ export default function App() {
         }
       }} />}
 
+      {/* Quick Add Custom Service Modal */}
+      {isQuickServiceOpen && (
+        <QuickServiceModal
+          isOpen={isQuickServiceOpen}
+          onClose={() => setIsQuickServiceOpen(false)}
+          onAddService={(serviceItem) => {
+            setCart((prev) => [
+              ...prev,
+              {
+                productId: serviceItem.productId,
+                name: serviceItem.name,
+                price: serviceItem.price,
+                qty: 1,
+                imei: "",
+                selectedImeis: [],
+              },
+            ]);
+            playScanPip();
+            showToast(`Added custom service: ${serviceItem.name} (${inr(serviceItem.price)})`, "green");
+          }}
+        />
+      )}
+
+      {/* Parked / Held Carts Modal */}
+      {isParkedCartsOpen && (
+        <ParkedCartsModal
+          isOpen={isParkedCartsOpen}
+          onClose={() => {
+            setIsParkedCartsOpen(false);
+            refreshParkedCount();
+          }}
+          onResumeCart={(parkedCart) => {
+            setCart(parkedCart.items);
+            if (parkedCart.customerName || parkedCart.customerPhone) {
+              setCheckoutCustomer({
+                name: parkedCart.customerName || "",
+                phone: parkedCart.customerPhone || "",
+                address: "",
+              });
+            }
+            if (parkedCart.discount) {
+              setCustomBillDiscount(parkedCart.discount);
+            }
+            showToast(`Cart resumed (${parkedCart.items.length} items restored)!`, "green");
+            playPaymentChime(parkedCart.items.reduce((s, i) => s + i.price * i.qty, 0));
+            refreshParkedCount();
+          }}
+          onCountChanged={refreshParkedCount}
+        />
+      )}
+
       {/* Windows Desktop App Modal */}
       {isWindowsModalOpen && (
         <WindowsAppModal
@@ -5592,6 +6424,35 @@ export default function App() {
           onTriggerInstall={handleTriggerPwaInstall}
         />
       )}
+
+      {/* Built-in Counter GST & Margin Calculator */}
+      <CounterCalculatorModal
+        isOpen={isCalculatorOpen}
+        onClose={() => setIsCalculatorOpen(false)}
+      />
+
+      {/* Fun Celebratory Motion Overlay */}
+      <FunMotionOverlay
+        type={funAnimation.type}
+        title={funAnimation.title}
+        subtitle={funAnimation.subtitle}
+        onComplete={() => setFunAnimation({ type: "none" })}
+      />
+
+      {/* Floating Animated Revenue Tags */}
+      {floatingMoney.map((m) => (
+        <div
+          key={m.id}
+          className="money-float"
+          style={{
+            left: "50%",
+            top: `${m.y}px`,
+            ["--money-x" as any]: `${m.x}px`,
+          }}
+        >
+          {m.text}
+        </div>
+      ))}
     </div>
   );
 }

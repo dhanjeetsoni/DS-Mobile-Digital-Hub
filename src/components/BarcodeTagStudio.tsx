@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Tag, Printer, CheckSquare, Square, Search, Smartphone, Layers, Eye } from "lucide-react";
+import { Tag, Printer, CheckSquare, Square, Search, Smartphone, Layers, Eye, Sparkles, Copy } from "lucide-react";
 import { Database, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
 
@@ -9,12 +9,12 @@ interface BarcodeTagStudioProps {
 
 export const BarcodeTagStudio: React.FC<BarcodeTagStudioProps> = ({ db }) => {
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
-  const [tagFormat, setTagFormat] = useState<"small" | "medium" | "showroom">("medium");
+  const [tagFormat, setTagFormat] = useState<"50x25" | "38x25" | "showroom">("50x25");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [copiesPerItem, setCopiesPerItem] = useState<number>(1);
-  const [showQrCode, setShowQrCode] = useState<boolean>(true);
-  const [showEmiBadge, setShowEmiBadge] = useState<boolean>(true);
+  const [showMrpStrike, setShowMrpStrike] = useState<boolean>(true);
+  const [customMrpMultiplier, setCustomMrpMultiplier] = useState<number>(1.3);
 
   const categories = ["All", ...db.categories];
 
@@ -51,26 +51,25 @@ export const BarcodeTagStudio: React.FC<BarcodeTagStudioProps> = ({ db }) => {
 
   const selectedProducts = db.products.filter((p) => selectedProductIds.includes(p.id));
 
-  // Barcode generator helper (visual Code128 pattern SVG)
-  const renderVisualBarcode = (code: string) => {
+  // High-contrast clean barcode SVG generator
+  const renderVisualBarcode = (code: string, compact = false) => {
     const clean = (code || "DSM000000").replace(/[^a-zA-Z0-9]/g, "");
     return (
-      <div style={{ textAlign: "center", margin: "4px 0" }}>
-        <svg viewBox="0 0 160 38" style={{ width: "100%", height: "26px" }}>
-          {/* Simple representative barcode stripes */}
+      <div style={{ textAlign: "center", margin: compact ? "1px 0" : "3px 0" }}>
+        <svg viewBox="0 0 160 32" style={{ width: "100%", height: compact ? "18px" : "24px" }}>
           {clean.split("").map((char, i) => {
             const codeVal = char.charCodeAt(0);
             const w1 = (codeVal % 3) + 1;
             const w2 = ((codeVal >> 1) % 3) + 1;
             return (
               <React.Fragment key={i}>
-                <rect x={i * 14} y="0" width={w1} height="36" fill="#000" />
-                <rect x={i * 14 + w1 + 1} y="0" width={w2} height="36" fill="#000" />
+                <rect x={i * 13 + 4} y="0" width={w1} height="32" fill="#000" />
+                <rect x={i * 13 + w1 + 3} y="0" width={w2} height="32" fill="#000" />
               </React.Fragment>
             );
           })}
         </svg>
-        <div style={{ fontSize: "10px", fontFamily: "monospace", letterSpacing: "1px", color: "#000" }}>
+        <div style={{ fontSize: compact ? "8.5px" : "9.5px", fontFamily: "monospace", letterSpacing: "1px", color: "#000", fontWeight: 700 }}>
           *{clean}*
         </div>
       </div>
@@ -81,14 +80,23 @@ export const BarcodeTagStudio: React.FC<BarcodeTagStudioProps> = ({ db }) => {
     <div>
       <div className="section">
         <div className="section-head">
-          <h2>Barcode &amp; Price Tag Studio</h2>
+          <div>
+            <h2 style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "19px", margin: 0 }}>
+              <Tag size={22} style={{ color: "var(--brand)" }} />
+              Thermal Barcode &amp; Price Tag Sticker Generator
+            </h2>
+            <p className="hint" style={{ marginTop: "4px", margin: 0 }}>
+              Generate &amp; print high-contrast price tags and barcode stickers (50x25mm &amp; 38x25mm) for chargers, cables, cases, and tempered glass.
+            </p>
+          </div>
+
           <div style={{ display: "flex", gap: "8px" }}>
             <button
               className="btn primary sm"
               disabled={selectedProducts.length === 0}
               onClick={() => window.print()}
             >
-              <Printer size={14} /> Print {selectedProducts.length * copiesPerItem} Tags
+              <Printer size={14} /> Print {selectedProducts.length * copiesPerItem} Thermal Stickers
             </button>
           </div>
         </div>
@@ -96,19 +104,19 @@ export const BarcodeTagStudio: React.FC<BarcodeTagStudioProps> = ({ db }) => {
         {/* Configuration Bar */}
         <div className="grid cols-4" style={{ gap: "12px", marginBottom: "14px" }}>
           <div className="field">
-            <label>Tag Format / Size</label>
+            <label>Thermal Sticker Size</label>
             <select value={tagFormat} onChange={(e) => setTagFormat(e.target.value as any)}>
-              <option value="small">Small Cable / Accessory Tag (38x20mm)</option>
-              <option value="medium">Standard Shelf Price Tag (50x35mm)</option>
-              <option value="showroom">Showroom Mobile Display Card (75x100mm)</option>
+              <option value="50x25">Standard Accessory Label (50 x 25 mm)</option>
+              <option value="38x25">Compact Cable / Glass Tag (38 x 25 mm)</option>
+              <option value="showroom">Showroom Counter Display (75 x 100 mm)</option>
             </select>
           </div>
           <div className="field">
-            <label>Copies per Product</label>
+            <label>Stickers per Product</label>
             <input
               type="number"
               min="1"
-              max="50"
+              max="100"
               value={copiesPerItem}
               onChange={(e) => setCopiesPerItem(Math.max(1, parseInt(e.target.value) || 1))}
             />
@@ -145,10 +153,10 @@ export const BarcodeTagStudio: React.FC<BarcodeTagStudioProps> = ({ db }) => {
           <label style={{ marginLeft: "auto", fontSize: "12.5px", display: "flex", alignItems: "center", gap: "6px" }}>
             <input
               type="checkbox"
-              checked={showEmiBadge}
-              onChange={(e) => setShowEmiBadge(e.target.checked)}
+              checked={showMrpStrike}
+              onChange={(e) => setShowMrpStrike(e.target.checked)}
             />
-            Show 0% EMI Estimate Badge
+            Display MRP &amp; Discount Strike
           </label>
         </div>
 
@@ -162,7 +170,7 @@ export const BarcodeTagStudio: React.FC<BarcodeTagStudioProps> = ({ db }) => {
                 <th>Category</th>
                 <th>Brand</th>
                 <th>SKU / Barcode</th>
-                <th>Price</th>
+                <th>Selling Price</th>
                 <th>Stock</th>
               </tr>
             </thead>
@@ -201,7 +209,7 @@ export const BarcodeTagStudio: React.FC<BarcodeTagStudioProps> = ({ db }) => {
         <div className="section-head">
           <h2>
             <Eye size={16} style={{ verticalAlign: "middle", marginRight: "6px" }} />
-            Print Preview ({selectedProducts.length * copiesPerItem} Tags)
+            Thermal Sticker Print Preview ({selectedProducts.length * copiesPerItem} Stickers)
           </h2>
           <button className="btn primary sm" onClick={() => window.print()} disabled={selectedProducts.length === 0}>
             <Printer size={14} /> Print Now
@@ -209,7 +217,7 @@ export const BarcodeTagStudio: React.FC<BarcodeTagStudioProps> = ({ db }) => {
         </div>
 
         {selectedProducts.length === 0 ? (
-          <div className="empty">Select one or more products above to preview and generate printable price tags.</div>
+          <div className="empty">Select one or more products above to preview thermal stickers.</div>
         ) : (
           <div id="print-area">
             <div
@@ -218,26 +226,28 @@ export const BarcodeTagStudio: React.FC<BarcodeTagStudioProps> = ({ db }) => {
                 gridTemplateColumns:
                   tagFormat === "showroom"
                     ? "repeat(auto-fill, minmax(220px, 1fr))"
-                    : tagFormat === "medium"
-                    ? "repeat(auto-fill, minmax(170px, 1fr))"
-                    : "repeat(auto-fill, minmax(130px, 1fr))",
-                gap: "12px",
-                padding: "8px",
-                background: "#fff",
+                    : tagFormat === "50x25"
+                    ? "repeat(auto-fill, minmax(180px, 1fr))"
+                    : "repeat(auto-fill, minmax(140px, 1fr))",
+                gap: "10px",
+                padding: "10px",
+                background: "#f9fafb",
                 borderRadius: "8px",
                 border: "1px solid var(--line)",
               }}
             >
               {selectedProducts.flatMap((p) =>
                 Array.from({ length: copiesPerItem }).map((_, copyIdx) => {
-                  const estEmi = Math.round(p.sellingPrice / 6);
+                  const estMrp = Math.round(p.sellingPrice * customMrpMultiplier);
+                  const isCompact = tagFormat === "38x25";
+
                   return (
                     <div
                       key={`${p.id}-${copyIdx}`}
                       style={{
-                        border: "1px dashed #999",
-                        borderRadius: tagFormat === "showroom" ? "8px" : "4px",
-                        padding: tagFormat === "showroom" ? "12px" : "8px",
+                        border: "1.5px solid #000",
+                        borderRadius: "4px",
+                        padding: isCompact ? "4px 6px" : "6px 8px",
                         background: "#fff",
                         color: "#000",
                         textAlign: "center",
@@ -245,59 +255,47 @@ export const BarcodeTagStudio: React.FC<BarcodeTagStudioProps> = ({ db }) => {
                         flexDirection: "column",
                         justifyContent: "space-between",
                         pageBreakInside: "avoid",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                        width: tagFormat === "50x25" ? "188px" : tagFormat === "38x25" ? "145px" : "auto",
+                        minHeight: tagFormat === "50x25" ? "95px" : tagFormat === "38x25" ? "95px" : "auto",
+                        margin: "0 auto",
                       }}
                     >
                       {/* Shop Header */}
-                      <div style={{ fontSize: "10px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "#444" }}>
-                        {db.settings.shopName || "DS MOBILE"}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #000", paddingBottom: "2px" }}>
+                        <span style={{ fontSize: isCompact ? "8px" : "9px", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                          {db.settings.shopName || "DS MOBILE"}
+                        </span>
+                        <span style={{ fontSize: isCompact ? "7.5px" : "8.5px", fontWeight: 700 }}>
+                          {p.category.slice(0, 10)}
+                        </span>
                       </div>
 
-                      {/* Product Name & Brand */}
-                      <div style={{ marginTop: "4px" }}>
-                        <div style={{ fontWeight: 800, fontSize: tagFormat === "showroom" ? "14px" : "11.5px", color: "#000", lineHeight: "1.2" }}>
+                      {/* Product Name */}
+                      <div style={{ margin: "2px 0" }}>
+                        <div style={{ fontWeight: 800, fontSize: isCompact ? "9.5px" : "11px", color: "#000", lineHeight: "1.15", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {p.name}
                         </div>
-                        {p.brand && (
-                          <div style={{ fontSize: "10px", color: "#666" }}>{p.brand} {p.category !== "Other" ? `• ${p.category}` : ""}</div>
+                        {p.compatibleModels && p.compatibleModels.length > 0 && (
+                          <div style={{ fontSize: "7.5px", color: "#333", whiteSpace: "nowrap", overflow: "hidden" }}>
+                            For {p.compatibleModels[0]}
+                          </div>
                         )}
                       </div>
 
-                      {/* Showroom Specs */}
-                      {tagFormat === "showroom" && (
-                        <div style={{ margin: "8px 0", fontSize: "11px", background: "#f5f5f5", padding: "6px", borderRadius: "6px", textAlign: "left" }}>
-                          {p.warrantyEnabled ? `✔ ${p.warrantyMonths} Months Warranty` : "✔ Genuine Quality Checked"}
-                          <br />
-                          {p.compatibleModels && p.compatibleModels.length > 0
-                            ? `✔ Compatible with ${p.compatibleModels[0]}`
-                            : "✔ 100% Tested & Verified"}
-                        </div>
-                      )}
-
                       {/* Barcode Strip */}
-                      {renderVisualBarcode(p.barcode || p.sku)}
+                      {renderVisualBarcode(p.barcode || p.sku, isCompact)}
 
                       {/* Price Section */}
-                      <div style={{ marginTop: "4px", borderTop: "1px dashed #ccc", paddingTop: "4px" }}>
-                        <div style={{ fontSize: tagFormat === "showroom" ? "18px" : "14px", fontWeight: 800, color: "#000" }}>
-                          {inr(p.sellingPrice)}
-                        </div>
-
-                        {showEmiBadge && p.sellingPrice >= 3000 && (
-                          <div
-                            style={{
-                              fontSize: "9.5px",
-                              fontWeight: 800,
-                              background: "#eaf1ff",
-                              color: "#16294f",
-                              padding: "2px 4px",
-                              borderRadius: "4px",
-                              marginTop: "2px",
-                              display: "inline-block",
-                            }}
-                          >
-                            0% EMI @ {inr(estEmi)}/mo*
+                      <div style={{ borderTop: "1px solid #000", paddingTop: "2px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        {showMrpStrike && (
+                          <div style={{ fontSize: isCompact ? "8px" : "9px", color: "#555", textDecoration: "line-through" }}>
+                            MRP {inr(estMrp)}
                           </div>
                         )}
+                        <div style={{ fontSize: isCompact ? "11.5px" : "13px", fontWeight: 900, color: "#000" }}>
+                          OUR: {inr(p.sellingPrice)}
+                        </div>
                       </div>
                     </div>
                   );

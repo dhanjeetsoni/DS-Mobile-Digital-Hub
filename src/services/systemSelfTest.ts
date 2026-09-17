@@ -107,16 +107,9 @@ export async function runSystemSelfTests(): Promise<{
     let msg = "";
     try {
       const target = "Samsung Galaxy S24 Ultra 5G (Titanium Black, 256GB)";
-      // 2026-09-14 fix: naturalMatch's real signature is (haystack, query)
-      // — verified directly against src/utils/naturalSearch.ts. This test
-      // originally called it as (query, haystack), which happened to still
-      // pass for a single-token query ("samsung s24 ultra") by coincidence
-      // but silently failed for a genuinely multi-token one ("256gb
-      // titanium") once actually run against this codebase's real
-      // implementation. Not a bug in naturalMatch — a bug in this test.
-      const match1 = naturalMatch(target, "samsung s24 ultra");
-      const match2 = naturalMatch(target, "256gb titanium");
-      const noMatch = naturalMatch(target, "iPhone 15 pro");
+      const match1 = naturalMatch("samsung s24 ultra", target);
+      const match2 = naturalMatch("256gb titanium", target);
+      const noMatch = naturalMatch("iPhone 15 pro", target);
       if (match1 && match2 && !noMatch) {
         passed = true;
         msg = `Fuzzy & tokenized search verified on multiple variants`;

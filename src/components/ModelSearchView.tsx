@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Search, Shield, Smartphone, Plus, Layers, CheckCircle2, Box, Sparkles } from "lucide-react";
 import { Database, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { lookupScreenSize } from "../utils/aiOcr";
 import { naturalMatch } from "../utils/naturalSearch";
 import { useCompatibleModelsDisplay } from "../hooks/useCompatibleModelsDisplay";
+import { ModelAutoSuggestInput } from "./ModelAutoSuggestInput";
 
 // A glass/cover recorded for e.g. 6.7" is treated as fitting a phone whose
 // AI-looked-up screen size is within this many inches — phones of the same
@@ -123,6 +124,20 @@ export const ModelSearchView: React.FC<ModelSearchViewProps> = ({
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  // Collect all known compatible models across store's products
+  const storeCompatibleModels = useMemo(() => {
+    const set = new Set<string>();
+    db.products.forEach((p) => {
+      (p.compatibleModels || []).forEach((m) => {
+        if (m && m.trim()) set.add(m.trim());
+      });
+      if (p.category.includes("Mobile") || p.category.includes("Phone")) {
+        if (p.name && p.name.trim()) set.add(p.name.trim());
+      }
+    });
+    return Array.from(set);
+  }, [db.products]);
+
   return (
     <div className="section">
       <div className="section-head">
@@ -137,27 +152,27 @@ export const ModelSearchView: React.FC<ModelSearchViewProps> = ({
         </button>
       </div>
 
-      {/* Search Input Bar */}
-      <div className="searchbar" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+      {/* Search Input Bar with Smart Phone Model Auto-Suggest & 1-Click Paste */}
+      <div className="searchbar" style={{ display: "flex", gap: "10px", alignItems: "center", marginBottom: "12px" }}>
         <div style={{ position: "relative", flex: 1 }}>
-          <input
-            placeholder="🔍 Type Phone Model e.g. 'Redmi Note 12', 'Vivo V29', 'iPhone 15', 'Realme C55'..."
+          <ModelAutoSuggestInput
             value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
+            onChange={(val) => {
+              setSearchQuery(val);
               setAiScreenSize(0);
               setAiLookupState("idle");
             }}
-            style={{ paddingLeft: "38px", fontSize: "15px" }}
+            onSelectModel={(model) => {
+              setSearchQuery(model);
+              setAiScreenSize(0);
+              setAiLookupState("idle");
+            }}
+            storeModels={storeCompatibleModels}
+            placeholder="🔍 Type Phone Model (e.g. 'V' for Vivo Y20/V29, 'Redmi Note 13', 'iPhone 15', 'Realme C55'…)"
             autoFocus
+            showPasteButton={true}
           />
-          <Search size={18} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--ink-soft)" }} />
         </div>
-        {searchQuery && (
-          <button className="btn sm ghost" onClick={() => setSearchQuery("")}>
-            Clear
-          </button>
-        )}
       </div>
 
       {searchQuery && filteredItems.length > 0 && (
@@ -207,9 +222,9 @@ export const ModelSearchView: React.FC<ModelSearchViewProps> = ({
               border: "1px solid",
               cursor: "pointer",
               whiteSpace: "nowrap",
-              background: selectedBrand === brand ? "var(--navy)" : "var(--card)",
-              color: selectedBrand === brand ? "#ffffff" : "var(--ink-soft)",
-              borderColor: selectedBrand === brand ? "var(--navy)" : "var(--line)",
+              background: selectedBrand === brand ? "var(--brand)" : "var(--card)",
+              color: selectedBrand === brand ? "var(--brand-fg)" : "var(--ink-soft)",
+              borderColor: selectedBrand === brand ? "var(--brand)" : "var(--line)",
             }}
           >
             {brand}

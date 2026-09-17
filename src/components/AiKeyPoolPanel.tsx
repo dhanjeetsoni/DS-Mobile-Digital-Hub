@@ -3,11 +3,6 @@ import { KeyRound, RefreshCw, CheckCircle2, XCircle, Clock, Sparkles, Cpu, Layer
 import { getGeminiKeyStatus, saveGeminiKey, GeminiKeySlotStatus, AiProvider } from "../services/geminiKeys";
 import { detectProviderFromKey } from "../services/aiProviderAdapters";
 
-// Step 2.1 (Owner Settings: up to 10 AI keys, auto-rotation pool) +
-// Step 2.2 (AI Key Status Widget: active key, available/exhausted counts,
-// today's rough usage). Owner-only — this is rendered inside the Settings
-// screen, which is already gated to Owner in Sidebar.tsx (ownerOnly: true).
-// Phase 11 extends the pool to any mix of providers, not just Gemini.
 const PROVIDER_OPTIONS: { id: AiProvider; name: string; placeholder: string; badgeColor: string; bg: string }[] = [
   { id: "gemini", name: "Google Gemini", placeholder: "Paste Gemini API key (AIzaSy...)", badgeColor: "#0284c7", bg: "rgba(2, 132, 199, 0.1)" },
   { id: "openai", name: "OpenAI (ChatGPT)", placeholder: "Paste OpenAI key (sk-...)", badgeColor: "#10b981", bg: "rgba(16, 185, 129, 0.1)" },
@@ -44,7 +39,7 @@ export const AiKeyPoolPanel: React.FC = () => {
       setLoadError(
         e instanceof Error
           ? e.message
-          : "AI Key status load nahi ho paya. Agar SUPABASE_SERVICE_ROLE_KEY server par set nahi hai, ya migration apply nahi hui, yeh dikh sakta hai."
+          : "AI Key status load nahi ho paya. Server configuration verify karein."
       );
     } finally {
       setLoading(false);

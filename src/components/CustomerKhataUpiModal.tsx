@@ -9,10 +9,13 @@ import {
   MessageCircle,
   X,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import { Database, Customer } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { openWhatsApp } from "../services/whatsapp";
+import { WhatsAppPreviewBubble } from "./WhatsAppPreviewBubble";
+import { QuickKhataRepaymentModal } from "./QuickKhataRepaymentModal";
 
 interface CustomerKhataUpiModalProps {
   customer: Customer;
@@ -31,6 +34,7 @@ export const CustomerKhataUpiModal: React.FC<CustomerKhataUpiModalProps> = ({
   const [amountToRequest, setAmountToRequest] = useState<number>(dueAmount);
   const [templateType, setTemplateType] = useState<"polite" | "standard" | "urgent">("polite");
   const [copied, setCopied] = useState(false);
+  const [showRepayModal, setShowRepayModal] = useState(false);
 
   const shopName = db.settings.shopName || "DS Mobile Hub";
   const upiId = db.settings.upiId || "shop@upi";
@@ -71,26 +75,13 @@ export const CustomerKhataUpiModal: React.FC<CustomerKhataUpiModalProps> = ({
       `Shri *${customer.name}* ji,\n` +
       `Aapke khate ka *${inr(
         amountToRequest
-      )}* ka udhaar kafi samay se bacha hua hai. Kripya aaj hi clearance karein taaki hum aapko aage bhi credit suvidha de sakein.\n\n` +
+      )}* ka udhaar bacha hua hai. Kripya clearance karein taaki hum aapko aage bhi credit suvidha de sakein.\n\n` +
       `💳 *Instant UPI Pay:* ${upiUrl}\n` +
       `UPI: \`${upiId}\`\n\n` +
-      `Kripya turant sampark karein: ${db.settings.phone || ""}`,
+      `Kripya sampark karein: ${db.settings.phone || ""}`,
   };
 
   const selectedMessage = messages[templateType];
-
-  const handleSendWhatsApp = () => {
-    if (!customer.phone || customer.phone.length < 10) {
-      showToast("Customer mobile number not valid for WhatsApp", "red");
-      return;
-    }
-    const ok = openWhatsApp(customer.phone, selectedMessage);
-    if (ok) {
-      showToast("Opening WhatsApp with Dynamic UPI Payment link...", "green");
-    } else {
-      showToast("Could not open WhatsApp", "red");
-    }
-  };
 
   const handleCopyLink = async () => {
     try {
@@ -104,7 +95,7 @@ export const CustomerKhataUpiModal: React.FC<CustomerKhataUpiModalProps> = ({
   };
 
   return (
-    <div className="overlay show">
+    <div className="overlay show" style={{ zIndex: 9999 }}>
       <div className="modal" style={{ maxWidth: "560px" }}>
         <div className="modal-head">
           <h3>
@@ -134,6 +125,22 @@ export const CustomerKhataUpiModal: React.FC<CustomerKhataUpiModalProps> = ({
             <div style={{ textAlign: "right" }}>
               <div className="hint" style={{ fontSize: "11px", textTransform: "uppercase" }}>Total Udhaar Due</div>
               <div style={{ fontSize: "17px", fontWeight: 800, color: "var(--red)" }}>{inr(dueAmount)}</div>
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => setShowRepayModal(true)}
+                style={{
+                  fontSize: "10px",
+                  padding: "2px 6px",
+                  background: "#dcfce7",
+                  color: "#15803d",
+                  border: "1px solid #86efac",
+                  fontWeight: 800,
+                  marginTop: "3px",
+                }}
+              >
+                <Zap size={10} /> ⚡ Jama / Settle
+              </button>
             </div>
           </div>
 
@@ -176,8 +183,8 @@ export const CustomerKhataUpiModal: React.FC<CustomerKhataUpiModalProps> = ({
               src={qrCodeUrl}
               alt="UPI QR Code"
               style={{
-                width: "110px",
-                height: "110px",
+                width: "100px",
+                height: "100px",
                 borderRadius: "8px",
                 border: "1px solid #e5e7eb",
                 padding: "4px",
@@ -186,16 +193,16 @@ export const CustomerKhataUpiModal: React.FC<CustomerKhataUpiModalProps> = ({
             />
 
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: "12px", color: "#6b7280", fontWeight: 700 }}>DIRECT SCAN &amp; PAY</div>
+              <div style={{ fontSize: "11px", color: "#6b7280", fontWeight: 700 }}>DIRECT SCAN &amp; PAY</div>
               <div style={{ fontSize: "16px", fontWeight: 900, color: "#111827", margin: "2px 0 4px" }}>
                 {inr(amountToRequest)}
               </div>
-              <div style={{ fontSize: "11.5px", fontFamily: "monospace", color: "#374151", background: "#f3f4f6", padding: "3px 6px", borderRadius: "4px", display: "inline-block", marginBottom: "8px" }}>
+              <div style={{ fontSize: "11px", fontFamily: "monospace", color: "#374151", background: "#f3f4f6", padding: "2px 6px", borderRadius: "4px", display: "inline-block", marginBottom: "6px" }}>
                 {upiId}
               </div>
 
               <div>
-                <button className="btn sm ghost" onClick={handleCopyLink} style={{ fontSize: "11px", padding: "3px 8px" }}>
+                <button className="btn sm ghost" onClick={handleCopyLink} style={{ fontSize: "11px", padding: "2px 8px" }}>
                   {copied ? <CheckCircle2 size={12} style={{ color: "var(--green)" }} /> : <Copy size={12} />}
                   {copied ? "Copied!" : "Copy UPI Link"}
                 </button>
@@ -203,44 +210,42 @@ export const CustomerKhataUpiModal: React.FC<CustomerKhataUpiModalProps> = ({
             </div>
           </div>
 
-          {/* Message Preview Box */}
+          {/* Interactive WhatsApp Chat Preview Bubble */}
           <div style={{ marginBottom: "16px" }}>
-            <label style={{ fontSize: "11.5px", fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase", display: "block", marginBottom: "4px" }}>
-              Message Preview (Sent via WhatsApp)
+            <label style={{ fontSize: "11.5px", fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>
+              💬 WhatsApp Message Preview (Real Chat View)
             </label>
-            <div
-              style={{
-                background: "var(--paper)",
-                border: "1px solid var(--line)",
-                borderRadius: "8px",
-                padding: "10px 12px",
-                fontSize: "12px",
-                whiteSpace: "pre-wrap",
-                color: "var(--ink)",
-                lineHeight: "1.5",
-                maxHeight: "150px",
-                overflowY: "auto",
-              }}
-            >
-              {selectedMessage}
-            </div>
+            <WhatsAppPreviewBubble
+              recipientPhone={customer.phone}
+              recipientName={customer.name}
+              messageText={selectedMessage}
+              shopName={shopName}
+              toast={showToast}
+              onSent={onClose}
+            />
           </div>
 
-          {/* Action Buttons */}
+          {/* Close button */}
           <div className="modal-actions">
             <button className="btn ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              className="btn primary"
-              onClick={handleSendWhatsApp}
-              style={{ background: "#25D366", color: "#fff", border: "none" }}
-            >
-              <Send size={15} /> Send WhatsApp Reminder
+              Close
             </button>
           </div>
         </div>
       </div>
+
+      {showRepayModal && (
+        <QuickKhataRepaymentModal
+          customer={customer}
+          db={db}
+          isOpen={true}
+          onClose={() => setShowRepayModal(false)}
+          onSuccess={(updated) => {
+            onClose();
+          }}
+          toast={showToast}
+        />
+      )}
     </div>
   );
 };

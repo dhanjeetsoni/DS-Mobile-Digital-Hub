@@ -291,10 +291,30 @@ of how much day-to-day friction they save.
    used under bright shop lighting and by people glancing at it quickly,
    not reading closely — consistent with the large-touch-target direction
    already set for Phase 4's Android redesign.
-10. **A long-press app-icon shortcut straight to "New Sale"** (Android's
-    native app-shortcuts feature) — skips the login-then-navigate path
-    entirely when the session's already active, for the single most
-    time-sensitive action in the app.
+10. **One-tap "Share bill" (WhatsApp/Telegram) the moment a sale
+    completes.** The app already sends Telegram invoices — surfacing that
+    as one big button right on the sale-complete screen (instead of it
+    only happening automatically in the background) means the customer
+    can be handed their bill on WhatsApp before they've even left the
+    counter, with zero extra menu-hunting.
+11. **Cart total + "Complete Sale" pinned to the bottom of the screen**,
+    never requiring a scroll to reach — the single most time-critical tap
+    in the whole app should always be exactly where a thumb already is.
+12. **Low-stock shown inline in search results**, not only on the
+    separate Notifications screen — a small red dot/label next to a
+    product's name right when it's being sold, so a staff member notices
+    "this is almost out" at the exact moment it matters (and can mention
+    it to the owner right then), not only if they happen to check
+    Notifications separately.
+13. **A short first-login walkthrough** (4-5 tooltips, dismissible, shown
+    once) — not everyone using this app is naturally comfortable with a
+    new app's layout, and a staff member's very first shift is the worst
+    time to be quietly confused about which button does what.
+
+_Dropped from the original 10: a long-press app-icon shortcut to "New
+Sale" — niche, most shop staff/owners are unlikely to discover or use an
+Android launcher shortcut, so it wasn't worth keeping over the four
+above._
 
 ---
 

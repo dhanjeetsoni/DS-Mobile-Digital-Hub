@@ -71,12 +71,9 @@ mechanism as staff, instead of the old shared local passcode. Concretely:
 - The owner can regenerate/reset this Android login credential from
   Windows at any time (lost phone, etc.) — same UX as resetting a staff
   password today.
-- **Open question to confirm before building:** does the owner keep the
-  ability to also use Cloud Sign-In (real email/password) on Android as
-  a fallback, or is the generated ID+password truly the *only* door in on
-  mobile? This plan assumes the latter (**ID+password only, no other
-  option**) per the explicit instruction, but flagging it since it's a
-  real behavior change from what exists today.
+- **Confirmed:** the generated ID+password is the *only* door in on
+  Android, for staff and owner alike — no email/password entry, no Cloud
+  Sign-In, on mobile at all.
 
 ### 2.3 What gets removed
 - The Android-only "choose: Staff Area / Owner Confidential Area" gate
@@ -219,11 +216,11 @@ explicitly an **Android-only new screen tree**, not a rewrite:
 ## 6. Rollout / migration notes
 
 - Existing installed "DS Owner" and "DS Staff" APKs on real devices will
-  need to be **replaced** by the new unified "DS Mobile" APK (different
-  package identifier = a fresh install, not an in-place update, unless
-  the identifier is kept identical to one of the two existing ones —
-  worth deciding explicitly which, if either, to preserve for a smoother
-  transition for anyone already using this app).
+  need to be **replaced** by the new unified "DS Mobile" APK — **confirmed:
+  a genuinely new package identifier** (not reusing either existing one),
+  so this is a fresh install on every device, not an in-place update.
+  Worth a short rollout note when this actually ships: uninstall the two
+  old apps, install the one new one.
 - The owner's very first Android login on their existing device will be
   the one **genuinely new step**: they'll need their Windows app updated
   first (to gain the "generate my own Android login" capability), open
@@ -232,21 +229,72 @@ explicitly an **Android-only new screen tree**, not a rewrite:
 
 ---
 
-## 7. Open questions before implementation starts
+## 7. Open questions — CONFIRMED
 
-Flagging these rather than guessing, since getting them wrong means
-redoing real work:
+1. **§2.2 — Email login on Android: REMOVED entirely.** No Cloud
+   Sign-In (real email/password) on mobile for anyone, owner included.
+   The owner's Android login is generated from the **exact same place**
+   staff logins already are — Staff Access Manager — just issuing
+   credentials against the owner's own `profiles` row instead of
+   creating a new staff row. One generation flow, two kinds of accounts.
+2. **§4.2 — Pro feature list: accepted as-is**, no changes requested.
+3. **§6 — New package identifier.** Not reusing `com.dsmobile.digitalhub.owner`
+   or `.staff` — DS Mobile ships as a genuinely new identifier (e.g.
+   `com.dsmobile.digitalhub`, TBD at build time), so every existing
+   device needs a fresh install of both old APKs replaced by the one new
+   one. No in-place upgrade path — call this out clearly when the rollout
+   actually happens.
 
-1. **§2.2** — is the generated Owner ID+password truly the *only* login
-   path on Android, with Cloud Sign-In (email/password) removed from
-   mobile entirely? (This plan assumes yes.)
-2. **§4.2** — does the proposed Pro feature list match what's actually
-   wanted, or should anything be added/removed? ("Important" is a
-   judgment call — flagging it explicitly rather than assuming this list
-   is final.)
-3. **§6** — keep one of the two existing package identifiers (so current
-   installs upgrade in place) or ship a genuinely new one (clean slate,
-   but every existing device needs a fresh install)?
+---
+
+## 8. Suggested usability improvements (beyond what was asked for)
+
+Not part of the original spec — flagging these because they're the kind
+of thing that make or break a POS app used one-handed, mid-transaction,
+by someone standing at a counter with a customer waiting. Each is small
+and additive to the plan above, not a redesign; listed roughly in order
+of how much day-to-day friction they save.
+
+1. **Sell screen opens straight to a focused search/scan bar, cursor
+   already active.** Zero taps to start typing or scanning the moment
+   the screen appears — the single most-used screen should need zero
+   setup taps.
+2. **Barcode scan gets a sound + vibration on successful read**, not just
+   a visual change — confirms the scan worked without the staff member
+   needing to look away from the customer/item in hand.
+3. **A small persistent "last synced Xs ago" / offline indicator**,
+   somewhere it doesn't get in the way (e.g. a tiny dot near the top).
+   This app leans hard on background sync (Phase 2/3) — a visible trust
+   signal for "is this up to date" matters a lot on a shop floor, and an
+   offline banner should say plainly what still works (Sell keeps
+   working offline) vs. what needs a connection.
+4. **Login screen remembers the last-used ID** (not the password) on
+   that device, so a second login is one tap into the password field,
+   not retyping a whole ID string. Small thing, saved every single time
+   after the first.
+5. **A visible role/mode badge** near the top of the screen at all
+   times — "Staff", "Owner · Lite", "Owner · Pro" — small but constant,
+   so there's never a moment of "wait, which mode am I in right now"
+   after a mode switch or a session resume.
+6. **Recent/frequently-sold items as quick-add tiles** on the Sell
+   screen, above or beside the search bar — most shops sell the same
+   20-30 SKUs constantly (screen guards, chargers, cables); tapping a
+   tile beats typing/searching for the fifth time that hour.
+7. **Add Stock's camera opens directly into capture mode** — no
+   intermediate "choose source" step when the intent is obviously "scan
+   this pack I'm holding right now."
+8. **One-tap Lite/Pro switch from wherever the owner is**, not buried
+   two screens into Settings — e.g. tapping that role/mode badge from
+   §5 itself opens the switch (with the fingerprint/PIN prompt only when
+   going *into* Pro, per §4.3).
+9. **Bigger default text size and high-contrast colours**, since this is
+   used under bright shop lighting and by people glancing at it quickly,
+   not reading closely — consistent with the large-touch-target direction
+   already set for Phase 4's Android redesign.
+10. **A long-press app-icon shortcut straight to "New Sale"** (Android's
+    native app-shortcuts feature) — skips the login-then-navigate path
+    entirely when the session's already active, for the single most
+    time-sensitive action in the app.
 
 ---
 

@@ -1938,3 +1938,72 @@ to trust. Three of the four findings below were in no plan document at all._
       repo. `debug-gemini-probe` looks like a leftover debug endpoint and should
       probably be removed from production.
 - [ ] Bundle splitting (Phase 13 above).
+
+### ⬜ Phase 17: DS Mobile — Unified App (Owner Lite/Pro)
+
+_Spec lives in `DS_MOBILE_UNIFIED_APP_PLAN.md`. Replaces the two separate
+"DS Owner"/"DS Staff" APKs and the shared local `ownerPasscode` unlock with
+one **DS Mobile** APK where everyone (staff and owner alike) signs in with a
+generated Login ID + password, and the signed-in profile's `role` decides
+what's shown. Broken into checkbox items here, per this file's own convention,
+before further implementation — nothing below is built until checked off._
+
+- [x] **17.1 — Single build + unified login screen for the `mobile` variant
+      (2026-09-18).**
+  - **Bug found while starting this phase:** `BUILD-ANDROID.md` already
+    documented the `mobile-android-apk` CI artifact as "ek hi app, Login
+    ID/Password daalega, role ke hisaab se access" — and the CI matrix
+    (`build-and-release.yml`) and `tauri.mobile-android.conf.json` already
+    existed — but `src/App.tsx` never actually special-cased
+    `VITE_APP_VARIANT="mobile"`. It fell through to the `"full"` branch, so a
+    real `mobile` build would have shown the **Windows-style chooser +
+    shared `ownerPasscode` gate** — the exact thing this phase exists to
+    remove. Docs and CI had shipped ahead of the actual gate logic.
+  - **Fixed:** `mobile` now behaves like the existing `staff` variant at the
+    gate — skips the chooser entirely and opens straight on the `staffAuth`
+    form, which (already, unmodified) accepts two kinds of Android-Access-
+    Area-issued credentials: a `staff` login (today's staff experience,
+    unchanged — §2.1/§3, not touched this phase) and a `manager` login (full
+    owner-level access, no time-window gate — `staffAuth.ts`/`staff-manage`).
+    `ownerMode` is already set `true` automatically for `role === "manager"`
+    in every place that checks it (pre-existing code, untouched).
+  - **Deliberately reused, not reinvented:** §2.2 asks for "the owner gets a
+    generated ID+password the same way staff does." The existing `manager`
+    role *already is* exactly that — full owner-level access via a
+    Staff-Access-Manager-generated Login ID/password — so this phase wires
+    the mobile build to that existing, already-battle-tested mechanism
+    instead of building a second, parallel "owner-specific" credential
+    system. Flagging this explicitly for the owner to confirm: if a
+    genuinely separate "Owner Android Login" concept (as literally worded in
+    §2.2, tied to the owner's *own* `profiles` row rather than a new
+    `manager` row) is wanted instead of reusing `manager`, that's a
+    deliberate follow-up, not an oversight.
+  - **Verified this session:** `npx tsc --noEmit` 0 errors, `npx vitest run`
+    32/32, `node scripts/static-audit.mjs` 16/16, `npm run build` clean.
+    Not yet verified: an actual `mobile` APK installed on a real device
+    (needs a CI run + the owner's phone, per this file's testing-cadence
+    convention).
+  - **Not done in this item, on purpose (separate, bigger follow-ups):**
+    - [ ] 17.2 — Retire the `staff`/`owner` CI matrix legs + their two Tauri
+          configs once real devices are confirmed migrated to `mobile`
+          (§2.3/§5.1's "collapse into one" — kept side-by-side for now since
+          people may still be on the old APKs, exactly as `build-and-
+          release.yml`'s own comment already says).
+    - [ ] 17.3 — Staff's fixed 5-screen tree on `mobile` (§3): Sell, Add
+          Stock, Today's Stock (view-only), Notifications, day's sales
+          total (count + ₹, no margin). Today the `mobile` variant simply
+          reuses the full existing staff experience as-is; narrowing it to
+          this exact 5-screen set is unstarted.
+    - [ ] 17.4 — Owner Lite/Pro toggle on `mobile` (§4): Lite (Sell + Add
+          Stock only) as the default/no-reprompt state, Pro (the §4.2 tool
+          set) behind the existing biometric/PIN unlock, remembered per
+          device. Today a `manager`/`owner` login on `mobile` gets the full,
+          untrimmed owner UI (same as Windows) — no Lite/Pro split exists
+          yet.
+    - [ ] 17.5 — New package identifier rollout note (§6): a short in-app
+          and README note that DS Mobile is a fresh install, not an
+          in-place update over the old Staff/Owner APKs.
+    - [ ] 17.6 — §8's usability list (search-bar autofocus, scan sound/
+          vibration, sync indicator, remembered last login ID, role/mode
+          badge, etc.) — explicitly scoped as later polish in the plan
+          document itself, not part of the core phase.

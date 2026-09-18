@@ -411,22 +411,37 @@ export default function App() {
   // a different person who logs in on the same machine.
   const GATE_ATTEMPTS_KEY = `dsmdh_gate_state_v1_${cloudProfile?.id || "anon"}`;
   const [gateUnlocked, setGateUnlocked] = useState(false);
-  // Step 1.5/1.8: the *same* codebase is packaged three ways —
+  // Step 1.5/1.8: the *same* codebase is packaged four ways —
   //   VITE_APP_VARIANT unset/"full"  -> Windows desktop app (today's behaviour, both tiles)
   //   VITE_APP_VARIANT="staff"       -> dedicated Staff Android app: skips the
   //                                      chooser entirely, no Owner tile ever shown/reachable.
   //   VITE_APP_VARIANT="owner"       -> dedicated Owner Android app: skips straight to the
   //                                      Owner gate, no Staff Area tile (Owner still gets full access).
-  // See src-tauri/tauri.staff-android.conf.json / tauri.owner-android.conf.json and
-  // BUILD-ANDROID.md for how these get built into two separate installable APKs.
+  //   VITE_APP_VARIANT="mobile"      -> DS Mobile Phase 1 (see DS_MOBILE_UNIFIED_APP_PLAN.md,
+  //                                      PROJECT_PLAN.md Phase 17): the single unified Android
+  //                                      app. No chooser, no shared local `ownerPasscode` gate —
+  //                                      everyone (staff AND owner) signs in with a generated
+  //                                      Login ID + password on the exact same `staffAuth` form
+  //                                      already used by the "staff" variant, which already
+  //                                      accepts both a "staff" credential and a "manager"
+  //                                      credential (full owner-level access, no time-window
+  //                                      gate — see staffAuth.ts/staff-manage). The owner's
+  //                                      Android login is generated the same way as a manager's,
+  //                                      from Staff Access Manager on Windows/Android-Pro — no
+  //                                      new backend concept needed for this phase. Role (staff
+  //                                      vs full-access) is read from the signed-in profile
+  //                                      after login, not baked into the build.
+  // See src-tauri/tauri.staff-android.conf.json / tauri.owner-android.conf.json /
+  // tauri.mobile-android.conf.json and BUILD-ANDROID.md for how these get built into
+  // separate installable APKs.
   const APP_VARIANT = (import.meta as any).env?.VITE_APP_VARIANT || "full";
   const [gateStage, setGateStage] = useState<"choose" | "ownerAuth" | "staffAuth" | "staffDenied" | "personalPin">(
-    APP_VARIANT === "staff" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose"
+    APP_VARIANT === "staff" || APP_VARIANT === "mobile" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose"
   );
-  // In a dedicated Staff/Owner build there is no "choose" screen to go back
-  // to (and it must never become reachable — that's the whole point of a
+  // In a dedicated Staff/Owner/Mobile build there is no "choose" screen to go
+  // back to (and it must never become reachable — that's the whole point of a
   // separate app). "Back" on those builds just resets the current form.
-  const gateBackStage = APP_VARIANT === "staff" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose";
+  const gateBackStage = APP_VARIANT === "staff" || APP_VARIANT === "mobile" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose";
   const [gatePassInput, setGatePassInput] = useState("");
   // Staff Access Manager (Part 1): staff sign in with an owner-issued Login ID
   // + password instead of walking straight into Staff Area. If cloud sync
@@ -5066,7 +5081,7 @@ export default function App() {
                   setCloudUser(null);
                   setCloudProfile(null);
                   setGatePassInput("");
-                  setGateStage(APP_VARIANT === "staff" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose");
+                  setGateStage(APP_VARIANT === "staff" || APP_VARIANT === "mobile" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose");
                 }}
               >
                 Not you? Sign out and use a different account

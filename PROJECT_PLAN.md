@@ -1994,16 +1994,48 @@ before further implementation — nothing below is built until checked off._
           total (count + ₹, no margin). Today the `mobile` variant simply
           reuses the full existing staff experience as-is; narrowing it to
           this exact 5-screen set is unstarted.
-    - [ ] 17.4 — Owner Lite/Pro toggle on `mobile` (§4): Lite (Sell + Add
-          Stock only) as the default/no-reprompt state, Pro (the §4.2 tool
-          set) behind the existing biometric/PIN unlock, remembered per
-          device. Today a `manager`/`owner` login on `mobile` gets the full,
-          untrimmed owner UI (same as Windows) — no Lite/Pro split exists
-          yet.
+  - [x] **17.4 — Owner Lite/Pro toggle on `mobile` (2026-09-19).** Lite
+        (Sell + Add Stock only, the safer default, no re-prompt) / Pro
+        (Reports, Daily Galla closing, Settings, Staff Access Manager incl.
+        its Remote Force-Logout + Telegram-digest controls, full inventory
+        browse+edit — the §4.2 curated set), remembered per device via plain
+        localStorage (never synced), only active for an owner/manager
+        identity on the `mobile` build variant — a no-op everywhere else
+        (Windows, `staff` identity on any build, the dedicated `staff`/
+        `owner` Android APKs).
+    - Lite → Pro reuses the existing "Owner Confidential Access" PIN modal
+      and fingerprint flow (tagged with a new `ownerLoginPurpose`, since
+      `ownerMode` is already `true` the instant an owner/manager signs in
+      on this build, so the pre-existing `requireOwner()` guard alone
+      can't gate this — a new `requestSwitchToProMode()` was needed).
+      Fingerprint option added to that modal for the first time (it
+      previously only appeared on the full-screen gate). Pro → Lite is
+      immediate, no prompt, per §4.3's "going more-restrictive never needs
+      re-auth" rule.
+    - Filtering is UI-layer only (Sidebar's primary/secondary nav +
+      `BottomTabBar`'s tab set), per §5's explicit design choice — the
+      underlying RPCs/RLS still enforce real role checks regardless of
+      which screens are shown, so this cannot be a security regression
+      even if someone tampered with the client to reach a hidden screen.
+    - **Known gap, left as-is on purpose:** Lite's "Add Stock" opens the
+      `AddProductModal` directly (same modal the Dashboard's own shortcut
+      card uses) rather than Lite having its own minimal home screen —
+      Dashboard itself carries many more widgets than Lite should expose,
+      and building a dedicated Lite home screen was judged out of scope
+      for this item. Worth revisiting if the owner wants Lite to feel like
+      more than "two buttons in a sidebar."
+    - **Verified this session:** `npx tsc --noEmit` 0 errors, `npx vitest
+      run` 32/32, `node scripts/static-audit.mjs` 16/16, `npm run build`
+      clean. Not yet verified: an actual device — the biometric prompt in
+      particular needs a real fingerprint sensor to confirm it actually
+      fires (the `mobile` gate screen's existing biometric button gives
+      confidence the plumbing is sound, but this is a new call site).
     - [ ] 17.5 — New package identifier rollout note (§6): a short in-app
           and README note that DS Mobile is a fresh install, not an
           in-place update over the old Staff/Owner APKs.
     - [ ] 17.6 — §8's usability list (search-bar autofocus, scan sound/
           vibration, sync indicator, remembered last login ID, role/mode
           badge, etc.) — explicitly scoped as later polish in the plan
-          document itself, not part of the core phase.
+          document itself, not part of the core phase. (The Lite/Pro badge
+          added in 17.4 above happens to satisfy the "role/mode badge" item
+          already.)

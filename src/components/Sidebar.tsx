@@ -367,6 +367,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
+      {mobileOwnerMode && (
+        <button
+          onClick={onToggleMobileOwnerMode}
+          title={mobileOwnerMode === "lite" ? "Switch to Pro Mode (needs fingerprint/PIN)" : "Switch back to Lite Mode"}
+          style={{
+            margin: "0 14px 8px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "8px",
+            padding: "7px 10px",
+            borderRadius: "8px",
+            border: "1px solid",
+            borderColor: mobileOwnerMode === "pro" ? "var(--amber-border, #f59e0b66)" : "var(--sidebar-border)",
+            background: mobileOwnerMode === "pro" ? "rgba(245,158,11,0.12)" : "rgba(255,255,255,0.03)",
+            color: "var(--sidebar-text)",
+            cursor: "pointer",
+          }}
+        >
+          <span style={{ fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            {mobileOwnerMode === "pro" ? "🔓 Owner · Pro" : "🔒 Owner · Lite"}
+          </span>
+          <span style={{ fontSize: "10px", opacity: 0.75 }}>{mobileOwnerMode === "pro" ? "Tap for Lite" : "Tap for Pro"}</span>
+        </button>
+      )}
+
       {/* Navigation List */}
       <nav className="nav" id="navList">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px 2px" }}>
@@ -397,6 +423,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             stock, add straight to the bill; it must stay reachable without
             switching to Owner mode). */}
         {(() => {
+          // Phase 17.4 (DS Mobile Owner Lite/Pro) — checked first because on
+          // the `mobile` build ownerMode is already true the instant an
+          // owner/manager signs in, so the very next check below would
+          // otherwise show everything regardless of Lite/Pro.
+          if (mobileOwnerMode === "lite") return PRIMARY_NAV_ITEMS.filter((i) => i.key === "sell");
+          if (mobileOwnerMode === "pro") return PRIMARY_NAV_ITEMS.filter((i) => MOBILE_PRO_PRIMARY_KEYS.includes(i.key));
           if (ownerMode && !isStaffIdentity) return PRIMARY_NAV_ITEMS;
           const hasPolicy = Array.isArray(allowedSections) && allowedSections.length > 0;
           return PRIMARY_NAV_ITEMS.filter((i) =>
@@ -424,8 +456,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
 
-        {/* Secondary / Advanced Section — Owner only */}
-        {!easyMode && ownerMode && (
+        {mobileOwnerMode === "lite" && onOpenAddStockLite && (
+          <button className="navitem" onClick={onOpenAddStockLite}>
+            <span className="ic">
+              <Package size={16} />
+            </span>
+            <span style={{ fontSize: "13px" }}>Add Stock</span>
+          </button>
+        )}
+
+        {/* Secondary / Advanced Section — Owner only. In DS Mobile Lite mode
+            this whole section is hidden (Lite = Sell + Add Stock, nothing
+            else); in Pro mode it's filtered to MOBILE_PRO_SECONDARY_KEYS
+            below via staffPolicyOk-style filtering, same pattern as the
+            existing staff allowedSections check. */}
+        {!easyMode && ownerMode && mobileOwnerMode !== "lite" && (
           <div style={{ marginTop: "6px", borderTop: "1px solid var(--sidebar-border)", paddingTop: "6px" }}>
             <button
               onClick={() => setShowAllTools(!showAllTools || isCurrentSecondary)}
@@ -455,9 +500,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {SECONDARY_NAV_GROUPS.map((group) => {
                   const staffPolicyOk = (key: string) =>
                     !isStaffIdentity || !Array.isArray(allowedSections) || allowedSections.length === 0 || allowedSections.includes(key);
+                  // Phase 17.4: Pro mode further narrows to the curated set,
+                  // on top of (not instead of) the existing owner/staff checks.
+                  const mobileProOk = (key: string) => mobileOwnerMode !== "pro" || MOBILE_PRO_SECONDARY_KEYS.includes(key);
                   const visibleItems = group.itemKeys
                     .map((key) => SECONDARY_NAV_ITEMS.find((n) => n.key === key))
-                    .filter((n): n is (typeof SECONDARY_NAV_ITEMS)[number] => !!n && (!n.ownerOnly || (ownerMode && !isStaffIdentity)) && staffPolicyOk(n.key));
+                    .filter((n): n is (typeof SECONDARY_NAV_ITEMS)[number] => !!n && (!n.ownerOnly || (ownerMode && !isStaffIdentity)) && staffPolicyOk(n.key) && mobileProOk(n.key));
 
                   if (visibleItems.length === 0) return null;
 

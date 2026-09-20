@@ -5303,6 +5303,12 @@ export default function App() {
   // (see handleStaffLoginSubmit's comment on why), so this is naturally
   // re-derived fresh on every app boot exactly when it's needed.
   const staffAllowedSections = isStaffIdentity ? (readCachedStaffSession()?.allowedSections ?? null) : null;
+  // Phase 17.4 (DS Mobile Owner Lite/Pro): only meaningful for an owner/
+  // manager identity on the unified `mobile` build. False for Windows, the
+  // dedicated `staff`/`owner` Android APKs, and for staff on `mobile` too
+  // (staff's own nav is governed entirely by staffAllowedSections above,
+  // unchanged by this phase).
+  const isMobileOwnerLiteProActive = APP_VARIANT === "mobile" && ownerMode && !isStaffIdentity;
 
   return (
     <div id="app" className={privacyMode ? "privacy-shield-active" : ""}>
@@ -5338,11 +5344,16 @@ export default function App() {
         onCloseMobile={() => setIsMobileNavOpen(false)}
         isStaffIdentity={isStaffIdentity}
         allowedSections={staffAllowedSections}
+        mobileOwnerMode={isMobileOwnerLiteProActive ? ownerMobileMode : null}
+        onOpenAddStockLite={() => requireOwner(() => setIsAddProductOpen(true))}
+        onToggleMobileOwnerMode={() => (ownerMobileMode === "lite" ? requestSwitchToProMode() : switchToLiteMode())}
       />
       <BottomTabBar
         currentPage={currentPage}
         isStaffIdentity={isStaffIdentity}
         allowedSections={staffAllowedSections}
+        mobileOwnerMode={isMobileOwnerLiteProActive ? ownerMobileMode : null}
+        onOpenAddStockLite={() => requireOwner(() => setIsAddProductOpen(true))}
         onNavigate={(page) => {
           // Same owner-passcode gate as <Sidebar>'s onNavigate above (kept
           // duplicated rather than refactored into a shared function, to

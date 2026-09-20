@@ -73,7 +73,35 @@ interface SidebarProps {
    * which would otherwise strand a staff member on a totally blank sidebar).
    */
   allowedSections?: string[] | null;
+  /** Phase 17.4 (DS Mobile Owner Lite/Pro, `mobile` build only). `null`/
+   * `undefined` on every other build or identity (Windows, dedicated
+   * `staff`/`owner` Android APKs, or a staff identity here) -- the whole
+   * block below is skipped and Sidebar behaves exactly as it always has.
+   * `"lite"` = Sell + Add Stock only (§4.1, the safer default); `"pro"` =
+   * the curated owner tool set (§4.2). */
+  mobileOwnerMode?: "lite" | "pro" | null;
+  /** Required to render the Lite "Add Stock" quick-action button — opens
+   * the same Add-Product modal as the Dashboard's own shortcut card. */
+  onOpenAddStockLite?: () => void;
+  /** Tapping the Lite/Pro badge below calls this — Lite->Pro triggers the
+   * owner's fingerprint/PIN prompt (handled by the caller); Pro->Lite is
+   * immediate. Only rendered when mobileOwnerMode is set. */
+  onToggleMobileOwnerMode?: () => void;
 }
+
+// Phase 17.4 §4.2 — the curated Pro-only SECONDARY_NAV_ITEMS keys judged
+// "important enough for a phone screen" (Reports, Daily Galla closing is a
+// PRIMARY item so it's handled separately below, Settings, Staff Access
+// Manager incl. its own Remote Force-Logout/Telegram-digest controls, and
+// full inventory browse+edit). Deliberately excludes everything the plan's
+// §4.2 "explicitly left out" paragraph calls desktop-only (bulk tools, deep
+// multi-tab reporting, etc.) -- kept as its own named list, not inlined,
+// so a future change to the Pro set is a one-line edit here.
+const MOBILE_PRO_SECONDARY_KEYS = ["products", "ownerreports", "saleshistory", "plDashboard", "staffAccess", "settings"];
+// Phase 17.4 §4.1/§4.2 — Pro's PRIMARY_NAV_ITEMS subset. "sell" is always
+// included (Lite's own baseline); "gallaClosing" (Daily Galla closing) is
+// the one primary item Pro adds on top of Lite.
+const MOBILE_PRO_PRIMARY_KEYS = ["sell", "gallaClosing"];
 
 // 6 Core Daily Counter Items for Ultra-Easy Counter Work
 export const PRIMARY_NAV_ITEMS = [
@@ -221,6 +249,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
   isStaffIdentity = false,
   allowedSections = null,
+  mobileOwnerMode = null,
+  onOpenAddStockLite,
+  onToggleMobileOwnerMode,
 }) => {
   const [showAllTools, setShowAllTools] = useState<boolean>(false);
   const [easyMode, setEasyMode] = useState<boolean>(false);

@@ -376,6 +376,17 @@ export default function App() {
   const [viewingCreditNote, setViewingCreditNote] = useState<ReturnRecord | null>(null);
   const [viewingExchange, setViewingExchange] = useState<ExchangeRecord | null>(null);
   const [isOwnerLoginOpen, setIsOwnerLoginOpen] = useState(false);
+  // Phase 17.4 (DS Mobile Owner Lite/Pro): the same "Owner Confidential
+  // Access" PIN/biometric modal above is reused for a second purpose on the
+  // `mobile` build -- confirming identity before switching from Lite to Pro
+  // -- even though `ownerMode` is already true the moment an owner/manager
+  // signs in on that build (unlike the Windows/legacy-Android flow, where
+  // this modal genuinely unlocks ownerMode itself). This tag tells
+  // handleGateOwnerSubmit/handleBiometricUnlock which outcome a successful
+  // unlock should produce. Always reset back to "ownerMode" (the default,
+  // original behaviour) wherever the modal closes, so a later ordinary
+  // requireOwner() prompt never accidentally flips Pro mode on.
+  const [ownerLoginPurpose, setOwnerLoginPurpose] = useState<"ownerMode" | "proMode">("ownerMode");
   const [privacyMode, setPrivacyMode] = useState(false);
   // Phase 2: self-service "My PIN" form state (used by owner/manager in
   // Settings, and by anyone via the account menu — see myPinForm usage).
@@ -442,6 +453,27 @@ export default function App() {
   // back to (and it must never become reachable — that's the whole point of a
   // separate app). "Back" on those builds just resets the current form.
   const gateBackStage = APP_VARIANT === "staff" || APP_VARIANT === "mobile" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose";
+  // Phase 17.4 (DS_MOBILE_UNIFIED_APP_PLAN.md §4): Owner Lite/Pro toggle for
+  // the `mobile` build only. Lite = Sell + Add Stock only (the safer
+  // default); Pro = the curated owner tool set (§4.2). "Remembered per
+  // device" per the spec, exactly like the existing biometric opt-in
+  // pattern — plain localStorage, never synced, and never read/used at all
+  // on any other build variant (Windows, `staff`, `owner`), so this cannot
+  // change behaviour there.
+  const MOBILE_OWNER_MODE_KEY = "dsmdh_mobile_owner_mode_v1";
+  const [ownerMobileMode, setOwnerMobileModeState] = useState<"lite" | "pro">(() => {
+    try {
+      return localStorage.getItem(MOBILE_OWNER_MODE_KEY) === "pro" ? "pro" : "lite";
+    } catch {
+      return "lite";
+    }
+  });
+  const persistOwnerMobileMode = (mode: "lite" | "pro") => {
+    setOwnerMobileModeState(mode);
+    try {
+      localStorage.setItem(MOBILE_OWNER_MODE_KEY, mode);
+    } catch {}
+  };
   const [gatePassInput, setGatePassInput] = useState("");
   // Staff Access Manager (Part 1): staff sign in with an owner-issued Login ID
   // + password instead of walking straight into Staff Area. If cloud sync
@@ -633,7 +665,17 @@ export default function App() {
       setGateUnlocked(true);
       setGatePassInput("");
       setIsOwnerLoginOpen(false);
-      showToast(cloudProfile ? `Welcome back, ${cloudProfile.staff_name || cloudProfile.full_name || "back"}!` : "Owner access unlocked.", "green");
+      if (ownerLoginPurpose === "proMode") {
+        // DS Mobile Owner Lite/Pro (§4.3): this modal was opened by
+        // requestSwitchToProMode(), not by a normal owner-only-action
+        // prompt — a correct PIN here means "switch to Pro", not the
+        // generic "Owner access unlocked" message.
+        persistOwnerMobileMode("pro");
+        setOwnerLoginPurpose("ownerMode");
+        showToast("Pro Mode unlocked.", "green");
+      } else {
+        showToast(cloudProfile ? `Welcome back, ${cloudProfile.staff_name || cloudProfile.full_name || "back"}!` : "Owner access unlocked.", "green");
+      }
       return;
     }
 
@@ -671,7 +713,12 @@ export default function App() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    if (gateStage === "personalPin" && cloudProfile?.id && isBiometricEnabled(cloudProfile.id)) {
+    // Phase 17.4: `isOwnerLoginOpen` added as a second trigger alongside the
+    // existing "personalPin" full-screen gate — the same modal now also
+    // opens mid-session for the DS Mobile Lite->Pro switch
+    // (requestSwitchToProMode), which should offer fingerprint too, not
+    // force a typed PIN every time.
+    if ((gateStage === "personalPin" || isOwnerLoginOpen) && cloudProfile?.id && isBiometricEnabled(cloudProfile.id)) {
       biometricCheck().then((status) => {
         if (!cancelled) setBiometricAvailable(Boolean(status?.isAvailable));
       });
@@ -679,7 +726,7 @@ export default function App() {
       setBiometricAvailable(false);
     }
     return () => { cancelled = true; };
-  }, [gateStage, cloudProfile?.id]);
+  }, [gateStage, isOwnerLoginOpen, cloudProfile?.id]);
 
   // Phase 6: separate availability check for the Settings "My PIN" card's
   // enable/disable toggle — deliberately independent of the gate-screen
@@ -713,7 +760,14 @@ export default function App() {
       if (cloudProfile.role === "owner" || cloudProfile.role === "manager") setOwnerMode(true);
       setGateUnlocked(true);
       setGatePassInput("");
-      showToast(`Welcome back, ${cloudProfile.staff_name || cloudProfile.full_name || "back"}!`, "green");
+      setIsOwnerLoginOpen(false);
+      if (ownerLoginPurpose === "proMode") {
+        persistOwnerMobileMode("pro");
+        setOwnerLoginPurpose("ownerMode");
+        showToast("Pro Mode unlocked.", "green");
+      } else {
+        showToast(`Welcome back, ${cloudProfile.staff_name || cloudProfile.full_name || "back"}!`, "green");
+      }
     } catch {
       // Cancelled by the person, or a genuine failed match — never treat
       // this as a wrong-PIN attempt (no lockout counter, no Telegram
@@ -763,6 +817,7 @@ export default function App() {
         setIsGallaModalOpen(false);
         setIsInvoiceViewerOpen(false);
         setIsOwnerLoginOpen(false);
+        setOwnerLoginPurpose("ownerMode");
         setIsWindowsModalOpen(false);
         setIsJobModalOpen(false);
         setIsCalculatorOpen(false);
@@ -1706,6 +1761,22 @@ export default function App() {
     }
     action();
   };
+
+  // Phase 17.4 (DS Mobile Owner Lite/Pro, §4.3): switching INTO Pro always
+  // needs the owner's fingerprint (if enabled) or PIN/password, even though
+  // `ownerMode` itself is already true for a signed-in owner/manager on this
+  // build — requireOwner() above would no-op here since it only checks
+  // ownerMode. Reuses the exact same "Owner Confidential Access" modal +
+  // handleGateOwnerSubmit/handleBiometricUnlock success path as every other
+  // owner re-auth in this app, just tagged so those handlers know to flip
+  // ownerMobileMode instead of (a no-op re-set of) ownerMode.
+  const requestSwitchToProMode = () => {
+    setOwnerLoginPurpose("proMode");
+    setIsOwnerLoginOpen(true);
+  };
+  // Switching BACK to Lite is always free/immediate, no prompt — going to
+  // the more-restrictive state never needs re-auth (§4.3's second rule).
+  const switchToLiteMode = () => persistOwnerMobileMode("lite");
 
   const handleTextScaleChange = (scale: "sm" | "md" | "lg" | "xl") => {
     saveState({ ...db, settings: { ...db.settings, textScale: scale } });
@@ -6296,16 +6367,20 @@ export default function App() {
         );
       })()}
 
-      {/* Owner Re-Auth Modal (mid-session switch from Staff view) */}
+      {/* Owner Re-Auth Modal — mid-session switch from Staff view, OR
+          (Phase 17.4, DS Mobile) confirming identity to switch Lite -> Pro. */}
       {isOwnerLoginOpen && (
         <div className="overlay show">
           <div className={`modal ${gateShakeError ? "shake" : ""}`} style={{ border: "1px solid rgba(239,68,68,.4)", boxShadow: "0 20px 50px -12px rgba(239,68,68,.25)" }}>
             <div className="modal-head">
-              <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}><ShieldAlert size={18} color="#ef4444" /> Owner Confidential Access</h3>
-              <button onClick={() => { setIsOwnerLoginOpen(false); setGatePassInput(""); }}>&times;</button>
+              <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <ShieldAlert size={18} color="#ef4444" />
+                {ownerLoginPurpose === "proMode" ? "Switch to Pro Mode" : "Owner Confidential Access"}
+              </h3>
+              <button onClick={() => { setIsOwnerLoginOpen(false); setGatePassInput(""); setOwnerLoginPurpose("ownerMode"); }}>&times;</button>
             </div>
             <div className="gate-warning-strip" style={{ marginBottom: 14, marginTop: -6 }}>
-              <Lock size={12} /> Restricted &amp; Monitored
+              <Lock size={12} /> {ownerLoginPurpose === "proMode" ? "Confirm it's you" : "Restricted & Monitored"}
             </div>
             {gateAttempts.lockUntil > Date.now() ? (
               <div className="gate-lock-banner">
@@ -6319,7 +6394,7 @@ export default function App() {
                 }}
               >
                 <div className="field">
-                  <label>Enter Owner Passcode</label>
+                  <label>{ownerLoginPurpose === "proMode" ? "Enter your PIN/Password" : "Enter Owner Passcode"}</label>
                   <input
                     type="password"
                     placeholder="Owner authentication required"
@@ -6334,11 +6409,21 @@ export default function App() {
                   ))}
                 </div>
                 <div className="modal-actions" style={{ marginTop: "16px" }}>
-                  <button type="button" className="btn" onClick={() => { setIsOwnerLoginOpen(false); setGatePassInput(""); }}>Cancel</button>
+                  <button type="button" className="btn" onClick={() => { setIsOwnerLoginOpen(false); setGatePassInput(""); setOwnerLoginPurpose("ownerMode"); }}>Cancel</button>
                   <button type="submit" className="btn primary" style={{ background: "#dc2626" }} disabled={gateBusy}>
-                    {gateBusy ? "Sending alert…" : "Unlock Owner Access"}
+                    {gateBusy ? "Sending alert…" : ownerLoginPurpose === "proMode" ? "Switch to Pro" : "Unlock Owner Access"}
                   </button>
                 </div>
+                {biometricAvailable && (
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ width: "100%", justifyContent: "center", marginTop: 10 }}
+                    onClick={handleBiometricUnlock}
+                  >
+                    <Fingerprint size={15} /> Use Fingerprint / Face
+                  </button>
+                )}
               </form>
             )}
           </div>

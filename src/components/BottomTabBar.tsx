@@ -20,6 +20,16 @@ interface BottomTabBarProps {
    * anchor tab regardless of policy, and "Reports" is already hard-gated by
    * ownerOnly above. */
   allowedSections?: string[] | null;
+  /** Phase 17.4 (DS Mobile Owner Lite/Pro, `mobile` build only): `null` on
+   * every other build/variant (Windows, dedicated `staff`/`owner` Android,
+   * or a staff identity here) -- unchanged behaviour. `"lite"` replaces the
+   * whole tab set with just Sell + Add Stock (DS_MOBILE_UNIFIED_APP_PLAN.md
+   * §4.1); `"pro"` keeps the normal tab set below, since Home/Inventory/
+   * Reports are all already part of Pro's curated set (§4.2). */
+  mobileOwnerMode?: "lite" | "pro" | null;
+  /** Required to render the Lite "Add Stock" tab — opens the same
+   * Add-Product modal as the Dashboard's "Add Stock / Product" shortcut. */
+  onOpenAddStockLite?: () => void;
 }
 
 // Phase 4.1 — bottom tab bar for Android/narrow-window layouts. Shown only
@@ -36,7 +46,37 @@ const TABS: { key: string; page: string; label: string; icon: React.ComponentTyp
   { key: "reports", page: "saleshistory", label: "Reports", icon: TrendingUp, ownerOnly: true },
 ];
 
-export default function BottomTabBar({ currentPage, onNavigate, onOpenMore, isStaffIdentity = false, allowedSections = null }: BottomTabBarProps) {
+export default function BottomTabBar({
+  currentPage,
+  onNavigate,
+  onOpenMore,
+  isStaffIdentity = false,
+  allowedSections = null,
+  mobileOwnerMode = null,
+  onOpenAddStockLite,
+}: BottomTabBarProps) {
+  if (mobileOwnerMode === "lite") {
+    return (
+      <nav className="bottom-tab-bar" aria-label="Primary navigation">
+        <button
+          type="button"
+          className={`bottom-tab-btn${currentPage === "sell" ? " active" : ""}`}
+          onClick={() => onNavigate("sell")}
+          aria-current={currentPage === "sell" ? "page" : undefined}
+        >
+          <ShoppingCart size={20} />
+          <span>Sell</span>
+        </button>
+        {onOpenAddStockLite && (
+          <button type="button" className="bottom-tab-btn" onClick={onOpenAddStockLite}>
+            <Package size={20} />
+            <span>Add Stock</span>
+          </button>
+        )}
+      </nav>
+    );
+  }
+
   const hasPolicy = isStaffIdentity && Array.isArray(allowedSections) && allowedSections.length > 0;
   const visibleTabs = TABS.filter((tab) => {
     if (tab.ownerOnly && isStaffIdentity) return false;

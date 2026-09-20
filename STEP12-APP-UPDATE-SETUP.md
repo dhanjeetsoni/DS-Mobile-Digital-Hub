@@ -64,8 +64,8 @@ chuka hai), toh Step 12 ke liye kuch extra Cloudflare setup nahi chahiye —
 ### 3. CI build workflow
 
 `.github/workflows/build-and-release.yml` (is ZIP mein add ki gayi hai) —
-Windows installer aur dono Android APKs build karta hai jab aap ek git tag
-push karte ho (jaise `v1.4.0`). Windows job automatically `.sig` file bhi
+Windows installer aur DS Mobile Android APK build karta hai jab aap ek git
+tag push karte ho (jaise `v1.4.0`). Windows job automatically `.sig` file bhi
 banata hai (upar wali secret ka use karke) aur dono ko ek GitHub Release mein
 attach kar deta hai.
 
@@ -92,7 +92,7 @@ GitHub secret add karo._
 
 Har build se pehle `.env.example` dekho — `VITE_APP_PLATFORM`,
 `VITE_APP_VERSION`, `VITE_APP_BUILD`, `VITE_APP_VARIANT` sahi set karo us
-specific shell (Windows / Staff Android / Owner Android) ke hisaab se. CI
+specific shell (Windows / DS Mobile Android) ke hisaab se. CI
 workflow yeh already sahi set karta hai per-job — local build karte ho to
 khud dhyan rakhna.
 

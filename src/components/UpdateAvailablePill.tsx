@@ -9,7 +9,8 @@ import { checkDownloadInstallAndRelaunch, detectTauriRuntime, type WindowsUpdate
 // LOW STOCK pill in App.tsx's top-actions row) rather than a blocking
 // modal — an app update should never stop someone mid-sale.
 //
-// Android (staff-android/owner-android): the one tap opens the APK's
+// Android (mobile-android — the dedicated staff-android/owner-android
+// builds were retired in Phase 17.2): the one tap opens the APK's
 // direct-download URL in the system browser. That's a real, working
 // install path with zero extra native code — Android's own download
 // manager + "install unknown apps" prompt takes it from there, same as

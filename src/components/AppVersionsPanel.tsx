@@ -30,8 +30,7 @@ interface AppVersionsPanelProps {
 
 const CONTENT_TYPE_BY_PLATFORM: Record<AppPlatform, string> = {
   windows: "application/octet-stream", // .exe/.msi/.msix installer
-  "staff-android": "application/vnd.android.package-archive",
-  "owner-android": "application/vnd.android.package-archive",
+  "mobile-android": "application/vnd.android.package-archive",
 };
 
 export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, storeLoading, toast }) => {

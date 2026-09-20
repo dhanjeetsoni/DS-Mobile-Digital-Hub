@@ -1,4 +1,4 @@
-# Android Apps Banana (Staff + Owner) — BUILD-ANDROID Guide
+# Android App (DS Mobile) — BUILD-ANDROID Guide
 
 Yeh guide **Step 1.5 aur 1.8** ka wo aakhri hissa poora karti hai jo pichhle
 session mein pending chhoda gaya tha: _"asli `.apk` file banana"_. Is
@@ -34,18 +34,23 @@ par kuch bhi install karne ki zaroorat nahi.
    asli workflow file hai: `.github/workflows/build-and-release.yml`).
    - Yeh khud-ba-khud bhi chalega jab tum `v1.2.3` jaisa git tag push karoge.
 4. Build complete hone ke baad (~10-15 minute), us workflow-run ke andar
-   **Artifacts** section mein alag-alag APK milenge:
-   - `staff-android-apk` → Staff Android App (dedicated, legacy)
-   - `owner-android-apk` → Owner Android App (dedicated, legacy)
-   - `mobile-android-apk` → **DS Mobile** (recommended) — ek hi app, koi bhi
-     Android Access Area se mila Login ID/Password daalega, uske role ke
-     hisaab se access mil jaayega (Staff ya Owner-level) — Gmail login ki
-     zaroorat nahi.
+   **Artifacts** section mein APK milega:
+   - `mobile-android-apk` → **DS Mobile** (the only Android build now — see
+     PROJECT_PLAN.md Phase 17.2) — ek hi app, koi bhi Android Access Area se
+     mila Login ID/Password daalega, uske role ke hisaab se access mil
+     jaayega (Staff ya Owner-level) — Gmail login ki zaroorat nahi.
    - `windows-installer` → Windows `.exe`
-   (Ek "release" job in sabko ek GitHub Release mein bhi jod deta hai.)
+   (Ek "release" job in dono ko ek GitHub Release mein bhi jod deta hai.)
+
+   _(Phase 17.2 se pehle yahan alag "Staff Android" aur "Owner Android"
+   dedicated APKs bhi milte the — un CI legs aur unke Tauri configs ko
+   retire kar diya gaya hai kyunki koi real device un par kabhi nahi tha
+   (verified against live Supabase data before removing). Agar tumhare paas
+   abhi bhi koi purana Staff/Owner APK installed hai, use uninstall karke
+   naya DS Mobile APK install kar do.)_
 5. Download karke seedha kisi bhi Android phone par install kar do
    (pehli baar "Unknown apps install" permission dena hoga, jaisa kisi bhi
-   sideloaded app ke liye lagta hai). Agar staff/owner ka purana APK pehle
+   sideloaded app ke liye lagta hai). Agar koi purana staff/owner APK pehle
    se installed hai, use uninstall karke naya install karo.
 
 ## Option B — Apne Computer Par Manually (agar CI use nahi karna)
@@ -57,11 +62,8 @@ npm install
 npm install -g @tauri-apps/cli
 npx tauri android init        # ek baar, project set up karta hai
 
-# Staff app:
-npm run android:staff:build
-
-# Owner app:
-npm run android:owner:build
+# DS Mobile app (the only Android build — see Phase 17.2):
+npm run android:mobile:build
 ```
 
 Built APK yahan milega: `src-tauri/gen/android/app/build/outputs/apk/`
@@ -72,16 +74,23 @@ Built APK yahan milega: `src-tauri/gen/android/app/build/outputs/apk/`
 
 | Zaroorat (Master Plan se) | Status |
 |---|---|
-| Dedicated Staff Android app (login-only, permission-based) | ✅ `App.tsx` variant switch (pichhle session mein bana) |
-| Dedicated Owner Android app (full access) | ✅ `App.tsx` variant switch (pichhle session mein bana) |
-| Real-time auto-sync dono ke saath Windows/Supabase ke | ✅ pehle se Supabase Realtime backbone (Step 1.7 fix se) |
-| Alag installable apps, alag identity | ✅ `tauri.staff-android.conf.json` / `tauri.owner-android.conf.json` |
+| Ek unified Android app, role ke hisaab se access (Staff/Owner) | ✅ `App.tsx` `mobile` variant (Phase 17.1) |
+| Real-time auto-sync Windows/Supabase ke saath | ✅ pehle se Supabase Realtime backbone (Step 1.7 fix se) |
+| Installable app, apni identity | ✅ `tauri.mobile-android.conf.json` |
 | **Asli `.apk` file ban paana** | ✅ **is guide/workflow se ab possible** |
 
-Version-info file (`version-staff.json` / `version-owner.json`) bhi har build
-ke saath generate hoti hai — yeh Step 12 (App Update & OTA Push System) ke
-liye foundation hai; jab Step 12 par kaam hoga, isi file ko Supabase/Cloudflare
-par host karke in-app "Update Available" check se compare kiya jaayega.
+_(Shuru mein yahan do alag dedicated "Staff Android"/"Owner Android" apps
+ka plan tha, apne-apne `tauri.staff-android.conf.json`/
+`tauri.owner-android.conf.json` ke saath — Phase 17 (DS Mobile Unified App)
+mein wo ek single app mein consolidate kar diya gaya, aur Phase 17.2 mein
+purane dono retire kar diye gaye.)_
+
+The App Update & OTA Push System (Step 12, since built) does **not** use a
+version-info file alongside the APK — it's the `app_versions` Supabase
+table + the Owner's in-app "App Versions" panel (Sidebar → ⚙️ System),
+documented in `STEP12-APP-UPDATE-SETUP.md`. (An earlier draft of this guide
+planned a `version-staff.json`/`version-owner.json` file per build; that
+was superseded by Step 12's actual design and never built.)
 
 ## Agla Kadam
 

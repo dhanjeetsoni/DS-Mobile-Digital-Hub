@@ -442,9 +442,11 @@ export default function App() {
   //                                      new backend concept needed for this phase. Role (staff
   //                                      vs full-access) is read from the signed-in profile
   //                                      after login, not baked into the build.
-  // See src-tauri/tauri.staff-android.conf.json / tauri.owner-android.conf.json /
-  // tauri.mobile-android.conf.json and BUILD-ANDROID.md for how these get built into
-  // separate installable APKs.
+  // See src-tauri/tauri.mobile-android.conf.json and BUILD-ANDROID.md for how
+  // this gets built into an installable APK. (The dedicated "staff"/"owner"
+  // Tauri configs this comment used to point at were retired in Phase 17.2 —
+  // the VITE_APP_VARIANT="staff"/"owner" code paths below are kept only for
+  // anyone still running one of those old, no-longer-built APKs.)
   const APP_VARIANT = (import.meta as any).env?.VITE_APP_VARIANT || "full";
   const [gateStage, setGateStage] = useState<"choose" | "ownerAuth" | "staffAuth" | "staffDenied" | "personalPin">(
     APP_VARIANT === "staff" || APP_VARIANT === "mobile" ? "staffAuth" : APP_VARIANT === "owner" ? "ownerAuth" : "choose"

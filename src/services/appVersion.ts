@@ -1,33 +1,40 @@
-// STEP 12 — App Update & OTA Push System (Windows + Staff Android + Owner
-// Android). See DS_Mobile_Master_Plan.md Step 12 and
-// STEP12-APP-UPDATE-SETUP.md for the full picture.
+// STEP 12 — App Update & OTA Push System (Windows + DS Mobile Android).
+// See DS_Mobile_Master_Plan.md Step 12 and STEP12-APP-UPDATE-SETUP.md for
+// the full picture.
 //
-// One shared JS bundle ships inside 3 different native shells (see
-// package.json's android:staff:build / android:owner:build / tauri:build
-// scripts and src-tauri/tauri.*.conf.json) — so at runtime the bundle has
-// to figure out *which* of the 3 it's currently running as before it can
-// know which "live" row in app_versions applies to it. There's no Tauri JS
-// API in this project yet (see supabaseClient.ts-style env-var pattern),
-// so platform + the installed version/build are both injected the same
-// way Supabase's URL/key already are: Vite env vars set per build target.
+// One shared JS bundle ships inside 2 different native shells (see
+// package.json's android:mobile:build / tauri:build scripts and
+// src-tauri/tauri.*.conf.json) — so at runtime the bundle has to figure out
+// *which* of the 2 it's currently running as before it can know which
+// "live" row in app_versions applies to it. There's no Tauri JS API in this
+// project yet (see supabaseClient.ts-style env-var pattern), so platform +
+// the installed version/build are both injected the same way Supabase's
+// URL/key already are: Vite env vars set per build target.
+//
+// Phase 17.2 (2026-09-20): the dedicated "staff-android"/"owner-android"
+// platforms retired here along with their APKs (PROJECT_PLAN.md Phase
+// 17.2, DS_MOBILE_UNIFIED_APP_PLAN.md). No app_versions row had ever been
+// published for any platform at the time of this change (verified against
+// the live table), so this was a pure rename/schema change, not a data
+// migration — see the matching supabase/migrations file.
 import { supabase } from "./supabaseClient";
 import { r2Upload, r2PublicUrl } from "./r2Client";
 
-export const APP_PLATFORMS = ["windows", "staff-android", "owner-android"] as const;
+export const APP_PLATFORMS = ["windows", "mobile-android"] as const;
 export type AppPlatform = (typeof APP_PLATFORMS)[number];
 
 const env = (import.meta as any).env || {};
 
 /**
- * Which of the 3 shells this running bundle is. Resolution order:
+ * Which of the 2 shells this running bundle is. Resolution order:
  *   1. VITE_APP_PLATFORM — set explicitly per build (see package.json
  *      scripts + .env.example). This is the reliable source once the
  *      build scripts below are used.
  *   2. Fallback heuristic for builds that haven't been updated yet: any
  *      Android WebView reports "Android" in the user agent — treat that as
- *      staff-android (the more common of the two installs) rather than
- *      silently skipping the update check. Anything else falls back to
- *      "windows" (desktop Tauri shell / dev-server preview).
+ *      mobile-android (the only Android shell now) rather than silently
+ *      skipping the update check. Anything else falls back to "windows"
+ *      (desktop Tauri shell / dev-server preview).
  * A wrong guess here only affects which row of app_versions gets compared
  * against — it can never crash the app, it just means a stale/absent
  * "Update Available" pill until the real build sets VITE_APP_PLATFORM.
@@ -36,7 +43,7 @@ export function detectRunningPlatform(): AppPlatform {
   const fromEnv = String(env.VITE_APP_PLATFORM || "").trim();
   if ((APP_PLATFORMS as readonly string[]).includes(fromEnv)) return fromEnv as AppPlatform;
   const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
-  if (/Android/i.test(ua)) return "staff-android";
+  if (/Android/i.test(ua)) return "mobile-android";
   return "windows";
 }
 
@@ -167,6 +174,5 @@ export async function setAppVersionLive(id: string): Promise<void> {
 
 export const PLATFORM_LABELS: Record<AppPlatform, string> = {
   windows: "Windows App",
-  "staff-android": "Staff Android App",
-  "owner-android": "Owner Android App",
+  "mobile-android": "DS Mobile (Android)",
 };

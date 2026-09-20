@@ -1984,11 +1984,63 @@ before further implementation — nothing below is built until checked off._
     (needs a CI run + the owner's phone, per this file's testing-cadence
     convention).
   - **Not done in this item, on purpose (separate, bigger follow-ups):**
-    - [ ] 17.2 — Retire the `staff`/`owner` CI matrix legs + their two Tauri
-          configs once real devices are confirmed migrated to `mobile`
-          (§2.3/§5.1's "collapse into one" — kept side-by-side for now since
-          people may still be on the old APKs, exactly as `build-and-
-          release.yml`'s own comment already says).
+  - [x] **17.2 — Retire the `staff`/`owner` CI matrix legs + their two Tauri
+        configs (2026-09-20).**
+    - **Checked before removing anything, not assumed:** queried the live
+      Supabase project directly. `profiles` has exactly one `staff` row and
+      one `owner` row, both with `last_active_at = null` — no real device
+      has ever signed in. `app_versions` has zero rows for any platform —
+      nothing has ever been published/installed. Confirmed with the owner
+      (shop not open yet) before proceeding on that basis. Given that, this
+      was a clean retirement, not a "some devices might still be on the old
+      APK" migration.
+    - **Bug found along the way:** `app_versions`' own `CHECK` constraint
+      only allowed `platform in ('windows', 'staff-android', 'owner-android')`
+      — `'mobile-android'` (the value `VITE_APP_PLATFORM` is already set to
+      for the `mobile` CI build, since 17.1) was never a legal value. The
+      Owner's "App Versions" panel would have hard-failed the moment anyone
+      tried to publish a DS Mobile update. `appVersion.ts`'s
+      `detectRunningPlatform()` also still guessed `"staff-android"` for
+      any Android user-agent when `VITE_APP_PLATFORM` didn't match its own
+      `APP_PLATFORMS` list — so a `mobile` APK's update check would have
+      silently compared against the wrong (nonexistent) row instead of a
+      `mobile-android` one.
+    - **Fixed:** applied a migration live via the Supabase MCP (no data to
+      migrate — verified zero existing rows first) replacing the check with
+      `platform in ('windows', 'mobile-android')`, then wrote the matching
+      file into `supabase/migrations/` so the repo doesn't drift from what's
+      now live (see this file's own "Repo ↔ production migration drift"
+      item — this change deliberately doesn't add to that pile).
+      `appVersion.ts` (`APP_PLATFORMS`, `PLATFORM_LABELS`, the UA fallback),
+      `AppVersionsPanel.tsx`'s content-type map, and `UpdateAvailablePill.tsx`'s
+      comment all updated to `mobile-android` as the one Android platform.
+    - **CI/build retirement:** `build-and-release.yml`'s Android matrix is
+      now `[mobile]` only. Deleted `tauri.staff-android.conf.json` and
+      `tauri.owner-android.conf.json`, and the `android:staff:*`/
+      `android:owner:*` npm scripts that pointed at them.
+    - **Deliberately NOT touched:** the `VITE_APP_VARIANT === "staff" |
+      "owner"` branches inside `App.tsx`'s gate logic (from before Phase 17
+      existed) are left in place — they're dead code now that nothing
+      builds those variants, but removing every one of those ternaries
+      throughout the app is a much larger, separate refactor with no
+      functional upside (no build sets those env values anymore, so those
+      branches simply never execute) and wasn't part of what "retire the
+      APK builds" asked for.
+    - **Docs updated:** `BUILD-ANDROID.md` and `STEP12-APP-UPDATE-SETUP.md`
+      rewritten to describe the single `mobile` Android build instead of
+      "Staff + Owner"; `BUILD-ANDROID.md` also had a stale paragraph from
+      before Step 12 was actually built (referencing a
+      `version-staff.json`/`version-owner.json` file that was never real) —
+      corrected while already touching that section.
+    - **Verified this session:** `npx tsc --noEmit` 0 errors, `npx vitest
+      run` 32/32, `node scripts/static-audit.mjs` 16/16, `npm run build`
+      clean, the edited workflow YAML parses (`python3 -c
+      "yaml.safe_load(...)"`), `package.json` still valid JSON, and the
+      live `app_versions` constraint confirmed via a follow-up query
+      (`pg_get_constraintdef`) to actually be `('windows',
+      'mobile-android')` after the migration ran. Not yet verified: a real
+      CI run of the trimmed workflow, and an actual app-version publish
+      through the Owner's App Versions panel end-to-end.
     - [ ] 17.3 — Staff's fixed 5-screen tree on `mobile` (§3): Sell, Add
           Stock, Today's Stock (view-only), Notifications, day's sales
           total (count + ₹, no margin). Today the `mobile` variant simply

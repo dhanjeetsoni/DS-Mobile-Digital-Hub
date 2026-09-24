@@ -23,6 +23,18 @@ interface AddProductModalProps {
   storeId?: string;
   onCreated: (product: Product) => void;
   toast: (msg: string, type?: "green" | "red" | "amber") => void;
+  /** Phase 17.3 (DS Mobile staff fixed 5-screen set, §3 item 2): true when
+   * this modal is opened by a staff identity. Hides the Purchase
+   * (Original) Price and Confidential Price inputs entirely and skips
+   * their validation — staff can add a brand-new product with a selling
+   * price but never sets/sees cost or margin data, matching this app's
+   * "staff should not see profit, margin, cost price, or expenses"
+   * principle (PROJECT_PLAN.md). Both fields simply stay at their default
+   * 0/blank, so the saved product is marked pendingCost (owner fills the
+   * real cost in later) exactly like an owner who leaves them blank today
+   * — same enforced independently at the DB layer, see
+   * upsert_product_catalog's Phase 17.3 migration. */
+  hideCostFields?: boolean;
 }
 
 const BUILTIN_CATEGORY_OPTIONS = [
@@ -65,6 +77,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   storeId,
   onCreated,
   toast,
+  hideCostFields = false,
 }) => {
   const { closing, requestClose, runClosing } = useAnimatedClose(onClose);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -314,8 +327,10 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       .filter((p) => p.brand?.trim().toLowerCase() === brandKey && p.category === categoryValue)
       .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
     if (!match) { setPriceAutoFilledHint(""); return; }
-    setPurchasePrice(match.purchasePrice || 0);
-    setConfidentialPrice(match.confidentialPrice || 0);
+    if (!hideCostFields) {
+      setPurchasePrice(match.purchasePrice || 0);
+      setConfidentialPrice(match.confidentialPrice || 0);
+    }
     setSellingPrice(match.sellingPrice || 0);
     setMrp(match.mrp || 0);
     setPriceAutoFilledHint(`"${brandValue.trim()}" (${categoryValue}) ke pichhle products se price auto-fill ho gaya — chaho to edit kar sakte ho.`);
@@ -658,12 +673,15 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     // Both extra tiers are optional (owner can leave them at 0 = "not set
     // yet"), but if the owner DOES set a Confidential Price it must sit
     // between Original and Selling, or the whole point of a protected
-    // floor is defeated.
-    if (confidentialPrice > 0 && purchasePrice > 0 && confidentialPrice < purchasePrice) {
+    // floor is defeated. Skipped entirely for a staff caller (hideCostFields)
+    // -- those inputs aren't even rendered for them, so purchasePrice/
+    // confidentialPrice are always 0 here and these checks would be no-ops
+    // anyway; skipping is just clearer than silently no-op-ing.
+    if (!hideCostFields && confidentialPrice > 0 && purchasePrice > 0 && confidentialPrice < purchasePrice) {
       toast("Confidential Price, Original (Purchase) Price se kam nahi ho sakti.", "red");
       return;
     }
-    if (confidentialPrice > 0 && sellingPrice < confidentialPrice) {
+    if (!hideCostFields && confidentialPrice > 0 && sellingPrice < confidentialPrice) {
       toast("Selling Price, Confidential Price se kam nahi ho sakti — staff isse neeche kabhi bech nahi payega.", "red");
       return;
     }
@@ -1463,23 +1481,32 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                 </div>
               </div>
 
-              <div className="field">
-                <label>1. Original / Purchase Price (₹)</label>
-                <input type="number" min="0" step="0.01" value={purchasePrice || ""} onChange={(e) => setPurchasePrice(Number(e.target.value) || 0)} placeholder="0" />
-                <div className="hint">Sirf aap dekhoge — staff ko kabhi nahi dikhta.</div>
-              </div>
+              {!hideCostFields && (
+                <>
+                  <div className="field">
+                    <label>1. Original / Purchase Price (₹)</label>
+                    <input type="number" min="0" step="0.01" value={purchasePrice || ""} onChange={(e) => setPurchasePrice(Number(e.target.value) || 0)} placeholder="0" />
+                    <div className="hint">Sirf aap dekhoge — staff ko kabhi nahi dikhta.</div>
+                  </div>
+
+                  <div className="field">
+                    <label>2. Confidential Price (₹) <span className="hint">(optional)</span></label>
+                    <input type="number" min="0" step="0.01" value={confidentialPrice || ""} onChange={(e) => setConfidentialPrice(Number(e.target.value) || 0)} placeholder="Khali chhod sakte hain" />
+                    <div className="hint">Staff isse neeche kabhi nahi bech payega — sirf aapke Telegram-approval se.</div>
+                  </div>
+                </>
+              )}
 
               <div className="field">
-                <label>2. Confidential Price (₹) <span className="hint">(optional)</span></label>
-                <input type="number" min="0" step="0.01" value={confidentialPrice || ""} onChange={(e) => setConfidentialPrice(Number(e.target.value) || 0)} placeholder="Khali chhod sakte hain" />
-                <div className="hint">Staff isse neeche kabhi nahi bech payega — sirf aapke Telegram-approval se.</div>
-              </div>
-
-              <div className="field">
-                <label>3. Selling Price (₹) <span className="req">*</span></label>
+                <label>{hideCostFields ? "Selling Price (₹)" : "3. Selling Price (₹)"} <span className="req">*</span></label>
                 <input type="number" min="0" step="0.01" value={sellingPrice || ""} onChange={(e) => setSellingPrice(Number(e.target.value) || 0)} placeholder="0" required />
                 <div className="hint">Sab ko (staff + owner) yahi dikhta hai.</div>
               </div>
+              {hideCostFields && (
+                <div className="hint" style={{ marginTop: "-8px", marginBottom: "8px" }}>
+                  Cost/purchase price yahan nahi set hoti — owner baad mein apne se bharenge.
+                </div>
+              )}
 
               <div className="field">
                 <label>4. MRP (₹) <span className="hint">(optional)</span></label>

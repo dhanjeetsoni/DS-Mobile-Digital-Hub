@@ -4394,6 +4394,41 @@ export default function App() {
       case "plDashboard":
         return <ProfitLossDashboardView db={db} />;
 
+      case "salesToday": {
+        const todaysVisibleSales = visibleSales.filter((s) => s.date === todayStr() && s.status !== "Cancelled");
+        const todaysSalesCount = todaysVisibleSales.length;
+        const todaysSalesTotal = todaysVisibleSales.reduce((sum, s) => sum + s.total, 0);
+        return (
+          <div>
+            <div className="section">
+              <div className="section-head">
+                <h2>Aaj ki Sales</h2>
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "12px",
+                  maxWidth: "480px",
+                }}
+              >
+                <div className="card" style={{ padding: "20px", textAlign: "center" }}>
+                  <div style={{ fontSize: "12px", color: "var(--ink-soft)", marginBottom: "6px" }}>Bills Aaj</div>
+                  <div style={{ fontSize: "32px", fontWeight: 800 }}>{todaysSalesCount}</div>
+                </div>
+                <div className="card" style={{ padding: "20px", textAlign: "center" }}>
+                  <div style={{ fontSize: "12px", color: "var(--ink-soft)", marginBottom: "6px" }}>Total (₹)</div>
+                  <div style={{ fontSize: "32px", fontWeight: 800 }}>{inr(todaysSalesTotal)}</div>
+                </div>
+              </div>
+              <div className="hint" style={{ marginTop: "14px" }}>
+                Yeh sirf aaj ki bikri ka count aur total hai — profit/margin/cost yahan kabhi nahi dikhta.
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       case "lowstock":
         return <LowStockAlertsView db={catalogDb} showToast={showToast} />;
 
@@ -5311,6 +5346,23 @@ export default function App() {
   // (staff's own nav is governed entirely by staffAllowedSections above,
   // unchanged by this phase).
   const isMobileOwnerLiteProActive = APP_VARIANT === "mobile" && ownerMode && !isStaffIdentity;
+  // Phase 17.3 (DS Mobile staff fixed 5-screen set): only true for a staff
+  // identity on the `mobile` build. staffAllowedSections above is
+  // deliberately NOT consulted here or by Sidebar/BottomTabBar when this is
+  // true -- §3 makes this set fixed, not something an admin policy widens
+  // or narrows on this build (staff on Windows/other Android still use
+  // staffAllowedSections exactly as before, untouched by this phase).
+  const isMobileStaffFixedNavActive = APP_VARIANT === "mobile" && isStaffIdentity;
+  // Opens the Add-Product modal for either audience above. No requireOwner()
+  // wrapper for staff (they're not the owner, so that would just re-prompt
+  // the owner passcode, which staff must never see) -- the modal itself
+  // stays cost/margin-free for them via AddProductModal's hideCostFields,
+  // and the DB-level RPC enforces the same boundary independently (see
+  // Phase 17.3's migration).
+  const openAddStockModal = () => {
+    if (isStaffIdentity) { setIsAddProductOpen(true); return; }
+    requireOwner(() => setIsAddProductOpen(true));
+  };
 
   return (
     <div id="app" className={privacyMode ? "privacy-shield-active" : ""}>
@@ -5347,7 +5399,8 @@ export default function App() {
         isStaffIdentity={isStaffIdentity}
         allowedSections={staffAllowedSections}
         mobileOwnerMode={isMobileOwnerLiteProActive ? ownerMobileMode : null}
-        onOpenAddStockLite={() => requireOwner(() => setIsAddProductOpen(true))}
+        mobileStaffFixedNav={isMobileStaffFixedNavActive}
+        onOpenAddStock={openAddStockModal}
         onToggleMobileOwnerMode={() => (ownerMobileMode === "lite" ? requestSwitchToProMode() : switchToLiteMode())}
       />
       <BottomTabBar
@@ -5355,7 +5408,8 @@ export default function App() {
         isStaffIdentity={isStaffIdentity}
         allowedSections={staffAllowedSections}
         mobileOwnerMode={isMobileOwnerLiteProActive ? ownerMobileMode : null}
-        onOpenAddStockLite={() => requireOwner(() => setIsAddProductOpen(true))}
+        mobileStaffFixedNav={isMobileStaffFixedNavActive}
+        onOpenAddStock={openAddStockModal}
         onNavigate={(page) => {
           // Same owner-passcode gate as <Sidebar>'s onNavigate above (kept
           // duplicated rather than refactored into a shared function, to
@@ -5722,7 +5776,7 @@ export default function App() {
         />
       )}
 
-      {isAddProductOpen && ownerMode && (
+      {isAddProductOpen && (ownerMode || isMobileStaffFixedNavActive) && (
         <AddProductModal
           isOpen={isAddProductOpen}
           onClose={() => setIsAddProductOpen(false)}
@@ -5730,6 +5784,7 @@ export default function App() {
           storeId={cloudProfile?.store_id}
           onCreated={() => saveState({ ...db })}
           toast={showToast}
+          hideCostFields={isStaffIdentity}
         />
       )}
 

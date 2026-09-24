@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, ShoppingCart, Package, TrendingUp, Menu } from "lucide-react";
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, Menu, Search, Bell, DollarSign } from "lucide-react";
 
 interface BottomTabBarProps {
   currentPage: string;
@@ -27,9 +27,19 @@ interface BottomTabBarProps {
    * §4.1); `"pro"` keeps the normal tab set below, since Home/Inventory/
    * Reports are all already part of Pro's curated set (§4.2). */
   mobileOwnerMode?: "lite" | "pro" | null;
-  /** Required to render the Lite "Add Stock" tab — opens the same
-   * Add-Product modal as the Dashboard's "Add Stock / Product" shortcut. */
-  onOpenAddStockLite?: () => void;
+  /** Opens the Add-Product modal — Owner Lite's "Add Stock" tab (§4.1) and
+   * staff's fixed "Add Stock / Add Product" screen (§3 item 2) both use
+   * this; see AddProductModal.tsx's hideCostFields for how the same modal
+   * stays cost/margin-free for a staff caller. */
+  onOpenAddStock?: () => void;
+  /** Phase 17.3 (DS Mobile staff fixed 5-screen set, `mobile` build only).
+   * `true` only for a staff identity on the `mobile` build — replaces the
+   * whole tab set below with the fixed 5 (§3), overriding
+   * allowedSections/ownerOnly filtering entirely rather than combining
+   * with it, since this set isn't admin-configurable on this build.
+   * `false`/`undefined` everywhere else — staff on Windows/other Android
+   * keep the allowedSections-driven tab set below, untouched. */
+  mobileStaffFixedNav?: boolean;
 }
 
 // Phase 4.1 — bottom tab bar for Android/narrow-window layouts. Shown only
@@ -53,8 +63,38 @@ export default function BottomTabBar({
   isStaffIdentity = false,
   allowedSections = null,
   mobileOwnerMode = null,
-  onOpenAddStockLite,
+  onOpenAddStock,
+  mobileStaffFixedNav = false,
 }: BottomTabBarProps) {
+  if (mobileStaffFixedNav) {
+    const fixedTabs: { key: string; label: string; icon: React.ComponentType<{ size?: number | string }>; onClick: () => void; active: boolean }[] = [
+      { key: "sell", label: "Sell", icon: ShoppingCart, onClick: () => onNavigate("sell"), active: currentPage === "sell" },
+      ...(onOpenAddStock ? [{ key: "addStock", label: "Add Stock", icon: Package, onClick: onOpenAddStock, active: false }] : []),
+      { key: "stock", label: "Stock", icon: Search, onClick: () => onNavigate("products"), active: currentPage === "products" },
+      { key: "alerts", label: "Alerts", icon: Bell, onClick: () => onNavigate("lowstock"), active: currentPage === "lowstock" },
+      { key: "sales", label: "Sales", icon: DollarSign, onClick: () => onNavigate("salesToday"), active: currentPage === "salesToday" },
+    ];
+    return (
+      <nav className="bottom-tab-bar" aria-label="Primary navigation">
+        {fixedTabs.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              className={`bottom-tab-btn${tab.active ? " active" : ""}`}
+              onClick={tab.onClick}
+              aria-current={tab.active ? "page" : undefined}
+            >
+              <Icon size={20} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+    );
+  }
+
   if (mobileOwnerMode === "lite") {
     return (
       <nav className="bottom-tab-bar" aria-label="Primary navigation">
@@ -67,8 +107,8 @@ export default function BottomTabBar({
           <ShoppingCart size={20} />
           <span>Sell</span>
         </button>
-        {onOpenAddStockLite && (
-          <button type="button" className="bottom-tab-btn" onClick={onOpenAddStockLite}>
+        {onOpenAddStock && (
+          <button type="button" className="bottom-tab-btn" onClick={onOpenAddStock}>
             <Package size={20} />
             <span>Add Stock</span>
           </button>

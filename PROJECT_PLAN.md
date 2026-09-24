@@ -2041,11 +2041,57 @@ before further implementation — nothing below is built until checked off._
       'mobile-android')` after the migration ran. Not yet verified: a real
       CI run of the trimmed workflow, and an actual app-version publish
       through the Owner's App Versions panel end-to-end.
-    - [ ] 17.3 — Staff's fixed 5-screen tree on `mobile` (§3): Sell, Add
-          Stock, Today's Stock (view-only), Notifications, day's sales
-          total (count + ₹, no margin). Today the `mobile` variant simply
-          reuses the full existing staff experience as-is; narrowing it to
-          this exact 5-screen set is unstarted.
+  - [x] **17.3 — Staff's fixed 5-screen tree on `mobile` (2026-09-23).**
+        Sell, Add Stock, Today's Stock (view-only), Notifications, day's
+        sales total (count + ₹, no margin) — fixed regardless of any
+        admin-configured `allowedSections` policy on this build (§3's "no
+        toggle"); staff on Windows/other Android keep the existing
+        policy-driven nav, untouched.
+    - **Screens mapped to existing, already-safe code where possible, not
+      rebuilt:** "Today's Stock" reuses the "products" page as-is — it
+      already hid cost/confidential price and the Edit button behind
+      `ownerMode` (pre-existing code), which is exactly "search + quick
+      view only, no edit." "Notifications" reuses "lowstock" (Low Stock
+      Alerts — already cost/margin-free). "Sales Total" is a new page
+      (`case "salesToday"`): count + ₹ total for today from `visibleSales`
+      (so it also respects a staff member's own visibility-window policy),
+      excluding cancelled sales — deliberately not the `gallaClosing`
+      screen, which is a full cash-drawer reconciliation, not a simple
+      confirmation number.
+    - **Bug found and fixed at the DB layer, not just the UI:**
+      `upsert_product_catalog` (the RPC "Add Stock" ultimately calls) was
+      `owner`/`manager`-only — a staff caller would have gotten a hard
+      "not authorized" the moment they tried to save. Widened the role
+      check to include `staff`, but structurally: for a staff caller,
+      INSERT always forces `cost_price = 0`, `confidential_price = null`,
+      `pending_cost = true` regardless of what the client sends (defense
+      in depth even if the UI were bypassed), and on the near-impossible
+      case of a collision with an existing product (sku is a random UUID
+      fragment, so this shouldn't happen in practice), UPDATE leaves
+      `cost_price`/`confidential_price` completely untouched rather than
+      zeroing them — a staff call can never destroy or fabricate cost
+      data. Applied live via the Supabase MCP (5 products existed at the
+      time, verified — pure function-body change, no data migration) and
+      mirrored into `supabase/migrations/`.
+    - **`AddProductModal.tsx` — new `hideCostFields` prop:** hides the
+      Purchase Price and Confidential Price inputs entirely for a staff
+      caller (selling price stays — staff already needs it to charge
+      customers). Also closed a second, subtler leak found while doing
+      this: the modal's "auto-fill price from a matching brand+category"
+      convenience was silently populating the (hidden, for staff)
+      purchasePrice/confidentialPrice state from a past product's cost —
+      harmless to the DB (still forced to 0/null server-side) but would
+      have left the local record inconsistent with the hidden field;
+      guarded that too so it only touches selling price/MRP for a staff
+      caller.
+    - **Verified this session:** `npx tsc --noEmit` 0 errors, `npx vitest
+      run` 32/32, `node scripts/static-audit.mjs` 16/16, `npm run build`
+      clean, and the live `upsert_product_catalog` role check re-queried
+      after the migration to confirm it now reads `not in
+      ('owner','manager','staff')`. Not yet verified: an actual staff
+      login on a real `mobile` device actually saving a new product
+      end-to-end (including the offline-queue retry path if the RPC call
+      fails, which reuses existing, unmodified code).
   - [x] **17.4 — Owner Lite/Pro toggle on `mobile` (2026-09-19).** Lite
         (Sell + Add Stock only, the safer default, no re-prompt) / Pro
         (Reports, Daily Galla closing, Settings, Staff Access Manager incl.

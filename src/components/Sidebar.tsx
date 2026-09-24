@@ -39,6 +39,7 @@ import {
   ShieldCheck,
   Clock,
   Calculator,
+  Bell,
 } from "lucide-react";
 import { Database } from "../types";
 import { inr } from "../utils/indianCurrency";
@@ -80,9 +81,18 @@ interface SidebarProps {
    * `"lite"` = Sell + Add Stock only (§4.1, the safer default); `"pro"` =
    * the curated owner tool set (§4.2). */
   mobileOwnerMode?: "lite" | "pro" | null;
-  /** Required to render the Lite "Add Stock" quick-action button — opens
-   * the same Add-Product modal as the Dashboard's own shortcut card. */
-  onOpenAddStockLite?: () => void;
+  /** Phase 17.3 (DS Mobile staff fixed 5-screen set, `mobile` build only).
+   * `true` only for a staff identity on the `mobile` build — overrides
+   * `allowedSections` entirely (this set is fixed, not admin-configurable,
+   * per §3's "no toggle"). `false`/`undefined` everywhere else, including
+   * staff on Windows/other Android, which keep their existing
+   * allowedSections-driven behaviour untouched. */
+  mobileStaffFixedNav?: boolean;
+  /** Opens the Add-Product modal (Owner Lite mode's "Add Stock" quick
+   * action, §4.1, and staff's fixed "Add Stock / Add Product" screen,
+   * §3 item 2 — same modal, same underlying RPC, just with
+   * hideCostFields set for a staff caller; see AddProductModal.tsx). */
+  onOpenAddStock?: () => void;
   /** Tapping the Lite/Pro badge below calls this — Lite->Pro triggers the
    * owner's fingerprint/PIN prompt (handled by the caller); Pro->Lite is
    * immediate. Only rendered when mobileOwnerMode is set. */
@@ -138,6 +148,7 @@ export const SECONDARY_NAV_ITEMS = [
   { key: "saleshistory", label: "Sales Breakdown & P&L", icon: TrendingUp, ownerOnly: true },
   { key: "plDashboard", label: "Profit & Loss Dashboard", icon: TrendingUp, ownerOnly: true },
   { key: "lowstock", label: "Low Stock & Reorder Alerts", icon: Shield, ownerOnly: false },
+  { key: "salesToday", label: "Today's Sales Total", icon: DollarSign, ownerOnly: false },
   { key: "loyalty", label: "Loyalty & Rewards", icon: Sparkles, ownerOnly: false },
   { key: "dailyreview", label: "Daily Review", icon: Calendar, ownerOnly: true },
   { key: "monthlyreview", label: "Monthly Review", icon: TrendingUp, ownerOnly: true },
@@ -250,7 +261,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isStaffIdentity = false,
   allowedSections = null,
   mobileOwnerMode = null,
-  onOpenAddStockLite,
+  mobileStaffFixedNav = false,
+  onOpenAddStock,
   onToggleMobileOwnerMode,
 }) => {
   const [showAllTools, setShowAllTools] = useState<boolean>(false);
@@ -429,6 +441,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           // otherwise show everything regardless of Lite/Pro.
           if (mobileOwnerMode === "lite") return PRIMARY_NAV_ITEMS.filter((i) => i.key === "sell");
           if (mobileOwnerMode === "pro") return PRIMARY_NAV_ITEMS.filter((i) => MOBILE_PRO_PRIMARY_KEYS.includes(i.key));
+          // Phase 17.3 — DS Mobile's fixed staff set. Checked before the
+          // allowedSections fallback below on purpose: this set is fixed
+          // by design (§3 "no toggle"), not something an admin-configured
+          // policy should be able to widen or narrow on this build.
+          if (mobileStaffFixedNav) return PRIMARY_NAV_ITEMS.filter((i) => i.key === "sell");
           if (ownerMode && !isStaffIdentity) return PRIMARY_NAV_ITEMS;
           const hasPolicy = Array.isArray(allowedSections) && allowedSections.length > 0;
           return PRIMARY_NAV_ITEMS.filter((i) =>
@@ -456,13 +473,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
 
-        {mobileOwnerMode === "lite" && onOpenAddStockLite && (
-          <button className="navitem" onClick={onOpenAddStockLite}>
+        {(mobileOwnerMode === "lite" || mobileStaffFixedNav) && onOpenAddStock && (
+          <button className="navitem" onClick={onOpenAddStock}>
             <span className="ic">
               <Package size={16} />
             </span>
             <span style={{ fontSize: "13px" }}>Add Stock</span>
           </button>
+        )}
+
+        {/* Phase 17.3 — the other 3 of the staff's fixed 5 screens.
+            "Today's Stock" reuses the existing "products" page as-is: it
+            already hides cost/confidential price and the Edit button
+            entirely behind `ownerMode` (see App.tsx), which is exactly
+            "search + quick view only, no edit" (§3 item 3) with no new
+            code needed there. "Notifications" reuses "lowstock" (already
+            cost/margin-free). "Sales Total" is a new page (App.tsx's
+            "salesToday" case) showing count + ₹ only, never profit/margin. */}
+        {mobileStaffFixedNav && (
+          <>
+            <button className="navitem" onClick={() => onNavigate("products")}>
+              <span className="ic">
+                <Search size={16} />
+              </span>
+              <span style={{ fontSize: "13px" }}>Today's Stock</span>
+            </button>
+            <button className="navitem" onClick={() => onNavigate("lowstock")}>
+              <span className="ic">
+                <Bell size={16} />
+              </span>
+              <span style={{ fontSize: "13px" }}>Notifications</span>
+            </button>
+            <button className="navitem" onClick={() => onNavigate("salesToday")}>
+              <span className="ic">
+                <DollarSign size={16} />
+              </span>
+              <span style={{ fontSize: "13px" }}>Aaj ki Sales</span>
+            </button>
+          </>
         )}
 
         {/* Secondary / Advanced Section — Owner only. In DS Mobile Lite mode

@@ -9,6 +9,29 @@ par kuch bhi install karne ki zaroorat nahi.
 
 ---
 
+## ⚠️ Rollout Note — purane Staff/Owner APK se DS Mobile par shift karte waqt
+
+Agar shop mein pehle se "DS Staff" ya "DS Owner" APK installed hain, DS
+Mobile un par **update ke roop mein install nahi hoga** — Android ke liye
+yeh ek bilkul alag app hai (`com.dsmobile.digitalhub`, purane do
+`com.dsmobile.digitalhub.staff` / `.owner` se alag package identifier).
+Matlab:
+
+1. Har phone par purana Staff/Owner APK **uninstall** karo, phir naya DS
+   Mobile APK **fresh install** karo (dono se package alag hai, isliye
+   dono ek saath bhi rakhe ja sakte hain agar kabhi test karna ho, par
+   normal use ke liye purana hata dena hi behtar hai).
+2. **Owner ke liye ek genuinely naya one-time step hai**: DS Mobile mein
+   login karne se pehle, Windows app update karke kholo → Sidebar →
+   "Staff Access Manager" → apne liye ek naya Login ID/Password banao
+   (role: **Full Access**) — yeh wahi step hai jo pehle se staff ke liye
+   available tha, ab khud owner bhi isse apne liye use kar sakta hai
+   (Phase 17.1). DS Mobile ke login screen par bhi yeh note dikhta hai.
+3. **Staff ke liye kuch nahi badla** — unka existing Login ID/Password DS
+   Mobile par bhi waisे hi kaam karega.
+
+---
+
 ## Option A — GitHub Actions se (Recommended, kuch install nahi karna)
 
 1. Is poore project ko GitHub repo mein push karo (agar already nahi kiya).
@@ -41,17 +64,10 @@ par kuch bhi install karne ki zaroorat nahi.
      jaayega (Staff ya Owner-level) — Gmail login ki zaroorat nahi.
    - `windows-installer` → Windows `.exe`
    (Ek "release" job in dono ko ek GitHub Release mein bhi jod deta hai.)
-
-   _(Phase 17.2 se pehle yahan alag "Staff Android" aur "Owner Android"
-   dedicated APKs bhi milte the — un CI legs aur unke Tauri configs ko
-   retire kar diya gaya hai kyunki koi real device un par kabhi nahi tha
-   (verified against live Supabase data before removing). Agar tumhare paas
-   abhi bhi koi purana Staff/Owner APK installed hai, use uninstall karke
-   naya DS Mobile APK install kar do.)_
-5. Download karke seedha kisi bhi Android phone par install kar do
-   (pehli baar "Unknown apps install" permission dena hoga, jaisa kisi bhi
-   sideloaded app ke liye lagta hai). Agar koi purana staff/owner APK pehle
-   se installed hai, use uninstall karke naya install karo.
+5. Download karke seedha kisi bhi Android phone par install kar do (pehli
+   baar "Unknown apps install" permission dena hoga, jaisa kisi bhi
+   sideloaded app ke liye lagta hai) — upar ka Rollout Note dekho agar
+   koi purana Staff/Owner APK pehle se installed hai.
 
 ## Option B — Apne Computer Par Manually (agar CI use nahi karna)
 

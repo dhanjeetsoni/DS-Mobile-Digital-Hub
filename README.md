@@ -20,6 +20,13 @@ npm run dev
 
 Set server secrets in `.env` from `.env.example`. Server-only secrets must never use the `VITE_` prefix.
 
+## Android (DS Mobile)
+Single unified Android app for both staff and owner — see
+[`BUILD-ANDROID.md`](./BUILD-ANDROID.md) for building/installing it and the
+**rollout note** if migrating a device off the old, now-retired "DS Staff"/
+"DS Owner" APKs (DS Mobile is a fresh install, not an in-place update — see
+`PROJECT_PLAN.md` Phase 17 for the full history).
+
 ## Production
 ```bash
 npm run lint

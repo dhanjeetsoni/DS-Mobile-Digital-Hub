@@ -5288,6 +5288,19 @@ export default function App() {
             >
               ← Back to selection
             </button>
+
+            {APP_VARIANT === "mobile" && (
+              <div className="hint" style={{ marginTop: 14, padding: "10px 12px", borderRadius: 8, background: "rgba(29,78,216,0.08)", border: "1px solid rgba(29,78,216,0.25)" }}>
+                <strong>Owner — pehli baar DS Mobile use kar rahe ho?</strong>
+                <br />
+                Yeh Login ID yahan tumhare paas nahi aayega tab tak jab tak tum
+                khud isse banao nahi. Apne Windows app ko update karke kholo →
+                Sidebar mein "Staff Access Manager" → apne liye ek naya login
+                banao (role: <strong>Full Access</strong>) → wahi Login ID aur
+                Password yahan daalo. Staff ka login pehle jaisa hi kaam
+                karega, unke liye kuch nahi badla.
+              </div>
+            )}
           </div>
         )}
 

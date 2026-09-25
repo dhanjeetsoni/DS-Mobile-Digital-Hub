@@ -2128,9 +2128,31 @@ before further implementation — nothing below is built until checked off._
       particular needs a real fingerprint sensor to confirm it actually
       fires (the `mobile` gate screen's existing biometric button gives
       confidence the plumbing is sound, but this is a new call site).
-    - [ ] 17.5 — New package identifier rollout note (§6): a short in-app
-          and README note that DS Mobile is a fresh install, not an
-          in-place update over the old Staff/Owner APKs.
+    - [x] **17.5 — New package identifier rollout note (2026-09-23).**
+          Confirmed the actual identifiers before writing anything: the old
+          (now-deleted) configs were `com.dsmobile.digitalhub.staff` /
+          `.owner`; the new one is `com.dsmobile.digitalhub` — genuinely
+          different packages, so this really is a fresh install on every
+          device, not an in-place update, exactly as §6 says.
+      - **In-app** (the "genuinely new step" for the owner, §6's second
+        bullet): a note on the DS Mobile login screen itself
+        (`gateStage === "staffAuth"`, `mobile` variant only) explaining
+        that an owner's Login ID won't exist until they generate one from
+        Windows first (Staff Access Manager → Full Access, same mechanism
+        as Phase 17.1) — explicitly says staff's own login is unaffected,
+        so a staff member reading it isn't confused into thinking
+        something changed for them.
+      - **BUILD-ANDROID.md**: replaced two scattered, easy-to-miss
+        "uninstall the old APK" mentions with one dedicated, prominent
+        "⚠️ Rollout Note" section up top, stating the actual package
+        identifiers and both migration steps (device APK swap + the
+        owner's one-time Windows step).
+      - **README.md**: added a short "Android (DS Mobile)" section (there
+        was no Android mention in it at all before) pointing at
+        BUILD-ANDROID.md's rollout note.
+      - **Verified this session:** `npx tsc --noEmit` 0 errors, `npx vitest
+        run` 32/32, `node scripts/static-audit.mjs` 16/16, `npm run build`
+        clean.
   - [x] **17.6 — §8's usability list (2026-09-23, partial by design).**
         §8 lists 13 "nice to have, not required" items. Shipped the 5 with
         the best value-to-effort ratio this session; the rest are listed

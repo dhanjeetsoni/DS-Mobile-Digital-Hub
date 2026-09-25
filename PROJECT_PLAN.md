@@ -2131,9 +2131,74 @@ before further implementation — nothing below is built until checked off._
     - [ ] 17.5 — New package identifier rollout note (§6): a short in-app
           and README note that DS Mobile is a fresh install, not an
           in-place update over the old Staff/Owner APKs.
-    - [ ] 17.6 — §8's usability list (search-bar autofocus, scan sound/
-          vibration, sync indicator, remembered last login ID, role/mode
-          badge, etc.) — explicitly scoped as later polish in the plan
-          document itself, not part of the core phase. (The Lite/Pro badge
-          added in 17.4 above happens to satisfy the "role/mode badge" item
-          already.)
+  - [x] **17.6 — §8's usability list (2026-09-23, partial by design).**
+        §8 lists 13 "nice to have, not required" items. Shipped the 5 with
+        the best value-to-effort ratio this session; the rest are listed
+        below as explicitly unstarted, not silently dropped.
+    - [x] §8.1 Sell screen search bar autofocus — **already existed**
+          before this phase (the search `<input>` already had `autoFocus`);
+          confirmed it re-fires on every navigation back to Sell (the page
+          fully unmounts/remounts on a `currentPage` switch here, so this
+          isn't a one-time-ever thing). No code change needed.
+    - [x] §8.2 Barcode scan sound + vibration — `CameraScannerModal.tsx`'s
+          `playScanSuccessFeedback()`: a short synthesized beep (Web Audio,
+          no bundled audio asset) + `navigator.vibrate(80)`, both
+          best-effort/silently-ignored if unsupported. Fires on a genuine
+          successful scan (live camera detection, either
+          BarcodeDetector-native or the ZXing fallback, and a decoded
+          uploaded photo) — deliberately NOT on the manual-typed-barcode
+          fallback, since the person already knows what they typed.
+    - [x] §8.3 Persistent sync/offline indicator — small dot + label in
+          Sidebar's header (`SyncIndicatorDot`), `mobile` build only (null
+          everywhere else, so Windows/other Android are untouched).
+          Reuses the already-existing `cloudStatus`/`pendingSyncCount`
+          signals (previously only surfaced on the buried Status Dashboard
+          page) rather than inventing a new sync-tracking mechanism; adds
+          `isDeviceOnline` (online/offline event listeners) and
+          `lastSyncedAt` (set whenever `cloudStatus` reaches "online") in
+          App.tsx to support the "Xs ago" text. Offline state's label
+          explicitly says Sell still works, per §8.3's own requirement.
+    - [x] §8.4 Login remembers the last-used ID — `staffLoginId` now
+          initializes from (and a successful sign-in persists to) a
+          device-local `localStorage` key; the password field gets
+          `autoFocus` instead of the ID field whenever an ID was already
+          remembered, so a returning login is genuinely "one tap into the
+          password field."
+    - [x] §8.5 Visible role/mode badge at all times — Phase 17.4 already
+          built this for the owner ("Owner · Lite"/"Owner · Pro",
+          tap-to-switch). Added the plain "👤 Staff" counterpart this
+          session so staff on the fixed nav also always sees which mode
+          they're in, not just owner.
+    - **Explicitly NOT done this session (real remaining scope, not
+      forgotten):**
+      - [ ] §8.6 Recent/frequently-sold items as quick-add tiles on Sell —
+            needs a "top N sold this week" query + new tile UI on an
+            already-large screen; a real feature, not a small polish item.
+      - [ ] §8.7 Add Stock's camera opens directly into capture mode — needs
+            checking `AddProductModal`'s current photo-source flow for
+            what "choose source" step actually exists today before
+            deciding how to skip it.
+      - [ ] §8.9 Bigger default text size / high contrast for mobile — a
+            text-scale setting (`handleTextScaleChange`, sm/md/lg/xl)
+            already exists and is user-controlled; changing its *default*
+            specifically for the `mobile` build is a one-line change but
+            was left for the owner to decide/request rather than silently
+            changing an existing user-facing default.
+      - [ ] §8.10 One-tap "Share bill" on the sale-complete screen — the
+            WhatsApp-share machinery already exists in full
+            (`services/whatsapp.ts`, `InvoiceViewerModal.tsx`'s
+            `handleWhatsAppShare`) but today only from the separate "View
+            Invoice" modal, not surfaced automatically the instant a sale
+            completes; needs looking at the actual sale-complete moment in
+            the Sell flow to wire in.
+      - [ ] §8.11 Cart total + "Complete Sale" pinned to the bottom of the
+            screen — a layout change to the Sell screen, one of the
+            largest/most-used screens in the app; higher regression risk,
+            deliberately not attempted alongside everything else above in
+            the same session.
+      - [ ] §8.12 Low-stock shown inline in search results — needs touching
+            the Sell screen's product search-result rendering broadly, not
+            a contained change.
+      - [ ] §8.13 A short first-login walkthrough (4-5 dismissible
+            tooltips) — needs a small onboarding-tooltip system that
+            doesn't exist yet; a real feature, not a polish item.

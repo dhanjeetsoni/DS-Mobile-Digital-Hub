@@ -10,6 +10,37 @@ interface CameraScannerModalProps {
   title?: string;
 }
 
+// Phase 17.6 (DS Mobile usability §8.2): a short, synthesized beep (no
+// bundled audio asset needed) + a brief vibration on a genuinely
+// successful scan (live camera detection or a decoded uploaded photo —
+// NOT the manual-typed-barcode fallback, which the person already knows
+// they entered correctly). Best-effort only: some browsers block
+// AudioContext before any user gesture, and iOS Safari has no
+// navigator.vibrate at all — both are silently ignored rather than
+// surfaced as an error, since this is a nice-to-have confirmation, not a
+// step the scan flow depends on.
+function playScanSuccessFeedback() {
+  try {
+    if (navigator.vibrate) navigator.vibrate(80);
+  } catch {}
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 1000;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.12);
+    osc.onended = () => ctx.close().catch(() => {});
+  } catch {}
+}
+
 export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
   isOpen,
   onClose,
@@ -112,6 +143,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
               if (barcodes && barcodes.length > 0) {
                 const raw = barcodes[0].rawValue;
                 if (raw) {
+                  playScanSuccessFeedback();
                   onScan(raw);
                   stopCamera();
                   runClosing();
@@ -138,6 +170,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
           const result = await reader.decodeOnceFromVideoElement(videoRef.current);
           const raw = result?.getText?.();
           if (raw) {
+            playScanSuccessFeedback();
             onScan(raw);
             stopCamera();
             runClosing();
@@ -163,6 +196,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
         const decoded = await decoder.decodeFromImageUrl(result);
         const raw = decoded?.getText?.();
         if (!raw) throw new Error("No barcode detected");
+        playScanSuccessFeedback();
         onScan(raw);
         runClosing();
       } catch {

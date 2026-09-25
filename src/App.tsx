@@ -481,7 +481,14 @@ export default function App() {
   // + password instead of walking straight into Staff Area. If cloud sync
   // isn't configured on this device, no staff accounts can exist yet, so we
   // fall back to the old instant "Staff Area" entry.
-  const [staffLoginId, setStaffLoginId] = useState("");
+  const STAFF_LOGIN_ID_REMEMBER_KEY = "dsmdh_last_staff_login_id_v1";
+  const [staffLoginId, setStaffLoginId] = useState(() => {
+    try {
+      return localStorage.getItem(STAFF_LOGIN_ID_REMEMBER_KEY) || "";
+    } catch {
+      return "";
+    }
+  });
   const [staffLoginPassword, setStaffLoginPassword] = useState("");
   const [staffLoginBusy, setStaffLoginBusy] = useState(false);
   const [staffLoginError, setStaffLoginError] = useState("");
@@ -562,6 +569,7 @@ export default function App() {
     try {
       const result = await staffSignIn(staffLoginId.trim(), staffLoginPassword);
       if (result.status === "ok") {
+        try { localStorage.setItem(STAFF_LOGIN_ID_REMEMBER_KEY, staffLoginId.trim()); } catch {}
         const isFullAccess = result.profile?.role === "manager";
         showToast(
           isFullAccess
@@ -1303,6 +1311,27 @@ export default function App() {
     const t = window.setInterval(check, 4000);
     return () => { active = false; window.clearInterval(t); };
   }, [db]);
+
+  // Phase 17.6 (DS Mobile usability suggestion §8.3): "a small persistent
+  // last-synced-Xs-ago / offline indicator". Deliberately not a new sync
+  // mechanism -- just surfacing the existing cloudStatus/pendingSyncCount
+  // signals above (already computed for other purposes) somewhere always
+  // visible, instead of only on the buried Status Dashboard page.
+  const [isDeviceOnline, setIsDeviceOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
+  useEffect(() => {
+    const goOnline = () => setIsDeviceOnline(true);
+    const goOffline = () => setIsDeviceOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (cloudStatus === "online") setLastSyncedAt(Date.now());
+  }, [cloudStatus]);
 
   useEffect(() => {
     // Owner-only (Master Plan 1.4): the connect-status poll backs the
@@ -5222,7 +5251,7 @@ export default function App() {
               <div className="field">
                 <label>Login ID</label>
                 <input
-                  autoFocus
+                  autoFocus={!staffLoginId}
                   value={staffLoginId}
                   onChange={(e) => setStaffLoginId(e.target.value)}
                   placeholder="e.g. rahul01"
@@ -5232,6 +5261,7 @@ export default function App() {
                 <label>Password</label>
                 <input
                   type="password"
+                  autoFocus={!!staffLoginId}
                   value={staffLoginPassword}
                   onChange={(e) => setStaffLoginPassword(e.target.value)}
                   placeholder="Password"
@@ -5363,6 +5393,11 @@ export default function App() {
     if (isStaffIdentity) { setIsAddProductOpen(true); return; }
     requireOwner(() => setIsAddProductOpen(true));
   };
+  // Phase 17.6 (DS Mobile usability §8.3) — null on every other build, so
+  // Sidebar renders nothing new for Windows/other Android.
+  const mobileSyncIndicator = APP_VARIANT === "mobile"
+    ? { isOnline: isDeviceOnline, cloudStatus, pendingSyncCount, lastSyncedAt }
+    : null;
 
   return (
     <div id="app" className={privacyMode ? "privacy-shield-active" : ""}>
@@ -5401,6 +5436,7 @@ export default function App() {
         mobileOwnerMode={isMobileOwnerLiteProActive ? ownerMobileMode : null}
         mobileStaffFixedNav={isMobileStaffFixedNavActive}
         onOpenAddStock={openAddStockModal}
+        syncIndicator={mobileSyncIndicator}
         onToggleMobileOwnerMode={() => (ownerMobileMode === "lite" ? requestSwitchToProMode() : switchToLiteMode())}
       />
       <BottomTabBar

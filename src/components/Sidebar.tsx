@@ -97,6 +97,18 @@ interface SidebarProps {
    * owner's fingerprint/PIN prompt (handled by the caller); Pro->Lite is
    * immediate. Only rendered when mobileOwnerMode is set. */
   onToggleMobileOwnerMode?: () => void;
+  /** Phase 17.6 (DS Mobile usability §8.3, `mobile` build only). `null`/
+   * `undefined` on every other build — no indicator rendered there, this
+   * doesn't touch Windows/other Android at all. When set, renders a small
+   * always-visible "Synced Xs ago" / "Offline" / "N pending sync" dot,
+   * reusing App.tsx's existing cloudStatus/pendingSyncCount tracking
+   * rather than any new sync mechanism. */
+  syncIndicator?: {
+    isOnline: boolean;
+    cloudStatus: string;
+    pendingSyncCount: number;
+    lastSyncedAt: number | null;
+  } | null;
 }
 
 // Phase 17.4 §4.2 — the curated Pro-only SECONDARY_NAV_ITEMS keys judged
@@ -247,6 +259,59 @@ if (import.meta.env.DEV) {
   console.assert(extra.length === 0, "Sidebar 9.2: SECONDARY_NAV_GROUPS references unknown keys ->", extra);
 }
 
+// Phase 17.6 (DS Mobile usability §8.3) — a small always-visible sync/
+// offline indicator. Self-contained ticking (re-renders its own "Xs ago"
+// text every 10s) so Sidebar itself doesn't need a render-forcing interval
+// just for this one label.
+const SyncIndicatorDot: React.FC<{
+  isOnline: boolean;
+  cloudStatus: string;
+  pendingSyncCount: number;
+  lastSyncedAt: number | null;
+}> = ({ isOnline, cloudStatus, pendingSyncCount, lastSyncedAt }) => {
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => forceTick((n) => n + 1), 10000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  let color = "#22c55e"; // green — synced, nothing pending
+  let label = "Synced";
+  if (!isOnline) {
+    color = "#ef4444"; // red — device has no connection at all
+    label = "Offline (Sell abhi bhi chalega)";
+  } else if (cloudStatus === "error" || cloudStatus === "sync-error") {
+    color = "#f59e0b"; // amber — online but the last sync attempt failed
+    label = "Sync issue";
+  } else if (pendingSyncCount > 0) {
+    color = "#f59e0b";
+    label = `${pendingSyncCount} pending sync`;
+  } else if (lastSyncedAt) {
+    const secondsAgo = Math.max(0, Math.floor((Date.now() - lastSyncedAt) / 1000));
+    label = secondsAgo < 5 ? "Synced just now" : secondsAgo < 60 ? `Synced ${secondsAgo}s ago` : `Synced ${Math.floor(secondsAgo / 60)}m ago`;
+  } else {
+    label = "Connecting…";
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        margin: "0 14px 8px",
+        fontSize: "10px",
+        color: "var(--sidebar-text)",
+        opacity: 0.85,
+      }}
+      title={isOnline ? "Cloud sync status" : "No internet — Sell aur baaki kaam offline chalte rehte hain, connection wapas aane par apne aap sync ho jaayega"}
+    >
+      <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: color, flexShrink: 0 }} />
+      <span>{label}</span>
+    </div>
+  );
+};
+
 export const Sidebar: React.FC<SidebarProps> = ({
   db,
   currentPage,
@@ -264,6 +329,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   mobileStaffFixedNav = false,
   onOpenAddStock,
   onToggleMobileOwnerMode,
+  syncIndicator = null,
 }) => {
   const [showAllTools, setShowAllTools] = useState<boolean>(false);
   const [easyMode, setEasyMode] = useState<boolean>(false);
@@ -378,6 +444,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         )}
       </div>
+
+      {syncIndicator && (
+        <SyncIndicatorDot
+          isOnline={syncIndicator.isOnline}
+          cloudStatus={syncIndicator.cloudStatus}
+          pendingSyncCount={syncIndicator.pendingSyncCount}
+          lastSyncedAt={syncIndicator.lastSyncedAt}
+        />
+      )}
+
+      {/* Phase 17.6 §8.5 — a role badge is always visible on this build,
+          not just for owner (mobileOwnerMode above already covers that
+          case with a tappable Lite/Pro switch); this is the plain,
+          non-interactive "Staff" counterpart for a staff identity on the
+          fixed nav, so there's never ambiguity about which mode is active. */}
+      {mobileStaffFixedNav && (
+        <div
+          style={{
+            margin: "0 14px 8px",
+            padding: "7px 10px",
+            borderRadius: "8px",
+            border: "1px solid var(--sidebar-border)",
+            background: "rgba(255,255,255,0.03)",
+            color: "var(--sidebar-text)",
+            fontSize: "11px",
+            fontWeight: 800,
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+          }}
+        >
+          👤 Staff
+        </div>
+      )}
 
       {mobileOwnerMode && (
         <button

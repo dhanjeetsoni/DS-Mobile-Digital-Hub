@@ -1,0 +1,15 @@
+-- Phase 18 (full audit sweep): PROJECT_PLAN.md flagged category_quotes
+-- (added in the phase10_category_quote_cache migration) as "either wire
+-- it up or drop it" -- the intended feature (per-category AI-generated
+-- invoice quote line) was never actually implemented in ai-gateway
+-- (confirmed by reading its live source: no reference to category_quotes
+-- anywhere in it, or in any other edge function, or in this repo's
+-- frontend). Table had 0 rows (verified live before dropping). Dropping
+-- it rather than leaving an orphaned, RLS-enabled-but-never-written-to
+-- table around; wiring up the actual feature (AI-generated per-category
+-- invoice quotes) is a real feature addition, not a bug fix, and can be
+-- revisited from DS_Mobile_Master_Plan.md / a fresh spec if wanted later.
+--
+-- Applied directly to production via the Supabase MCP on 2026-09-27; this
+-- file mirrors that change so the repo and live schema stay in sync.
+drop table if exists public.category_quotes;

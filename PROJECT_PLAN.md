@@ -2224,3 +2224,77 @@ before further implementation — nothing below is built until checked off._
       - [ ] §8.13 A short first-login walkthrough (4-5 dismissible
             tooltips) — needs a small onboarding-tooltip system that
             doesn't exist yet; a real feature, not a polish item.
+
+### ✅ Phase 18: Full audit sweep (2026-09-27)
+
+_Triggered by "full recheck, find and fix bugs". Deliberately evidence-driven
+rather than a vague read-through: ran the baseline checks, then Supabase's own
+security + performance advisors against the live project, then swept the
+source for known bug patterns, then re-reviewed the Phase 17 code for
+mistakes of my own._
+
+- [x] **Baseline:** `npx tsc --noEmit` 0 errors, `npx vitest run` 32/32,
+      `node scripts/static-audit.mjs` 16/16, `npm run build` clean.
+- [x] **Performance advisor — fixed (migration applied live + mirrored into
+      `supabase/migrations/20260927033341_...`):**
+  - `auth_rls_initplan` (10 findings): RLS policies on `crash_reports`,
+    `profiles`, `products_staff_view`, `sales`, `return_approval_requests`,
+    `staff_access_policies` called `auth.uid()` bare, so Postgres re-evaluated
+    it per row. Rewrote via `ALTER POLICY` to `(select auth.uid())` — the
+    documented caching pattern. Semantically identical: same rows visible to
+    the same people, just evaluated once per query.
+  - `duplicate_index` (2 findings): byte-for-byte duplicate indexes on
+    `product_price_history` — dropped the redundant `*_id_idx` copies.
+  - `unindexed_foreign_keys` (7 findings): added plain covering btree indexes
+    (additive only, nothing removed or changed).
+  - Re-ran the advisor afterwards: all three finding types are gone.
+- [x] **`category_quotes` dropped** (migration applied live + mirrored into
+      `..._phase18_drop_unused_category_quotes.sql`). This was Phase 16's own
+      open "wire it up or drop it" item. Verified before dropping: 0 rows, and
+      no reference anywhere — read `ai-gateway`'s live source (the function the
+      original migration said would write to it), the other edge functions, and
+      the frontend. The feature was never implemented. Wiring it up would be a
+      new feature, not a bug fix, so it was dropped rather than left as an
+      orphaned table.
+- [x] **Checked and found clean:** no `dangerouslySetInnerHTML`, `eval` or
+      `new Function`; no console logging of passwords/tokens/keys; no
+      TODO/FIXME/HACK markers in `src/`. Re-read the Phase 17 biometric/Pro-mode
+      code path for state leaks (`ownerLoginPurpose` is reset on every close
+      path — Cancel, X, Escape, success — and resets to its default on a fresh
+      mount), and confirmed `AddProductModal` has no margin/profit display that
+      could leak around the hidden cost fields for staff.
+- [x] **Reviewed and deliberately left alone (not bugs):**
+  - 71 `authenticated_security_definer_function_executable` warnings — this is
+    how the whole app works: every write/read goes through an RPC that does its
+    own role check internally. Revoking them would break the app.
+  - `get_live_app_versions()` callable by `anon` — intentional: the update
+    check runs from the same component as the login gate, so it must work
+    before anyone signs in. It only returns version metadata.
+  - 6 tables with RLS enabled and no policies — INFO level, and consistent
+    with Phase 16's lockdown pattern (RPC-only access).
+  - 5 `multiple_permissive_policies` — a mild inefficiency, not a correctness
+    issue; merging RLS policies risks silently changing who can access what,
+    which isn't worth it at the current data volume.
+  - 48 `unused_index` — expected pre-launch (no real traffic yet), and
+    dropping indexes that simply haven't been exercised would be premature.
+- [ ] **Found but NOT fixable from here — needs the owner:**
+  - `debug-gemini-probe` edge function is still deployed. It has already been
+    neutered to a static `410 "retired debug probe"` response and nothing in
+    the repo references it, so it's harmless — but with `verify_jwt: false` it's
+    still publicly reachable, and the Supabase tools available to me can deploy
+    and read functions but not delete them. Delete it from the Supabase
+    Dashboard → Edge Functions.
+  - Leaked-password protection is still off (Dashboard → Auth toggle; not
+    exposed through SQL).
+  - `pg_trgm` is installed in the `public` schema (advisor WARN). Moving it
+    requires checking every function/index that depends on it first
+    (`search_screen_size_cache`, the `phone_screen_size_cache` trigram index) —
+    a careful change of its own, not something to fold into a sweep.
+- [ ] **Still open from earlier phases, untouched:** reports reading the JSON
+      snapshot instead of the relational ledger (needs a real design decision
+      on one source of truth), repo↔production migration drift, bundle
+      splitting.
+- **Not verified:** nothing above was exercised on a real device or with real
+  traffic — the database has ~5 products and no real sales, so the
+  `auth_rls_initplan` and index fixes are correct but their performance benefit
+  can't be measured yet.

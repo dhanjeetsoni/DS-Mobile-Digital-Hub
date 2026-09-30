@@ -74,6 +74,13 @@ interface SidebarProps {
    * which would otherwise strand a staff member on a totally blank sidebar).
    */
   allowedSections?: string[] | null;
+  /** Phase 19 — count of products awaiting review (reviewStatus
+   * "pending_review"), for the Stock Review Queue's badge. Passed in
+   * separately rather than computed from `db` here because `db` is
+   * usually `catalogDb`, whose whole point is to already exclude pending
+   * items (see catalogProducts in App.tsx) — this is the one count that
+   * has to come from the unfiltered list. */
+  stockReviewPendingCount?: number;
   /** Phase 17.4 (DS Mobile Owner Lite/Pro, `mobile` build only). `null`/
    * `undefined` on every other build or identity (Windows, dedicated
    * `staff`/`owner` Android APKs, or a staff identity here) -- the whole
@@ -161,6 +168,7 @@ export const SECONDARY_NAV_ITEMS = [
   { key: "plDashboard", label: "Profit & Loss Dashboard", icon: TrendingUp, ownerOnly: true },
   { key: "lowstock", label: "Low Stock & Reorder Alerts", icon: Shield, ownerOnly: false },
   { key: "salesToday", label: "Today's Sales Total", icon: DollarSign, ownerOnly: false },
+  { key: "stockReview", label: "Stock Review Queue (Fast Add)", icon: ClipboardList, ownerOnly: true },
   { key: "loyalty", label: "Loyalty & Rewards", icon: Sparkles, ownerOnly: false },
   { key: "dailyreview", label: "Daily Review", icon: Calendar, ownerOnly: true },
   { key: "monthlyreview", label: "Monthly Review", icon: TrendingUp, ownerOnly: true },
@@ -222,7 +230,7 @@ export const SECONDARY_NAV_GROUPS: NavGroup[] = [
     id: "inventory",
     label: "📦 Inventory",
     icon: Package,
-    itemKeys: ["products", "stockadjust", "purchases", "lowstock", "labels", "secondHandKyc", "downloadArea", "offlineSync", "smartRestock", "deadStock", "stockAudit", "warrantyLookup"],
+    itemKeys: ["products", "stockadjust", "purchases", "lowstock", "labels", "secondHandKyc", "downloadArea", "offlineSync", "smartRestock", "deadStock", "stockAudit", "warrantyLookup", "stockReview"],
   },
   {
     id: "people",
@@ -240,7 +248,7 @@ export const SECONDARY_NAV_GROUPS: NavGroup[] = [
     id: "reports",
     label: "📊 Reports",
     icon: TrendingUp,
-    itemKeys: ["ownerreports", "monthlyreview", "dailyreview", "plDashboard", "saleshistory"],
+    itemKeys: ["ownerreports", "monthlyreview", "dailyreview", "plDashboard", "saleshistory", "salesToday"],
   },
   {
     id: "system",
@@ -327,6 +335,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   allowedSections = null,
   mobileOwnerMode = null,
   mobileStaffFixedNav = false,
+  stockReviewPendingCount = 0,
   onOpenAddStock,
   onToggleMobileOwnerMode,
   syncIndicator = null,
@@ -663,6 +672,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     if (item.key === "products") groupBadgeCount += lowStockCount;
                     if (item.key === "simTracker") groupBadgeCount += pendingSimComm;
                     if (item.key === "financeLedger") groupBadgeCount += pendingFinance;
+                    if (item.key === "stockReview") groupBadgeCount += stockReviewPendingCount;
                   });
 
                   return (
@@ -693,6 +703,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             if (item.key === "products" && lowStockCount > 0) badgeCount = lowStockCount;
                             if (item.key === "simTracker" && pendingSimComm > 0) badgeCount = pendingSimComm;
                             if (item.key === "financeLedger" && pendingFinance > 0) badgeCount = pendingFinance;
+                            if (item.key === "stockReview" && stockReviewPendingCount > 0) badgeCount = stockReviewPendingCount;
 
                             return (
                               <button

@@ -317,9 +317,32 @@ export async function upsertProductCatalog(storeId: string, product: any): Promi
       : (product.photo ? [product.photo] : []),
     p_specifications: product.specifications ?? null,
     p_feature_highlights: product.featureHighlights ?? null,
+    // Phase 19 (Owner Fast Stock Add + Stock Review Queue): "pending_review"
+    // only when the caller explicitly set it (the new QuickStockAddModal);
+    // every existing caller of this function doesn't set product.reviewStatus
+    // at all, so this stays "live" for them exactly as before this field
+    // existed. The RPC itself also independently forces "live" for a staff
+    // caller regardless of what's sent here (defense in depth).
+    p_review_status: product.reviewStatus === "pending_review" ? "pending_review" : "live",
   });
   if (error) throw error;
   return data as string;
+}
+
+/**
+ * Phase 19 — Windows Stock Review Queue's two actions. Owner/manager only
+ * (enforced independently inside the RPC too). Approve flips a
+ * still-pending product to "live" (now visible everywhere); reject deletes
+ * it outright, and only works while it's still pending -- this can never
+ * touch an already-approved/live product, even by mistake.
+ */
+export async function setProductReviewStatus(storeId: string, productId: string, approve: boolean): Promise<void> {
+  const { error } = await supabase.rpc("set_product_review_status", {
+    p_store_id: storeId,
+    p_product_id: productId,
+    p_approve: approve,
+  });
+  if (error) throw error;
 }
 
 /**

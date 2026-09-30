@@ -198,6 +198,16 @@ export interface Product {
   // photoStorage.ts's cleanupStaleOutOfStockPhotos(). Undefined/null means
   // "currently in stock" or "never tracked yet" (pre-7.2 products).
   outOfStockSince?: string | null;
+  // Phase 19 — Owner Fast Stock Add (DS Mobile) + Windows Stock Review
+  // Queue. "pending_review" means this product was added via the phone's
+  // fast-add flow (photo + AI auto-fill + owner just types qty/prices) and
+  // is deliberately excluded from every catalog/search/sell surface
+  // (see catalogProducts in App.tsx) until the owner reviews and approves
+  // it on Windows. Undefined/"live" (its default everywhere else --
+  // Windows's own Add New Item, staff's Add Stock) means normal, fully
+  // visible/sellable — this field did not exist before Phase 19, so every
+  // pre-existing product has no value here and must be treated as "live".
+  reviewStatus?: "live" | "pending_review";
   // Phase 10: Product-specific terms/rules (warranty, return conditions, exclusions)
   customTerms?: string[];
   // Phase 10: Product-specific feel-good line / quote printed on the invoice

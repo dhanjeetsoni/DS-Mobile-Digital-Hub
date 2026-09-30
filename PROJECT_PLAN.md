@@ -2298,3 +2298,83 @@ mistakes of my own._
   traffic — the database has ~5 products and no real sales, so the
   `auth_rls_initplan` and index fixes are correct but their performance benefit
   can't be measured yet.
+
+### ✅ Phase 19: Owner Fast Stock Add (DS Mobile) + Windows Stock Review Queue (2026-09-29)
+
+_User request: a fast, camera-first way for the owner to add stock from
+their phone — photo, quantity, and the 4 prices only — with everything
+AI-filled verified/editable on Windows before it becomes sellable._
+
+- **Data model:** new `products.review_status` column (`'live'` default —
+  every existing row and every existing write path, including staff's
+  Phase 17.3 Add Stock, is unaffected). Only the owner's new Fast Stock Add
+  flow ever writes `'pending_review'`.
+- **`upsert_product_catalog`:** new `p_review_status` param (default
+  `'live'`). Only an owner/manager caller may set `'pending_review'`
+  (forced back to `'live'` for anyone else, independent of the UI). Only
+  applies on INSERT — the UPDATE branch never touches `review_status`, so
+  this can't be used to silently flip an existing product's review state.
+  (First migration attempt rolled back atomically — adding a parameter
+  makes Postgres treat it as a new overload rather than a replacement, so
+  the unqualified `GRANT` afterward became ambiguous, exactly the bug
+  migration `20260910081856` already fixed once for this function. Redone
+  with an explicit `DROP FUNCTION` of the old signature first. Re-queried
+  `pg_proc` afterward to confirm exactly one overload of each function.)
+- **New `set_product_review_status(store_id, product_id, approve)`:**
+  owner/manager only. Approve flips a still-pending product to `'live'`;
+  reject deletes it outright, and only while still pending — can never
+  touch an already-approved/live product even by mistake.
+- **The one place hiding pending items had to live:** `catalogProducts` in
+  App.tsx (already the established "every catalog-browsing/Sell-search
+  screen reads this instead of `db.products`" layer) now filters out
+  `reviewStatus === "pending_review"`. Verified this actually covers every
+  real selection surface before trusting it: Sell search, the Products/
+  Today's Stock list (and fixed its header count, which still read raw
+  `db.products.length`), Low Stock Alerts, and the repair-job "spare part
+  to auto-deduct" dropdown — all already read from `catalogProducts`, so a
+  pending item can never even be selected, let alone sold.
+- **`QuickStockAddModal.tsx`** (new, DS Mobile owner only): camera opens
+  immediately, AI (`processAccessoryOcr`) runs in the background while the
+  owner types Quantity + Selling/Confidential/MRP/Original price (only Qty
+  + Selling required). Save waits for the AI pass to finish (a few
+  seconds) so the record always has a usable name, rather than saving
+  something blank. Reuses the exact same compress/upload/OCR utilities as
+  the full `AddProductModal` rather than duplicating that logic.
+  Deliberately excludes barcode/warranty/supplier/notes/second-photo/
+  screen-size/custom-terms — available on Windows or the full modal
+  instead; adding any of those to a screen meant for mid-unboxing use would
+  defeat the point.
+- **`StockReviewQueueView.tsx`** (new, Windows, owner-only nav item +
+  badge): lists pending items with photo/AI-filled fields/qty/prices, an
+  "Edit" button that reuses the existing `EditProductModal` (no second edit
+  form built), "Verify & Live Karo" (approve), and "Reject" (delete, with a
+  confirm). Deliberately reads `db.products` directly, not
+  `catalogProducts` — this is the one screen meant to see pending items.
+- **Owner's "Add Stock" action on `mobile`** (both Lite and Pro, wired in
+  Phase 17.4/17.3) now opens `QuickStockAddModal` instead of the full
+  `AddProductModal`. Staff's own Add Stock (Phase 17.3) and Windows's
+  separate "+ Add New Item" button are both untouched.
+- **Bug found and fixed while wiring the new nav item:** Phase 17.3's
+  `"salesToday"` secondary nav key was never added to any
+  `SECONDARY_NAV_GROUPS` group — it silently failed this file's own
+  dev-mode assertion and could never be granted to a Windows/other-Android
+  staff member via `allowedSections` (it still worked for its one intended
+  use case, the direct button in the `mobileStaffFixedNav` block, just
+  wasn't otherwise reachable). Added both `salesToday` and the new
+  `stockReview` to their appropriate groups.
+- **Verified this session:** `npx tsc --noEmit` 0 errors, `npx vitest run`
+  32/32, `node scripts/static-audit.mjs` 16/16, `npm run build` clean, live
+  `pg_proc` re-queried to confirm exactly one overload of
+  `upsert_product_catalog`/`set_product_review_status` each. Also manually
+  traced every `db.products.find/filter` call site in App.tsx to confirm
+  none of them can reach a pending item outside `catalogProducts`.
+- **Not yet verified:** an actual owner phone doing a real Fast Stock Add
+  and a real Windows session approving it end-to-end; the AI OCR call
+  itself (network-dependent, not exercised in this sandbox).
+- **Known, deliberate gaps for later:** a rejected item's uploaded photo is
+  not cleaned up from Cloudflare R2 storage (mirrors the existing 90-day
+  stale-photo cleanup job rather than adding a second cleanup path here);
+  no realtime "ping" when a new pending item arrives on Windows (it appears
+  via the existing store-state sync, which is not instant push — a
+  dedicated Realtime channel like `live-catalog`'s would make it feel more
+  "live" if that matters in practice).

@@ -26,6 +26,8 @@ const CameraScannerModal = React.lazy(() =>
   import("./components/CameraScannerModal").then((m) => ({ default: m.CameraScannerModal }))
 );
 import { AddProductModal } from "./components/AddProductModal";
+import { QuickStockAddModal } from "./components/QuickStockAddModal";
+import { StockReviewQueueView } from "./components/StockReviewQueueView";
 import { EditProductModal } from "./components/EditProductModal";
 import { ProductThumb } from "./components/ProductThumb";
 import { SecondHandKycModal } from "./components/SecondHandKycModal";
@@ -337,8 +339,15 @@ export default function App() {
   // Read-only, display-ready product list — every screen that only lists/
   // shows products (not one that finds-then-mutates-then-saves) should
   // read from this instead of db.products directly.
+  // Phase 19 (Owner Fast Stock Add + Stock Review Queue): a product with
+  // reviewStatus "pending_review" is deliberately excluded here — this is
+  // the ONE place that filter needs to live, since every catalog-browsing
+  // and Sell-search screen already reads from catalogProducts/catalogDb
+  // rather than db.products directly (see the comment below). The new
+  // "stockReview" page is the only screen that reads db.products directly
+  // to see pending items.
   const catalogProducts = useMemo(
-    () => db.products.map(catalogOf),
+    () => db.products.filter((p) => p.reviewStatus !== "pending_review").map(catalogOf),
     [db.products, liveCatalogByClientId, liveCatalogBySku]
   );
   // For child components confirmed to only ever READ db.products (list/
@@ -365,6 +374,7 @@ export default function App() {
   const [confidentialPriceProduct, setConfidentialPriceProduct] = useState<Product | null>(null);
   const [isAddGiftOpen, setIsAddGiftOpen] = useState(false);
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
+  const [isQuickStockAddOpen, setIsQuickStockAddOpen] = useState(false);
   const [isEditProductOpen, setIsEditProductOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isKycModalOpen, setIsKycModalOpen] = useState(false);
@@ -3788,7 +3798,7 @@ export default function App() {
           <div>
             <div className="section">
               <div className="section-head">
-                <h2>Product Catalog &amp; Inventory ({db.products.length})</h2>
+                <h2>Product Catalog &amp; Inventory ({catalogProducts.length})</h2>
                 <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                   <div className="view-toggle">
                     <button
@@ -4457,6 +4467,17 @@ export default function App() {
           </div>
         );
       }
+
+      case "stockReview":
+        return (
+          <StockReviewQueueView
+            db={db}
+            storeId={cloudProfile?.store_id}
+            ownerMode={ownerMode}
+            onUpdate={() => saveState({ ...db })}
+            toast={showToast}
+          />
+        );
 
       case "lowstock":
         return <LowStockAlertsView db={catalogDb} showToast={showToast} />;
@@ -5404,6 +5425,13 @@ export default function App() {
   // Phase 17.3's migration).
   const openAddStockModal = () => {
     if (isStaffIdentity) { setIsAddProductOpen(true); return; }
+    // Phase 19: owner's "Add Stock" on the mobile build is the new
+    // camera-first Fast Stock Add (QuickStockAddModal) -- saves as
+    // reviewStatus "pending_review", verified later on Windows in the
+    // Stock Review Queue. Windows's own "+ Add New Item" button is a
+    // separate, untouched code path that still opens the full
+    // AddProductModal directly.
+    if (APP_VARIANT === "mobile") { requireOwner(() => setIsQuickStockAddOpen(true)); return; }
     requireOwner(() => setIsAddProductOpen(true));
   };
   // Phase 17.6 (DS Mobile usability §8.3) — null on every other build, so
@@ -5411,6 +5439,9 @@ export default function App() {
   const mobileSyncIndicator = APP_VARIANT === "mobile"
     ? { isOnline: isDeviceOnline, cloudStatus, pendingSyncCount, lastSyncedAt }
     : null;
+  // Phase 19 — computed from raw db.products (not catalogProducts, which
+  // deliberately excludes these) for the Stock Review Queue's badge.
+  const stockReviewPendingCount = db.products.filter((p) => p.reviewStatus === "pending_review").length;
 
   return (
     <div id="app" className={privacyMode ? "privacy-shield-active" : ""}>
@@ -5450,6 +5481,7 @@ export default function App() {
         mobileStaffFixedNav={isMobileStaffFixedNavActive}
         onOpenAddStock={openAddStockModal}
         syncIndicator={mobileSyncIndicator}
+        stockReviewPendingCount={stockReviewPendingCount}
         onToggleMobileOwnerMode={() => (ownerMobileMode === "lite" ? requestSwitchToProMode() : switchToLiteMode())}
       />
       <BottomTabBar
@@ -5834,6 +5866,17 @@ export default function App() {
           onCreated={() => saveState({ ...db })}
           toast={showToast}
           hideCostFields={isStaffIdentity}
+        />
+      )}
+
+      {isQuickStockAddOpen && ownerMode && APP_VARIANT === "mobile" && (
+        <QuickStockAddModal
+          isOpen={isQuickStockAddOpen}
+          onClose={() => setIsQuickStockAddOpen(false)}
+          db={db}
+          storeId={cloudProfile?.store_id}
+          onCreated={() => saveState({ ...db })}
+          toast={showToast}
         />
       )}
 

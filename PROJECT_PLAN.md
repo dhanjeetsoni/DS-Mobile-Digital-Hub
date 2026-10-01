@@ -2378,3 +2378,30 @@ AI-filled verified/editable on Windows before it becomes sellable._
   via the existing store-state sync, which is not instant push — a
   dedicated Realtime channel like `live-catalog`'s would make it feel more
   "live" if that matters in practice).
+
+#### Phase 19 follow-up: 3 speed improvements to QuickStockAddModal (2026-09-29)
+
+- **#1 AI selling-price suggestion**: fires automatically right after the
+  photo scan finds a name/brand/category (same `getPriceSuggestion` call
+  `AddProductModal` already makes, just unprompted here instead of behind
+  a button). Shown as a tap-to-fill chip under Selling Price — never
+  forced, the owner can still just type a number and ignore it. Silently
+  shows nothing on failure (no toast) since this was always a bonus, not
+  a required step.
+- **#2 Quantity shortcuts**: one-tap buttons for 5/10/12/24 (this shop's
+  common carton counts) next to the existing +/- stepper.
+- **#3 Burst mode**: Save no longer closes the modal — it resets straight
+  back to camera-ready and keeps a running "`N` items add ho chuke" count
+  in the header, so the owner can go through an entire box without
+  re-opening "Add Stock" each time. "Done" (replacing "Cancel" once at
+  least one item has been saved) is the only thing that actually closes
+  it; safe to tap anytime since every item was already saved individually
+  the moment it was added, not batched.
+- **Verified:** `npx tsc --noEmit` 0 errors, `npx vitest run` 32/32,
+  `node scripts/static-audit.mjs` 16/16, `npm run build` clean.
+- **Not done (listed when proposed, still open if wanted later):**
+  duplicate/existing-item detection before creating a new row, a
+  real-time push/sound to Windows when a new pending item arrives (today:
+  the existing store-state sync, not instant), bulk-approve in the Review
+  Queue, "who/when added" shown per pending item, barcode-first lookup,
+  blurry-photo warning, stale-pending-item highlighting.

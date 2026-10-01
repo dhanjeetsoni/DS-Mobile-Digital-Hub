@@ -1,12 +1,17 @@
 import React, { useRef, useState } from "react";
-import { Camera, RotateCcw, Loader2, CheckCircle2, Minus, Plus } from "lucide-react";
+import { Camera, RotateCcw, Loader2, CheckCircle2, Minus, Plus, Sparkles } from "lucide-react";
 import { Database, Product, StockBatch } from "../types";
 import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
-import { processAccessoryOcr } from "../utils/aiOcr";
+import { processAccessoryOcr, getPriceSuggestion, PriceSuggestion } from "../utils/aiOcr";
 import { compressImageToDataUrl, compressImageForScan } from "../utils/imageCompress";
 import { uploadProductPhotoOrFallback } from "../services/photoStorage";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
+
+// Improvement #2 — the box sizes actually seen in this shop's accessories
+// (glass/covers/chargers etc. come in these common carton counts). Tapping
+// one is faster than dialing the stepper up one at a time.
+const QTY_SHORTCUTS = [5, 10, 12, 24];
 
 interface QuickStockAddModalProps {
   isOpen: boolean;
@@ -64,6 +69,20 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
   const [purchasePrice, setPurchasePrice] = useState<number>(0);
   const [saving, setSaving] = useState(false);
 
+  // Improvement #1 — AI selling-price suggestion, same call
+  // AddProductModal already makes, just automatic here (fires right after
+  // the photo scan finds a name/brand/category) instead of behind a
+  // button, since the whole point of this screen is fewer taps.
+  const [priceSuggestion, setPriceSuggestion] = useState<PriceSuggestion | null>(null);
+  const [priceSuggestLoading, setPriceSuggestLoading] = useState(false);
+
+  // Improvement #3 — "burst mode": Save doesn't close the modal anymore,
+  // it resets straight back to the camera so the owner can keep going
+  // through a whole box without re-opening this screen each time. This
+  // counts how many were added so far this session; "Done" (which does
+  // close) shows it.
+  const [sessionCount, setSessionCount] = useState(0);
+
   if (!isOpen) return null;
 
   const resetForm = () => {
@@ -80,7 +99,15 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
     setConfidentialPrice(0);
     setMrp(0);
     setPurchasePrice(0);
+    setPriceSuggestion(null);
+    setPriceSuggestLoading(false);
     photoPathIdRef.current = uid("qsa");
+  };
+
+  const handleDone = () => {
+    resetForm();
+    setSessionCount(0);
+    onClose();
   };
 
   const handlePhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -98,12 +125,18 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
         .catch(() => {});
 
       setIsScanning(true);
+      let scannedBrand = "";
+      let scannedCategory = "General";
+      let scannedName = "";
       try {
         const scanDataUrl = await compressImageForScan(file).catch(() => dataUrl);
         const result = await processAccessoryOcr(scanDataUrl);
-        setAiBrand(result.brand || "");
-        setAiCategory(result.category || "General");
-        setAiName([result.brand, result.productName].filter(Boolean).join(" — ") || "New Item");
+        scannedBrand = result.brand || "";
+        scannedCategory = result.category || "General";
+        scannedName = [result.brand, result.productName].filter(Boolean).join(" — ") || "New Item";
+        setAiBrand(scannedBrand);
+        setAiCategory(scannedCategory);
+        setAiName(scannedName);
         setAiCompatibleModels(result.compatibleModels || []);
       } catch {
         // AI scan failing is not fatal here — the owner can still save with
@@ -115,6 +148,19 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
         setIsScanning(false);
         setScanDone(true);
       }
+
+      // Improvement #1 — ask AI for a selling-price ballpark too, right
+      // after the scan, using whatever name/brand/category it just found.
+      // Best-effort: no toast on failure, just no suggestion shown — the
+      // owner types the price manually either way, exactly like today.
+      if (scannedName) {
+        setPriceSuggestLoading(true);
+        getPriceSuggestion({ brand: scannedBrand, productName: scannedName, category: scannedCategory })
+          .then((s) => setPriceSuggestion(s))
+          .catch(() => setPriceSuggestion(null))
+          .finally(() => setPriceSuggestLoading(false));
+      }
+
       await uploadPromise;
     } catch (err: any) {
       toast(err?.message || "Photo process nahi ho payi, dobara try karein", "red");
@@ -201,23 +247,28 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
     db.stockBatches.push(openingBatch);
 
     onCreated(product);
-    toast(`${product.name} save ho gaya — Windows par verify karke Live karo`, "green");
+    toast(`✅ #${sessionCount + 1}: ${product.name} save ho gaya`, "green");
     setSaving(false);
+    setSessionCount((n) => n + 1);
+    // Improvement #3 — burst mode: stays open, resets straight back to the
+    // camera-ready state instead of closing, so the owner can keep going
+    // through the rest of the box without re-opening "Add Stock" each time.
+    // "Done" (in the header/footer) is the only thing that actually closes.
     resetForm();
-    onClose();
   };
 
   return (
     <div className="overlay show">
       <div className="modal" style={{ maxWidth: "420px" }}>
         <div className="modal-head">
-          <h3>⚡ Fast Stock Add</h3>
-          <button onClick={() => { resetForm(); onClose(); }}>&times;</button>
+          <h3>⚡ Fast Stock Add{sessionCount > 0 ? ` · ${sessionCount} item${sessionCount > 1 ? "s" : ""} add ho chuke` : ""}</h3>
+          <button onClick={handleDone}>&times;</button>
         </div>
 
         <div className="hint" style={{ marginBottom: "12px" }}>
-          Photo kheencho, quantity aur price daalo, Save karo. Yeh turant nahi
-          bikega — Windows par verify karne ke baad hi "Live" hoga.
+          {sessionCount > 0
+            ? "Agla item ready hai — photo kheencho. Jab box khatam ho jaaye to neeche \"Done\" dabao."
+            : "Photo kheencho, quantity aur price daalo, Save karo. Yeh turant nahi bikega — Windows par verify karne ke baad hi \"Live\" hoga."}
         </div>
 
         <input
@@ -290,11 +341,42 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
               <Plus size={16} />
             </button>
           </div>
+          <div style={{ display: "flex", gap: "6px", marginTop: "8px", flexWrap: "wrap" }}>
+            {QTY_SHORTCUTS.map((n) => (
+              <button
+                key={n}
+                type="button"
+                className="btn sm"
+                style={qty === n ? { background: "var(--brand)", color: "#fff" } : undefined}
+                onClick={() => setQty(n)}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="field" style={{ marginTop: "10px" }}>
           <label>Selling Price (₹) <span className="req">*</span></label>
           <input type="number" min="0" step="0.01" value={sellingPrice || ""} onChange={(e) => setSellingPrice(Number(e.target.value) || 0)} placeholder="0" />
+          {priceSuggestLoading && (
+            <div className="hint" style={{ marginTop: "4px", display: "flex", alignItems: "center", gap: "6px" }}>
+              <Loader2 size={12} className="spin" /> AI price suggest kar raha hai…
+            </div>
+          )}
+          {!priceSuggestLoading && priceSuggestion && (
+            <button
+              type="button"
+              className="btn sm"
+              style={{ marginTop: "6px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              onClick={() => {
+                setSellingPrice(priceSuggestion.recommendedSellingPrice);
+                if (priceSuggestion.mrp) setMrp(priceSuggestion.mrp);
+              }}
+            >
+              <Sparkles size={13} /> AI: ₹{priceSuggestion.recommendedSellingPrice} (₹{priceSuggestion.priceRangeLow}–₹{priceSuggestion.priceRangeHigh}) — Tap to use
+            </button>
+          )}
         </div>
         <div className="field" style={{ marginTop: "10px" }}>
           <label>Confidential Price (₹) <span className="hint">(optional)</span></label>
@@ -310,9 +392,11 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
         </div>
 
         <div className="modal-actions" style={{ marginTop: "16px" }}>
-          <button type="button" className="btn" onClick={() => { resetForm(); onClose(); }}>Cancel</button>
+          <button type="button" className="btn" onClick={handleDone}>
+            {sessionCount > 0 ? `Done (${sessionCount})` : "Cancel"}
+          </button>
           <button type="button" className="btn primary" disabled={saving || isScanning} onClick={handleSave}>
-            {saving ? "Saving…" : isScanning ? "AI ka wait karo…" : "Save (Verify ke liye bhejo)"}
+            {saving ? "Saving…" : isScanning ? "AI ka wait karo…" : "Save & Agla Item"}
           </button>
         </div>
       </div>

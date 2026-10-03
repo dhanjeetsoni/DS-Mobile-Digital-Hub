@@ -68,7 +68,8 @@ export function ConnectionStatusBadge({ cloudStatus, pendingSyncCount, onRetry, 
       : "Cloud se connect ho raha hai...";
   }
 
-  const showRetry = !simplified && (!isOnline || hasSyncIssue || pendingSyncCount > 0);
+  const hasRealIssue = !isOnline || hasSyncIssue || pendingSyncCount > 0;
+  const showRetry = !simplified && hasRealIssue;
 
   const handleRetry = async () => {
     if (retrying) return;
@@ -81,11 +82,42 @@ export function ConnectionStatusBadge({ cloudStatus, pendingSyncCount, onRetry, 
   };
 
   if (simplified) {
-    // Staff area: just the dot. Green = online/synced, yellow/pulsing =
-    // syncing or connecting, red = offline or a sync error. No label, no
-    // manual retry — nothing for staff to fiddle with; it just works
-    // (or quietly keeps retrying) in the background.
-    return <span className={`status-dot ${dotClass}`} title={hint}></span>;
+    // Staff area: normally just the dot (green = online/synced, yellow/
+    // pulsing = syncing/connecting, red = offline or a sync error) — green
+    // is the 99% case and there's nothing for staff to fiddle with then.
+    // Improvement: when there IS a real issue (a sale genuinely failed to
+    // sync, not just "still syncing"), staff also gets a small tappable
+    // retry — previously only the owner could ever manually retry, so a
+    // staff member seeing a stuck sale had no option but to wait or go
+    // find the owner. Background auto-retry (startConnectivitySync) still
+    // runs regardless either way; this is just a manual nudge, same as the
+    // owner's version.
+    if (!hasRealIssue) {
+      return <span className={`status-dot ${dotClass}`} title={hint}></span>;
+    }
+    return (
+      <button
+        className="btn sm"
+        onClick={handleRetry}
+        disabled={retrying}
+        title={`${hint} Dobara try karne ke liye tap karo.`}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "5px",
+          background: hasSyncIssue ? "var(--amber-light)" : undefined,
+          color: hasSyncIssue ? "var(--amber)" : undefined,
+          border: hasSyncIssue ? "1px solid var(--amber-border)" : undefined,
+          padding: "3px 8px",
+          fontSize: "11px",
+          fontWeight: 700,
+        }}
+      >
+        <span className={`status-dot ${dotClass}`}></span>
+        <RefreshCw size={12} className={retrying ? "spin" : ""} />
+        {pendingSyncCount > 0 ? `${pendingSyncCount} pending` : hasSyncIssue ? "Retry" : "Offline"}
+      </button>
+    );
   }
 
   return (

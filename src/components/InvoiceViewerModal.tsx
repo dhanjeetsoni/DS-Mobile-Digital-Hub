@@ -252,6 +252,33 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
           </div>
         )}
 
+        {sale && (
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              flexWrap: "wrap",
+              marginBottom: "14px",
+              padding: "10px",
+              borderRadius: "10px",
+              background: "var(--card)",
+              border: "1px solid var(--line)",
+            }}
+          >
+            {isBluetoothPrintSupported() && (
+              <button className="btn primary sm" onClick={handleBluetoothPrint} disabled={btStatus.loading}>
+                <Bluetooth size={14} /> {btStatus.loading ? "Printing..." : "🖨️ Print Receipt"}
+              </button>
+            )}
+            <button className="btn success sm" onClick={() => setShowWhatsAppPreview((v) => !v)}>
+              <MessageCircle size={14} /> WhatsApp Bill
+            </button>
+            <button className="btn sm ghost" onClick={handleOpenImageCard} disabled={isGeneratingImg}>
+              <ImageIcon size={14} /> {isGeneratingImg ? "Generating..." : "Share as Image"}
+            </button>
+          </div>
+        )}
+
         <div id="print-area" data-format={sale ? printFormat : "a4"}>
           {sale && (
             <div className={`invoice-paper ${printFormat === "thermal" ? "thermal" : ""}`}>

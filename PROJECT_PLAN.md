@@ -2405,3 +2405,73 @@ AI-filled verified/editable on Windows before it becomes sellable._
   the existing store-state sync, not instant), bulk-approve in the Review
   Queue, "who/when added" shown per pending item, barcode-first lookup,
   blurry-photo warning, stale-pending-item highlighting.
+
+### Android improvements round 2 (2026-09-29): #3, #5, #6 — #4 needs a decision first
+
+_User asked for 4 things. Investigated each before writing code — two
+turned out to already exist (just not surfaced well), one was a real gap
+fixed cleanly, one (#4, App Shortcuts) needs the owner's explicit go-ahead
+before touching native Android config — see below, not implemented yet._
+
+- **#3 "Bluetooth thermal printer support"** — already fully built (Phase
+  4, `services/thermalPrinter.ts`, ESC/POS over Web Bluetooth) and already
+  wired to a "Bluetooth Print" button in `InvoiceViewerModal.tsx`, which
+  already auto-opens the instant a sale finishes (`handleFinalizeSale`
+  already calls `setIsInvoiceViewerOpen(true)`). The real gap: that button
+  (and WhatsApp Bill, and Share-as-Image) sat at the very BOTTOM of the
+  modal, after the entire printed invoice preview — on a phone, reaching
+  it meant scrolling past the whole bill first. Fixed by adding a compact
+  quick-actions row right at the top of the modal (Print Receipt /
+  WhatsApp Bill / Share as Image), above the invoice preview. The original
+  bottom action row (Print Document, Return, Exchange, etc.) is untouched.
+  **Known remaining limitation, not fixed:** the paired Bluetooth device is
+  only cached in memory for the current app session — relaunching the app
+  requires re-picking the printer from the system dialog each time. A
+  persistent-pairing improvement (`navigator.bluetooth.getDevices()`) was
+  considered but left alone: that API's support is inconsistent across
+  Android WebView versions (same caveat `ci-wire-android-bluetooth-
+  permissions.mjs` already documents for Web Bluetooth generally), and
+  getting it subtly wrong isn't verifiable from this sandbox at all.
+- **#5 "Customer lookup by last 4 digits"** — was a real, confirmed gap:
+  checkout's phone field only auto-filled on an exact, complete match
+  (typing even 9 of 10 digits found nothing). Now shows a tappable
+  dropdown of customers whose phone *contains* the typed digits (not just
+  starts-with) once 3+ are typed — so "9876" alone finds "XXXXXX9876" or
+  any number containing that sequence. Capped at 6 results. Uses
+  `onMouseDown` (not `onClick`) on the suggestions so a tap registers
+  before the input's `onBlur` closes the dropdown.
+- **#6 "Offline queue retry button for staff"** — was a real, deliberate
+  design choice being asked to change: staff's `ConnectionStatusBadge`
+  (`simplified={true}`) previously showed only an inert dot, by design
+  ("nothing for staff to fiddle with"), with manual retry owner-only.
+  Changed to a middle ground rather than just flipping the switch: staff
+  still sees *just the plain dot* in the normal all-synced case (zero
+  visual change, same philosophy), but when there's an actual problem
+  (offline, a real sync error, or something genuinely pending) the dot
+  becomes a small tappable retry button showing the pending count. This
+  gives staff the "see it and retry it" capability asked for without
+  cluttering the 99% case. Background auto-retry (`startConnectivitySync`)
+  is unchanged either way.
+- **#4 "App Shortcuts" (Android home-screen long-press → "Naya Sale" /
+  "Add Stock") — NOT implemented, needs a decision first.** This is
+  fundamentally different risk from the other three: it means patching
+  generated native Android files (`AndroidManifest.xml` + a new
+  `res/xml/shortcuts.xml`, following the exact pattern this repo already
+  uses for Bluetooth/camera/biometric permissions —
+  `scripts/ci-wire-android-*.mjs` run after `tauri android init` on every
+  CI build, since `src-tauri/gen/android` is gitignored and regenerated
+  fresh each time). A tappable shortcut that's actually useful (jumps
+  straight to Sell, not just "opens the app like the icon already does")
+  needs a deep-link mechanism, which this project doesn't have yet — Tauri
+  has no deep-link plugin registered today, and adding one is a second new
+  native dependency. None of this is buildable or testable from this
+  sandbox (no Android SDK, no device) — unlike #3/#5/#6, which are pure
+  React changes already proven via `tsc`/`vitest`/`build`, a mistake in
+  the manifest/shortcuts XML here would only surface as a broken Android
+  CI build or a shortcut that silently does nothing on a real phone.
+  **Decision needed from the owner:** proceed anyway (accepting that it
+  can only be verified by actually running the CI build and testing an
+  installed APK), or skip it.
+- **Verified this session (for #3/#5/#6):** `npx tsc --noEmit` 0 errors,
+  `npx vitest run` 32/32, `node scripts/static-audit.mjs` 16/16,
+  `npm run build` clean.

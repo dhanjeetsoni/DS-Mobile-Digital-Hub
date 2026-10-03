@@ -2415,6 +2415,14 @@ export default function App() {
     phone: "",
     address: "",
   });
+  // Improvement (post-Phase 19): phone search during checkout used to only
+  // auto-fill on an EXACT, complete phone match — typing even the last 3-4
+  // digits of a known customer's number found nothing until the whole
+  // number was typed out. Now shows a tappable dropdown of matches (number
+  // contains the typed digits, not just starts-with) once 3+ digits are
+  // typed, so "9876" alone can find "9876543210". Closed the moment a
+  // suggestion is tapped or the field is cleared.
+  const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
 
   const handleStartCheckout = () => {
     if (cart.length === 0) {
@@ -6022,7 +6030,7 @@ export default function App() {
                     />
                   </div>
                 </div>
-                <div className="field">
+                <div className="field" style={{ position: "relative" }}>
                   <label>Mobile Number (For Instant WhatsApp Bill)</label>
                   <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                     <input
@@ -6040,9 +6048,13 @@ export default function App() {
                         } else {
                           setCheckoutCustomer({ ...checkoutCustomer, phone: cleanPhone });
                         }
+                        setShowCustomerSuggestions(cleanPhone.replace(/\D/g, "").length >= 3);
                       }}
-                      placeholder="10-digit mobile"
+                      onFocus={() => setShowCustomerSuggestions(checkoutCustomer.phone.replace(/\D/g, "").length >= 3)}
+                      onBlur={() => window.setTimeout(() => setShowCustomerSuggestions(false), 150)}
+                      placeholder="10-digit mobile (ya last 4 digit se search karo)"
                       style={{ flex: 1 }}
+                      autoComplete="off"
                     />
                     <PasteButton
                       cleanType="phone"
@@ -6089,6 +6101,59 @@ export default function App() {
                       </button>
                     )}
                   </div>
+                  {showCustomerSuggestions && (() => {
+                    const typed = checkoutCustomer.phone.replace(/\D/g, "");
+                    const matches = typed.length >= 3
+                      ? db.customers.filter((c) => c.phone && c.phone.includes(typed)).slice(0, 6)
+                      : [];
+                    if (matches.length === 0) return null;
+                    return (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          left: 0,
+                          right: 0,
+                          zIndex: 20,
+                          background: "var(--surface)",
+                          border: "1px solid var(--line)",
+                          borderRadius: "8px",
+                          boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
+                          marginTop: "2px",
+                          maxHeight: "220px",
+                          overflowY: "auto",
+                        }}
+                      >
+                        {matches.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            // onMouseDown (not onClick) fires before the input's onBlur closes
+                            // this dropdown, so the tap actually registers.
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setCheckoutCustomer({ ...checkoutCustomer, phone: c.phone, name: c.name, address: c.address || "" });
+                              setShowCustomerSuggestions(false);
+                            }}
+                            style={{
+                              display: "block",
+                              width: "100%",
+                              textAlign: "left",
+                              padding: "8px 10px",
+                              border: "none",
+                              borderBottom: "1px solid var(--line)",
+                              background: "transparent",
+                              cursor: "pointer",
+                              fontSize: "13px",
+                            }}
+                          >
+                            <strong>{c.name || "Naam nahi"}</strong>
+                            <span style={{ color: "var(--ink-soft)", marginLeft: "8px" }}>{c.phone}</span>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="field full">
                   <label>Customer Address (Optional)</label>

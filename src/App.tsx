@@ -2423,7 +2423,7 @@ export default function App() {
             p_min_stock: i.minStock,
           });
           if (resolveError) throw resolveError;
-          return { product_id: realId, quantity: i.qty, unit_price: i.price, warranty_enabled: i.warrantyEnabled, warranty_months: i.warrantyMonths, warranty_start: i.warrantyStart ?? null, warranty_end: i.warrantyEnd ?? null };
+          return { product_id: realId, quantity: i.qty, unit_price: i.price, is_gift: i.isGift ?? false, warranty_enabled: i.warrantyEnabled, warranty_months: i.warrantyMonths, warranty_start: i.warrantyStart ?? null, warranty_end: i.warrantyEnd ?? null };
         }));
 
         const { data: atomicSaleId, error: atomicError } = await supabase.rpc("atomic_complete_sale_v2", {

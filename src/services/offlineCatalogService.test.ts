@@ -26,7 +26,9 @@ describe("account-scoped offline catalog", () => {
     expect(mocks.range.mock.calls).toEqual([[0,499],[500,999]]);
     expect(mocks.from.mock.calls.every(([name]) => name === "products_staff_view")).toBe(true);
     expect(getOfflineCatalogMeta(owner).itemCount).toBe(501);
-    expect(getCachedOfflineCatalog(owner)?.[0]?.costPrice).toBe(0);
+    expect(getCachedOfflineCatalog(owner)?.[0]?.purchasePrice).toBeNull();
+    expect(getCachedOfflineCatalog(owner)?.[0]?.confidentialPrice).toBeNull();
+    expect(getCachedOfflineCatalog(owner)?.[0]).not.toHaveProperty("costPrice");
     expect(getCachedOfflineCatalog(staff)).toBeNull();
     expect(getOfflineCatalogMeta(staff).status).toBe("empty");
     expect(getCachedOfflineCatalog({...owner, storeId:"other"})).toBeNull();

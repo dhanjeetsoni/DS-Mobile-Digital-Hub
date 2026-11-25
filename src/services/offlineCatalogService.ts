@@ -59,7 +59,7 @@ export async function downloadFullCatalogForOffline(
 
     // Group categories
     const categoriesSet = new Set<string>();
-    const normalizedProducts: Partial<Product>[] = catalogRows.map((r: any) => {
+    const normalizedProducts: Partial<Product>[] = catalogRows.map((r: any): Partial<Product> => {
       const cat = r.category || "General";
       categoriesSet.add(cat);
       return {
@@ -67,13 +67,16 @@ export async function downloadFullCatalogForOffline(
         name: r.model || r.brand || "Product",
         category: cat,
         brand: r.brand || "",
-        model: r.model || "",
         sku: r.sku || "",
         barcode: r.barcode || "",
         sellingPrice: Number(r.selling_price || 0),
         mrp: Number(r.mrp || 0),
-        costPrice: 0, // safe
+        purchasePrice: null, // confidential cost must never be cached here
+        confidentialPrice: null,
+        pendingCost: true,
         stock: Number(r.stock_qty || 0),
+        minStock: Number(r.min_stock || 0),
+        requireCustomerDetails: !!r.require_customer_details,
         photo: r.photo || "",
         warrantyEnabled: !!r.warranty_enabled,
         warrantyMonths: Number(r.warranty_months || 0),
@@ -84,8 +87,9 @@ export async function downloadFullCatalogForOffline(
         isSparePart: !!r.is_spare_part,
         supplier: r.supplier || "",
         notes: r.notes || "",
-        customTerms: r.custom_terms || undefined,
-        customQuote: r.custom_quote || undefined,
+        photos: Array.isArray(r.photos) ? r.photos : [],
+        specifications: Array.isArray(r.specifications) ? r.specifications : [],
+        featureHighlights: Array.isArray(r.feature_highlights) ? r.feature_highlights : [],
       };
     });
 
@@ -103,7 +107,7 @@ export async function downloadFullCatalogForOffline(
     let photosOmitted = false;
     try { save(normalizedProducts); }
     catch {
-      save(normalizedProducts.map(p => ({ ...p, photo: "" })));
+      save(normalizedProducts.map(p => ({ ...p, photo: "", photos: [] })));
       photosOmitted = true;
     }
     onProgress?.("Catalog records saved.", 100);

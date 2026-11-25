@@ -250,3 +250,16 @@
   --shadow-pop: 0 24px 64px -20px rgb(from var(--brand) r g b / 0.35), 0 0 0 1px rgb(from var(--brand) r g b / 0.25);
 }
 
+
+[data-theme="commerce"] {
+ --canvas: #0b1425; --canvas-alt: #101c30; --surface: #142139; --surface-2: #1b2c47; --surface-3: #223550;
+ --line: #2b4160; --line-strong: #4a6588; --ink: #eef5ff; --ink-muted: #b3c6e1; --ink-faint: #8c9eb8;
+ --brand: #79a9ff; --brand-hi: #a4c4ff; --brand-fg: #07182f; --brand-soft: #203b67;
+ --accent: #ffd54f; --accent-fg: #292001; --accent-soft: #3e3210;
+}
+[data-theme="commerce"][data-mode="light"] {
+ --canvas: #f1f5fb; --canvas-alt: #e7eef8; --surface: #ffffff; --surface-2: #f4f7fc; --surface-3: #eaf0fb;
+ --line: #d9e3f1; --line-strong: #aabbd4; --ink: #122341; --ink-muted: #465b78; --ink-faint: #667a96;
+ --brand: #2057cf; --brand-hi: #1743a9; --brand-fg: #ffffff; --brand-soft: #e2ecff;
+ --accent: #e5aa00; --accent-fg: #211a00; --accent-soft: #fff2bf;
+}

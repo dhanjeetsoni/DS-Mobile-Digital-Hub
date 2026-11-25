@@ -54,7 +54,7 @@ function systemMode(): ThemeMode {
 export const useAppearance = create<AppearanceState>()(
   persist(
     (set, get) => ({
-      themeId: "midnight",
+      themeId: "commerce",
       mode: "light",
       followSystem: false,
       density: "cosy",
@@ -66,7 +66,7 @@ export const useAppearance = create<AppearanceState>()(
       // landing in dark sepia is never what someone meant.
       setTheme: (id) => {
         const theme = getTheme(id);
-        const next = get().followSystem ? systemMode() : theme.defaultMode;
+        const next = get().followSystem ? systemMode() : get().mode;
         set({ themeId: theme.id, mode: next });
       },
       setMode: (mode) => set({ mode, followSystem: false }),

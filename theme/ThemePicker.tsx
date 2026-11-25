@@ -19,7 +19,7 @@ function SwatchStrip({ theme }: { theme: ThemeMeta }) {
   const [canvas, surface, brand, accent] = theme.swatch[mode];
   return (
     <div
-      className="flex h-14 overflow-hidden rounded-md border border-line"
+      className="retail-theme-swatch flex h-14 overflow-hidden rounded-md border border-line"
       style={{ background: canvas }}
       aria-hidden
     >
@@ -92,7 +92,7 @@ export function ThemePicker({ className }: { className?: string }) {
         <div>
           <h2 className="text-lg font-semibold">Appearance</h2>
           <p className="text-sm text-ink-muted">
-            Ten themes, each in light and dark. The change applies instantly and is
+            Ten retail themes plus High Contrast, each in light and dark. The change applies instantly and is
             remembered on this device.
           </p>
         </div>
@@ -124,7 +124,7 @@ export function ThemePicker({ className }: { className?: string }) {
         </div>
       </header>
 
-      <div className="grid gap-(--gap) sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+      <div className="retail-theme-grid grid gap-(--gap) sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
         {THEMES.map((theme) => {
           const active = theme.id === themeId;
           return (
@@ -132,6 +132,7 @@ export function ThemePicker({ className }: { className?: string }) {
               key={theme.id}
               type="button"
               onClick={() => setTheme(theme.id)}
+              data-theme-choice={theme.id}
               aria-pressed={active}
               className={cn(
                 "group rounded-lg border bg-surface p-3 text-left",

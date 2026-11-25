@@ -14,6 +14,7 @@
 
 export const THEME_IDS = [
   "midnight",
+  "commerce",
   "nord",
   "emerald",
   "royal",
@@ -45,7 +46,7 @@ export interface ThemeMeta {
 export const THEMES: readonly ThemeMeta[] = [
   {
     id: "midnight",
-    name: "Midnight",
+    name: "Midnight Pro",
     tagline: "Deep navy — the default face of DS Nexus",
     defaultMode: "dark",
     swatch: {
@@ -54,8 +55,12 @@ export const THEMES: readonly ThemeMeta[] = [
     },
   },
   {
+    id: "commerce", name: "Commerce Blue", tagline: "Shopping-inspired blue and yellow for a modern retail counter", defaultMode: "light",
+    swatch: { dark: ["#0b1425", "#142139", "#79a9ff", "#ffd54f"], light: ["#f1f5fb", "#ffffff", "#2057cf", "#e5aa00"] },
+  },
+  {
     id: "nord",
-    name: "Nord",
+    name: "Aqua Glass",
     tagline: "Arctic blue-grey, low glare for long shifts",
     defaultMode: "dark",
     swatch: {
@@ -65,7 +70,7 @@ export const THEMES: readonly ThemeMeta[] = [
   },
   {
     id: "emerald",
-    name: "Emerald",
+    name: "Emerald Retail",
     tagline: "Cash green — profit reads at a glance",
     defaultMode: "dark",
     swatch: {
@@ -95,7 +100,7 @@ export const THEMES: readonly ThemeMeta[] = [
   },
   {
     id: "rose",
-    name: "Rose",
+    name: "Rose Gold",
     tagline: "Soft magenta — accessories and gifts",
     defaultMode: "dark",
     swatch: {
@@ -115,7 +120,7 @@ export const THEMES: readonly ThemeMeta[] = [
   },
   {
     id: "slate",
-    name: "Slate Mono",
+    name: "Carbon Black",
     tagline: "Monochrome — nothing competes with the numbers",
     defaultMode: "dark",
     swatch: {
@@ -125,7 +130,7 @@ export const THEMES: readonly ThemeMeta[] = [
   },
   {
     id: "paper",
-    name: "Paper Light",
+    name: "Pearl Light",
     tagline: "Warm paper — closest match to a printed invoice",
     defaultMode: "light",
     swatch: {

@@ -50,9 +50,9 @@ function declares(body: string, token: string): boolean {
 }
 
 describe("theme catalogue", () => {
-  it("exposes exactly ten themes with unique ids", () => {
-    expect(THEMES).toHaveLength(10);
-    expect(new Set(THEME_IDS).size).toBe(10);
+  it("exposes ten retail themes plus high contrast with unique ids", () => {
+    expect(THEMES).toHaveLength(11);
+    expect(new Set(THEME_IDS).size).toBe(11);
     expect(THEMES.map((t) => t.id)).toEqual([...THEME_IDS]);
   });
 

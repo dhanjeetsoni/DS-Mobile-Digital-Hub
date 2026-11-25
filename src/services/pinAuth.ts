@@ -5,6 +5,8 @@ import { supabase } from "./supabaseClient";
 
 const CACHE_PREFIX = "dsmdh_pin_v2_";
 const STATUS_PREFIX = "dsmdh_pin_status_v2_";
+const ATTEMPT_PREFIX = "dsmdh_pin_attempts_v1_";
+const offlineVerifying = new Set<string>();
 export interface CachedPin { hash: string; salt: string; revision: string; }
 type PinStatus = { hasPin: boolean; revision: string; lockedUntil?: string | null };
 
@@ -42,6 +44,7 @@ async function cacheVerifiedPin(profileId: string, pin: string, revision: string
     const salt = randomSalt();
     const hash = await deriveVerifier(pin,salt);
     localStorage.setItem(CACHE_PREFIX + profileId,JSON.stringify({hash,salt,revision}));
+    localStorage.removeItem(ATTEMPT_PREFIX + profileId);
   } catch { /* online unlock can succeed even when offline storage is unavailable */ }
 }
 async function isCurrentProfile(profileId: string): Promise<boolean> {
@@ -74,7 +77,22 @@ export async function verifyPin(profileId: string, enteredPin: string): Promise<
     const cached = readCachedPin(profileId), status = readStatus(profileId);
     if (!cached || !status?.hasPin || cached.revision !== status.revision) return false;
     if (status.lockedUntil && Date.parse(status.lockedUntil) > Date.now()) return false;
-    return await deriveVerifier(enteredPin,cached.salt) === cached.hash;
+    // UI lockout is defense in depth; also enforce a persistent limit in the verifier.
+    if (offlineVerifying.has(profileId)) return false;
+    offlineVerifying.add(profileId);
+    try {
+      const key = ATTEMPT_PREFIX + profileId;
+      const prior = JSON.parse(localStorage.getItem(key) || "null");
+      const now = Date.now();
+      if (prior?.revision === cached.revision && Number(prior.lockUntil) > now) return false;
+      const count = prior?.revision === cached.revision && !prior.lockUntil ? Number(prior.count) || 0 : 0;
+      const next = count + 1;
+      // Persist before deriving so reloads cannot reset the UI attempt counter.
+      localStorage.setItem(key, JSON.stringify({ revision: cached.revision, count: next, lockUntil: next >= 3 ? now + 120000 : 0 }));
+      const valid = await deriveVerifier(enteredPin,cached.salt) === cached.hash;
+      if (valid) localStorage.removeItem(key);
+      return valid;
+    } finally { offlineVerifying.delete(profileId); }
   } catch { return false; }
 }
 
@@ -128,6 +146,8 @@ function biometricPrefKey(profileId: string) {
 export function isBiometricEnabled(profileId: string): boolean {
   try {
     const cached = readCachedPin(profileId), status = readStatus(profileId);
+    const attempts = JSON.parse(localStorage.getItem(ATTEMPT_PREFIX + profileId) || "null");
+    if (attempts?.revision === cached?.revision && Number(attempts?.lockUntil) > Date.now()) return false;
     return !!cached && !!status?.hasPin && cached.revision === status.revision && !(status.lockedUntil && Date.parse(status.lockedUntil) > Date.now()) && localStorage.getItem(biometricPrefKey(profileId)) === "1";
   } catch {
     return false;

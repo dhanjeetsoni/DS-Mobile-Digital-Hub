@@ -9,22 +9,24 @@ import {
 
 interface OfflineCatalogDownloadProps {
   storeId: string | null;
+  profileId: string | null;
   onDownloaded?: () => void;
 }
 
-export const OfflineCatalogDownload: React.FC<OfflineCatalogDownloadProps> = ({ storeId, onDownloaded }) => {
-  const [meta, setMeta] = useState<CatalogDownloadMeta>(() => getOfflineCatalogMeta());
+export const OfflineCatalogDownload: React.FC<OfflineCatalogDownloadProps> = ({ storeId, profileId, onDownloaded }) => {
+  const scope = storeId && profileId ? { storeId, profileId } : null;
+  const [meta, setMeta] = useState<CatalogDownloadMeta>(() => getOfflineCatalogMeta(scope));
   const [isDownloading, setIsDownloading] = useState(false);
   const [progressMsg, setProgressMsg] = useState("");
   const [progressPercent, setProgressPercent] = useState(0);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
-    setMeta(getOfflineCatalogMeta());
-  }, []);
+    setMeta(getOfflineCatalogMeta(scope));
+  }, [storeId, profileId]);
 
   const handleDownload = async () => {
-    if (!storeId) {
+    if (!scope) {
       setFeedback({ type: "error", text: "Please sign in to a store before downloading the catalog." });
       return;
     }
@@ -34,13 +36,13 @@ export const OfflineCatalogDownload: React.FC<OfflineCatalogDownloadProps> = ({ 
     setProgressPercent(5);
     setProgressMsg("Starting download...");
 
-    const res = await downloadFullCatalogForOffline(storeId, (msg, pct) => {
+    const res = await downloadFullCatalogForOffline(scope, (msg, pct) => {
       setProgressMsg(msg);
       setProgressPercent(pct);
     });
 
     setIsDownloading(false);
-    setMeta(getOfflineCatalogMeta());
+    setMeta(getOfflineCatalogMeta(scope));
 
     if (res.success) {
       setFeedback({ type: "success", text: res.message });
@@ -52,9 +54,13 @@ export const OfflineCatalogDownload: React.FC<OfflineCatalogDownloadProps> = ({ 
 
   const handleClear = () => {
     if (window.confirm("Are you sure you want to remove the local offline catalog cache from this device?")) {
-      clearOfflineCatalogCache();
-      setMeta(getOfflineCatalogMeta());
-      setFeedback({ type: "success", text: "Offline catalog cache cleared from this device." });
+      try {
+        clearOfflineCatalogCache(scope);
+        setMeta(getOfflineCatalogMeta(scope));
+        setFeedback({ type: "success", text: "Offline catalog cache cleared for this account." });
+      } catch {
+        setFeedback({ type: "error", text: "Could not clear the catalog cache." });
+      }
     }
   };
 
@@ -94,7 +100,7 @@ export const OfflineCatalogDownload: React.FC<OfflineCatalogDownloadProps> = ({ 
             <span>Offline Catalog &amp; Product Pages Download</span>
           </div>
           <div className="hint" style={{ marginTop: "4px", fontSize: "12px", maxWidth: "600px" }}>
-            Naye device ya fresh login par poora product catalog (specifications, stock, photos, AI rules aur details) local storage mein download kar lein, taaki internet band hone par bhi POS aur product lookup 100% offline kaam kare.
+            Is account ke product records device par save karein. Photos alag se download karein; offline billing aur sync status Sync Center mein check karein.
           </div>
         </div>
 
@@ -118,7 +124,7 @@ export const OfflineCatalogDownload: React.FC<OfflineCatalogDownloadProps> = ({ 
             className="btn primary sm"
             style={{ display: "flex", alignItems: "center", gap: "6px" }}
             onClick={handleDownload}
-            disabled={isDownloading || !storeId}
+            disabled={isDownloading || !scope}
           >
             {isDownloading ? (
               <>

@@ -5255,7 +5255,7 @@ export default function App() {
               </div>
             </div>
 
-            <OfflineCatalogDownload storeId={cloudProfile?.store_id || null} />
+            <OfflineCatalogDownload key={`${cloudProfile?.store_id || ""}:${cloudProfile?.id || ""}`} storeId={cloudProfile?.store_id || null} profileId={cloudProfile?.id || null} />
 
             <AiKeyPoolPanel />
 

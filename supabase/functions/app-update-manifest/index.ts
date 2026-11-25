@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
     // NSIS installer is set to createUpdaterArtifacts in tauri.conf.json,
     // which produces a matching .sig alongside the .exe at build time via
     // `npx tauri signer sign` / the TAURI_SIGNING_PRIVATE_KEY* env vars —
-    // see .github/workflows/build-and-release.yml's windows job and
+    // see .github/workflows/android-build.yml's windows job and
     // STEP12-APP-UPDATE-SETUP.md). A live row with no signature can't be
     // verified by the plugin's pubkey check, so it must never be reported
     // as an available update — that would just make every device's
@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
           url: downloadUrl,
         },
         // NSIS/MSI installers built by this project's single Windows
-        // runner target x86_64 only (see .github/workflows/build-and-release.yml's
+        // runner target x86_64 only (see .github/workflows/android-build.yml's
         // windows job) — an ARM64 Windows build isn't part of this app's
         // scope. Tauri simply won't match any platform key it doesn't ask
         // for, so leaving arm64 out here is safe, not a bug.

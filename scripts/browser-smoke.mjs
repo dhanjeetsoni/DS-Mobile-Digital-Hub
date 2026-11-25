@@ -15,11 +15,18 @@ try{
  await page.goto(url,{waitUntil:"domcontentloaded"});
  await page.getByText("Owner Confidential Area",{exact:true}).first().waitFor({timeout:30000});
  await page.getByText("Login (ID / Password)",{exact:true}).click();
- await page.getByText("All Products",{exact:true}).first().waitFor({timeout:30000});
+ await page.getByText("Sales / New Bill",{exact:true}).first().waitFor({timeout:30000});
  await page.getByText("Sales / New Bill",{exact:true}).first().click();
- await page.getByText("All Products",{exact:true}).first().click();
- await page.getByText("Returns & Exchanges",{exact:true}).first().click();
- await page.getByText("All Products",{exact:true}).first().click();
+ await page.getByText("Photo Stock Finder",{exact:true}).first().click();
+ // Fresh isolated owner context, no production account or credentials.
+ const owner=await browser.newPage({viewport:{width:1440,height:900}});
+ owner.on("pageerror",e=>errors.push(e.message));
+ await owner.goto(url,{waitUntil:"domcontentloaded"});
+ await owner.getByText("Owner Confidential Area",{exact:true}).first().click();
+ await owner.getByPlaceholder("Enter Owner Device PIN").fill("1234");
+ await owner.getByRole("button",{name:"Unlock",exact:true}).click();
+ await owner.getByText("All Products",{exact:true}).first().waitFor({timeout:30000});
+ await owner.getByText("Sales / New Bill",{exact:true}).first().click();
  assert.deepEqual(errors,[],"Uncaught browser errors");
- console.log("PASS production UI boot, local-mode entry, inventory/POS/returns navigation");
+ console.log("PASS production UI boot, local-mode entry, local owner/staff entry and inventory/POS navigation");
 }finally{await browser?.close();server.kill();}

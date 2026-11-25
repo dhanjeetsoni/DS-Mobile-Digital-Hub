@@ -72,10 +72,11 @@ Deno.serve(async (req) => {
     const user = await getCaller(req);
     if (!user) return json({ error: "Unauthorized" }, 401);
     const admin = createClient(url, serviceKey);
-    const { data: callerProfile } = await admin.from("profiles").select("store_id,role").eq("id", user.id).maybeSingle();
+    const { data: callerProfile } = await admin.from("profiles").select("store_id,role,access_enabled,access_mode,access_expires_at").eq("id", user.id).maybeSingle();
     if (!callerProfile?.store_id || !["owner", "manager"].includes(callerProfile.role)) {
       return json({ error: "Only the shop owner or a manager can manage staff accounts." }, 403);
     }
+    if (callerProfile.role === "manager" && (!callerProfile.access_enabled || (callerProfile.access_mode !== "no_restriction" && !(Date.parse(callerProfile.access_expires_at || "") > Date.now())))) return json({ error: "Manager access disabled or expired." }, 403);
     const storeId = callerProfile.store_id;
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "");
@@ -146,8 +147,13 @@ Deno.serve(async (req) => {
       if (!target || target.store_id !== storeId || !["staff", "manager"].includes(target.role)) {
         return json({ error: "Account not found in your shop." }, 404);
       }
-      await admin.from("profiles").delete().eq("id", staffId);
-      await admin.auth.admin.deleteUser(staffId).catch(() => {});
+      // Disable access first; never report success when Auth deletion fails.
+      const { error: disableError } = await admin.from("profiles").update({access_enabled:false,force_logout_at:new Date().toISOString()}).eq("id",staffId);
+      if (disableError) return json({error:disableError.message},400);
+      const {error: deleteError} = await admin.auth.admin.deleteUser(staffId);
+      if(deleteError) return json({error:deleteError.message},400);
+      const {error: profileError} = await admin.from("profiles").delete().eq("id",staffId);
+      if(profileError) return json({error:profileError.message},400);
       return json({ ok: true });
     }
 

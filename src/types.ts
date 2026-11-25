@@ -301,6 +301,7 @@ export interface MobileFinanceDetails {
 
 export interface Sale {
   id: string;
+  archivedAt?: string;
   syncOperationId?: string;
   invoiceNo: string;
   date: string;

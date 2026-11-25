@@ -1908,9 +1908,9 @@ export default function App() {
     if (!ownerMode || !saleIds.length) return;
     const idSet = new Set(saleIds);
     const updated: Database = structuredClone(db);
-    updated.sales = updated.sales.filter((s) => !idSet.has(s.id));
+    updated.sales=updated.sales.map(s=>idSet.has(s.id)?{...s,archivedAt:new Date().toISOString()}:s);
     saveState(updated);
-    showToast(`${saleIds.length} purane invoice record${saleIds.length > 1 ? "s" : ""} clear kar diye gaye (PDF export ke baad).`, "green");
+    showToast(`${saleIds.length} invoices archived; financial history retained.`, "green");
   };
 
   // NOTE (theme system): html[data-theme] is owned entirely by the
@@ -2753,7 +2753,34 @@ export default function App() {
     return Date.now() - createdMs <= correctionWindowMs;
   };
 
-  const handleCancelSale = (s: Sale) => {
+  const commitInvoiceChange=async(before:Database,updated:Database,sale:Sale,action:"cancel"|"payment",note:string)=>{
+    if(!cloudProfile?.store_id){saveState(updated);return true;}
+    const base=cloudBaseRef.current;
+    if(!navigator.onLine||!base||base.profileId!==cloudProfile.id||base.storeId!==cloudProfile.store_id||savingCloudRef.current){
+      showToast("Connect to cloud and finish pending sync before correcting an invoice.","amber");return false;
+    }
+    savingCloudRef.current=true;
+    try{
+      const {data,error}=await supabase.rpc("commit_invoice_correction",{p_store_id:base.storeId,p_invoice_no:sale.invoiceNo,p_operation_id:sale.syncOperationId??null,p_action:action,p_note:note,p_state:updated,p_expected_version:base.version,p_payment_method:action==="payment"?sale.payment:null,p_amount_paid:action==="payment"?sale.amountPaid:null,p_due_amount:action==="payment"?sale.dueAmount:null});
+      if(error)throw error;
+      const version=Number(data);
+      if(!Number.isSafeInteger(version))throw new Error("Invalid correction version");
+      if(cloudBaseRef.current?.profileId!==base.profileId||cloudBaseRef.current?.storeId!==base.storeId)return false;
+      const latest=structuredClone(dbRef.current);
+      const merged=mergeStoreState(before,latest,updated);
+      cloudBaseRef.current={...base,state:structuredClone(updated),version};
+      const next=merged.conflicts.length?updated:merged.state;
+      if(merged.conflicts.length)await archiveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:before,local:latest,version:base.version,conflicts:merged.conflicts});
+      dbRef.current=next;setDb(next);setCloudVersion(version);cacheCloudSnapshot(cloudBaseRef.current,next);
+      if(sameState(next,updated))await clearSnapshotRecovery(base.profileId,base.storeId);
+      else await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:updated,local:next,version,conflicts:[]});
+      setCloudStatus(merged.conflicts.length?"sync-error":"online");
+      return true;
+    }catch(error:any){showToast(error?.message||"Correction was not confirmed. Refresh invoice before retrying.","red");return false;}
+    finally{savingCloudRef.current=false;}
+  };
+
+  const handleCancelSale = async (s: Sale) => {
     if (!ownerMode) return;
     if (s.status === "Cancelled") return;
     if (!isSaleWithinCorrectionWindow(s)) {
@@ -2761,8 +2788,9 @@ export default function App() {
       return;
     }
     const reason = window.prompt(`Invoice ${s.invoiceNo} cancel karne ki wajah likho (galat item, galat rate, duplicate, etc.):`);
-    if (reason === null) return; // user cancelled the prompt
-    const updated: Database = structuredClone(db);
+    if (reason === null || !reason.trim()) return;
+    const before:Database=structuredClone(dbRef.current);
+    const updated: Database = structuredClone(before);
     const sale = updated.sales.find((x) => x.id === s.id);
     if (!sale) return;
 
@@ -2771,6 +2799,7 @@ export default function App() {
       const prod = updated.products.find((p) => p.id === item.productId);
       if (prod) {
         prod.stock += item.qty;
+        addStockBatch(updated,prod.id,item.qty,item.purchasePrice,todayStr(),{source:"sale_cancel",ref:sale.invoiceNo});
         (item.selectedImeis || []).forEach((imeiStr: string) => {
           const unit = (prod.units || []).find((u) => u.imei1 === imeiStr);
           if (unit && unit.status === "Sold") unit.status = "In Stock";
@@ -2798,8 +2827,8 @@ export default function App() {
     sale.status = "Cancelled";
     sale.cancelledAt = new Date().toISOString();
     sale.cancelledBy = cloudProfile?.full_name || cloudProfile?.staff_name || "Owner";
-    sale.cancelReason = reason || "(no reason given)";
-    saveState(updated);
+    sale.cancelReason = reason;
+    if(!await commitInvoiceChange(before,updated,sale,"cancel",reason))return;
     showToast(`Invoice ${s.invoiceNo} cancel kar diya — stock wapas add ho gaya.`, "amber");
   };
 
@@ -2843,16 +2872,18 @@ export default function App() {
     setCorrectionForm({ payment: s.payment, amountPaid: s.amountPaid, dueAmount: s.dueAmount, note: "" });
   };
 
-  const handleSaveCorrection = () => {
-    if (!correctionTarget) return;
+  const handleSaveCorrection = async () => {
+    if (!correctionTarget || !ownerMode) return;
     if (!isSaleWithinCorrectionWindow(correctionTarget)) {
       showToast("Correction window khatam ho chuka hai — ye sale ab permanently locked hai.", "red");
       setCorrectionTarget(null);
       return;
     }
-    const updated: Database = structuredClone(db);
+    const before:Database=structuredClone(dbRef.current);
+    const updated: Database = structuredClone(before);
     const sale = updated.sales.find((x) => x.id === correctionTarget.id);
     if (!sale) return;
+    if(sale.status==="Cancelled"||!Number.isFinite(correctionForm.amountPaid)||!Number.isFinite(correctionForm.dueAmount)||correctionForm.amountPaid<0||correctionForm.dueAmount<0||Math.abs(correctionForm.amountPaid+correctionForm.dueAmount+(sale.financeDetails?.loanAmount||0)-sale.total)>0.01){showToast("Paid amount + due amount + finance loan must equal invoice total.","red");return;}
     const dueDelta = round2(correctionForm.dueAmount - sale.dueAmount);
     if (sale.customerId && dueDelta !== 0) {
       const cust = updated.customers.find((c) => c.id === sale.customerId);
@@ -2868,7 +2899,7 @@ export default function App() {
       ...(sale.editHistory || []),
       { at: sale.editedAt, by: sale.editedBy, note: correctionForm.note || "Payment/amount correction" },
     ];
-    saveState(updated);
+    if(!await commitInvoiceChange(before,updated,sale,"payment",correctionForm.note||"Payment/amount correction"))return;
     showToast(`Invoice ${sale.invoiceNo} correct kar diya.`, "green");
     setCorrectionTarget(null);
   };

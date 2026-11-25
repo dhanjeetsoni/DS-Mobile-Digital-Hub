@@ -18,8 +18,11 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
   const [customEndDate, setCustomEndDate] = useState(todayStr());
   const [paymentFilter, setPaymentFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
+  const [archiveFilter,setArchiveFilter]=useState("active");
 
   const filteredSales = db.sales.filter((s) => {
+    if(archiveFilter==="active"&&s.archivedAt)return false;
+    if(archiveFilter==="archived"&&!s.archivedAt)return false;
     // Date filter
     if (dateRange === "TODAY" && s.date !== todayStr()) return false;
     if (dateRange === "THIS_MONTH") {
@@ -48,9 +51,10 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
     return true;
   });
 
-  // Calculate Metrics
-  const totalRevenue = filteredSales.reduce((a, s) => a + s.total, 0);
-  const totalCost = filteredSales.reduce((a, s) => {
+  // Cancelled invoices remain visible but do not count as revenue or COGS.
+  const financialSales=filteredSales.filter(s=>s.status!=="Cancelled");
+  const totalRevenue = financialSales.reduce((a, s) => a + s.total, 0);
+  const totalCost = financialSales.reduce((a, s) => {
     const saleCost = s.items.reduce((sum, item) => sum + (item.cost || (item.purchasePrice * item.qty) || 0), 0);
     return a + saleCost;
   }, 0);
@@ -109,7 +113,7 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
         <div className="card">
           <h3>Customer Udhaar Invoices</h3>
           <div className="big red">
-            {inr(filteredSales.reduce((a, s) => a + (s.dueAmount || 0), 0))}
+            {inr(financialSales.reduce((a, s) => a + (s.dueAmount || 0), 0))}
           </div>
           <div className="foot">Uncollected Udhaar in Range</div>
         </div>
@@ -181,6 +185,7 @@ export const SalesHistoryView: React.FC<SalesHistoryViewProps> = ({
             </select>
           </div>
 
+          <label>Invoices: <select value={archiveFilter} onChange={e=>setArchiveFilter(e.target.value)}><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select></label>
           <div style={{ flex: 1, minWidth: "200px" }}>
             <input
               placeholder="Search invoice #, customer name, phone, item..."

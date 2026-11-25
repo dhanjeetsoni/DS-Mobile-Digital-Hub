@@ -43,6 +43,7 @@ export const ExportClearInvoicesView: React.FC<ExportClearInvoicesViewProps> = (
   const [preset, setPreset] = useState<RangePreset>("last3m");
   const [fromDate, setFromDate] = useState(isoDaysAgo(90));
   const [toDate, setToDate] = useState(isoDaysAgo(0));
+  const [printedSelection,setPrintedSelection]=useState("");
   const [hasPrinted, setHasPrinted] = useState(false);
   const [confirmChecked, setConfirmChecked] = useState(false);
 
@@ -55,50 +56,53 @@ export const ExportClearInvoicesView: React.FC<ExportClearInvoicesViewProps> = (
   const matchingSales = useMemo(() => {
     return db.sales
       .filter((s) => s.date >= effectiveFrom && s.date <= effectiveTo)
-      .filter((s) => !isSaleWithinCorrectionWindow(s))
+      .filter((s) => !s.archivedAt && !isSaleWithinCorrectionWindow(s) && (s.status==="Paid"||s.status==="Cancelled"))
       .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   }, [db.sales, effectiveFrom, effectiveTo, isSaleWithinCorrectionWindow]);
 
-  const totalValue = matchingSales.reduce((a, s) => a + (s.total || 0), 0);
+  const totalValue = matchingSales.reduce((a, s) => a + (s.status==="Cancelled"?0:(s.total||0)), 0);
+  const selectionKey=JSON.stringify(matchingSales.map(s=>[s.id,s.total,s.status,s.editedAt]));
 
   // Changing the range invalidates any earlier print/confirm state — the
   // owner must re-print if they widen/narrow the selection, so the PDF
   // they saved always actually matches what they're about to delete.
   const resetGate = () => {
     setHasPrinted(false);
+    setPrintedSelection("");
     setConfirmChecked(false);
   };
 
   const handlePrint = () => {
     if (!matchingSales.length) return;
     setHasPrinted(true);
+    setPrintedSelection(selectionKey);
     // Let the print-area render with the new content before printing.
     setTimeout(() => window.print(), 50);
   };
 
   const handleClear = () => {
-    if (!hasPrinted || !confirmChecked || !matchingSales.length) return;
+    if (!hasPrinted || printedSelection!==selectionKey || !confirmChecked || !matchingSales.length) return;
     const ok = window.confirm(
-      `${matchingSales.length} invoice record(s) permanently delete karein? Combined PDF pehle se print/save ho chuka hai. Yeh undo nahi ho sakta.`
+      `${matchingSales.length} invoices archive karein? Financial records, warranty aur reports preserved rahenge.`
     );
     if (!ok) return;
     onClear(matchingSales.map((s) => s.id));
-    toast?.(`${matchingSales.length} purane invoice records clear kar diye gaye.`, "green");
+    toast?.(`${matchingSales.length} invoices archived.`, "green");
     resetGate();
   };
 
   return (
     <div className="section">
       <div className="section-head">
-        <h2><Archive size={18} style={{ verticalAlign: "-3px", marginRight: "6px" }} />Export & Clear Old Invoices</h2>
+        <h2><Archive size={18} style={{ verticalAlign: "-3px", marginRight: "6px" }} />Export & Archive Old Invoices</h2>
       </div>
 
       <div className="card" style={{ marginBottom: "16px" }}>
         <p className="hint" style={{ marginTop: 0 }}>
           Purane invoices kabhi apne aap delete nahi hote — yeh sirf Owner ka manual tool hai. Pehle ek combined
-          PDF print/save karo, uske baad hi individual records delete karne ka option milega. Sirf woh invoices
+          PDF print/save karo, uske baad archive karne ka option milega. Financial records delete nahi honge. Sirf paid ya cancelled invoices
           yahan dikhte hain jinki correction window (Settings mein set) khatam ho chuki hai — abhi editable/live
-          sale kabhi delete nahi hota.
+          sale kabhi archive nahi hota.
         </p>
 
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
@@ -144,7 +148,7 @@ export const ExportClearInvoicesView: React.FC<ExportClearInvoicesViewProps> = (
         )}
 
         <div className="stat-row" style={{ display: "flex", gap: "18px", flexWrap: "wrap" }}>
-          <div><b>{matchingSales.length}</b> invoice(s) is range mein, lock ho chuki (deletable)</div>
+          <div><b>{matchingSales.length}</b> invoice(s) is range mein, locked (eligible for archive)</div>
           <div>Total value: <b>{inr(totalValue)}</b></div>
         </div>
       </div>
@@ -183,14 +187,13 @@ export const ExportClearInvoicesView: React.FC<ExportClearInvoicesViewProps> = (
               <button className="btn primary" onClick={handlePrint}>
                 <Printer size={14} /> Combined PDF Print / Save karo ({matchingSales.length} invoices)
               </button>
-              {hasPrinted && <span className="badge ok">✅ Print ho chuka hai is session mein</span>}
+              {hasPrinted && <span className="badge ok">Print dialog opened — confirm file saved</span>}
             </div>
 
             {hasPrinted && (
               <div className="alert amber" style={{ marginBottom: "12px" }}>
                 <AlertTriangle size={14} style={{ verticalAlign: "-2px", marginRight: "6px" }} />
-                Aage badhne se pehle confirm karo ki PDF safely save/print ho gaya hai — delete hone ke baad yeh
-                records wapas nahi aayenge (backup sirf weekly Telegram export mein rahega).
+                Aage badhne se pehle confirm karo ki PDF safely save/print ho gaya hai. Archived records Sales History mein dikh sakte hain; ledger aur reports retained rahenge.
                 <div style={{ marginTop: "8px" }}>
                   <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
                     <input
@@ -206,10 +209,10 @@ export const ExportClearInvoicesView: React.FC<ExportClearInvoicesViewProps> = (
 
             <button
               className="btn sm danger"
-              disabled={!hasPrinted || !confirmChecked}
+              disabled={!hasPrinted || printedSelection!==selectionKey || !confirmChecked}
               onClick={handleClear}
             >
-              <Trash2 size={12} /> Ab In {matchingSales.length} Records Ko Delete Karo
+              <Trash2 size={12} /> Archive {matchingSales.length} Invoices
             </button>
           </div>
         </>

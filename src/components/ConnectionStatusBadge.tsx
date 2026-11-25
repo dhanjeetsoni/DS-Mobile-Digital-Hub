@@ -22,6 +22,7 @@ export type CloudConnectionStatus = "offline" | "connecting" | "online" | "error
 
 interface ConnectionStatusBadgeProps {
   cloudStatus: CloudConnectionStatus;
+  cloudConnected?: boolean;
   pendingSyncCount: number;
   onRetry: () => Promise<{ processed: number; failed: number }>;
   /** 2026-09-08: staff area wants just the dot — no "Syncing (n)" text, no
@@ -31,7 +32,7 @@ interface ConnectionStatusBadgeProps {
   simplified?: boolean;
 }
 
-export function ConnectionStatusBadge({ cloudStatus, pendingSyncCount, onRetry, simplified = false }: ConnectionStatusBadgeProps) {
+export function ConnectionStatusBadge({ cloudStatus, pendingSyncCount, onRetry, simplified = false, cloudConnected = true }: ConnectionStatusBadgeProps) {
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [retrying, setRetrying] = useState(false);
 
@@ -52,7 +53,9 @@ export function ConnectionStatusBadge({ cloudStatus, pendingSyncCount, onRetry, 
   let label = "Online (Synced)";
   let hint = "Sab data live/synced hai.";
 
-  if (!isOnline) {
+  if (!cloudConnected) {
+    dotClass = "offline"; label = "Local only"; hint = "Cloud account connected nahi hai. Data is device par local hai.";
+  } else if (!isOnline) {
     dotClass = "offline";
     label = "Offline";
     hint = "Internet nahi hai — data is device par safe hai, net aate hi khud-ba-khud sync ho jayega.";
@@ -69,7 +72,8 @@ export function ConnectionStatusBadge({ cloudStatus, pendingSyncCount, onRetry, 
   }
 
   const hasRealIssue = !isOnline || hasSyncIssue || pendingSyncCount > 0;
-  const showRetry = !simplified && hasRealIssue;
+  if(cloudConnected && isOnline && cloudStatus==="offline" && pendingSyncCount===0){dotClass="offline";label="Not synced";hint="Cloud sync abhi confirm nahi hua hai." ;}
+  const showRetry = cloudConnected && !simplified && (hasRealIssue||cloudStatus==="offline");
 
   const handleRetry = async () => {
     if (retrying) return;

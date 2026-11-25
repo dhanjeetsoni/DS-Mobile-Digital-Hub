@@ -292,6 +292,7 @@ export default function App() {
     return page || "products";
   })();
   const [currentPage, setCurrentPage] = useState(initialRoutePage);
+  useEffect(()=>{const page=document.getElementById("page");if(page){page.scrollTop=0;page.scrollLeft=0;}},[currentPage]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [toasts, setToasts] = useState<{ id: string; msg: string; kind?: string }[]>([]);
   const [cloudUser, setCloudUser] = useState<any>(null);
@@ -5837,6 +5838,7 @@ export default function App() {
                 chalta rehta hai, chahe koi button na dabaye. */}
             <ConnectionStatusBadge
               cloudStatus={cloudStatus as any}
+              cloudConnected={Boolean(cloudProfile?.store_id&&cloudUser)}
               pendingSyncCount={pendingSyncCount}
               simplified={cloudProfile?.role === "staff"}
               onRetry={async () => {

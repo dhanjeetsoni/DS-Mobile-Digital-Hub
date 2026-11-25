@@ -163,6 +163,11 @@ try{
    await mobile.locator('[data-command-key="'+key+'"]').click();
    await mobile.locator('#page[data-current-page="'+key+'"]').waitFor();
    await mobile.waitForFunction(()=>!document.querySelector("#page")?.textContent?.includes("Loading view..."));
+   await mobile.waitForFunction(()=>document.querySelector("#page").scrollLeft===0&&document.querySelector("#page").scrollTop===0);
+   const pageBounds=await mobile.locator("#page").boundingBox();
+   const sections=await mobile.locator("#page .section").evaluateAll(els=>els.filter(e=>e.getBoundingClientRect().width>0).map(e=>({left:e.getBoundingClientRect().left,right:e.getBoundingClientRect().right})));
+   assert(sections.every(r=>r.left>=pageBounds.x-2&&r.right<=pageBounds.x+pageBounds.width+2),"Clipped mobile section: "+key);
+   assert(await mobile.getByText("Local only",{exact:true}).count()>0,"Local device must not claim cloud sync");
    const geometry=await mobile.evaluate(()=>({width:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,page:document.querySelector("#page").getBoundingClientRect().height}));
    assert(geometry.scroll<=geometry.width+1&&geometry.page>150,"Mobile layout issue "+key+" "+JSON.stringify(geometry));
    await mobile.screenshot({path:"visual-review/android-"+label+".png",animations:"disabled"});

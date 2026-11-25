@@ -100,3 +100,19 @@ html[data-retail-motion=cinematic] #page>.section,html[data-retail-motion=cinema
 @media(prefers-reduced-motion:reduce){.retail-command-dialog,.retail-quick-rail button,#page>.section,#page>div>.section,.gate-orb,.gate-screen::before,.gate-option,.gate-card,.gate-brand{animation:none!important;transition:none!important;}}
 html[data-retail-motion=quiet] .retail-command-dialog,html[data-retail-motion=quiet] .gate-orb,html[data-retail-motion=quiet] .gate-screen::before,html[data-retail-motion=quiet] .gate-card,html[data-retail-motion=quiet] .gate-brand,html[data-retail-motion=quiet] .gate-option{animation:none!important;transition:none!important;}
 }
+
+@media screen and (max-width:900px){
+ #app #main,#app #page,#app #page>div,#app #page .section,#app #page .grid>*,#app #page .retail-hero{min-width:0;max-width:100%;box-sizing:border-box;}
+ #app #page{overflow-x:hidden;}
+ #app #page[data-current-page="sell"] .grid.cols-2{grid-template-columns:minmax(0,1fr);}
+ #app #page[data-current-page="sell"] .section{padding:12px;}
+ #app #page[data-current-page="sell"] .section-head{flex-wrap:wrap;}
+ #app #page[data-current-page="sell"] .section-head>*{max-width:100%;}
+ #app #page[data-current-page="sell"] input:not([type=checkbox]):not([type=radio]):not([type=range]),#app #page[data-current-page="sell"] select{min-width:0;max-width:100%;box-sizing:border-box;}
+ #app #page[data-current-page="sell"] .retail-hero{min-height:145px;padding:12px;}
+ #app .retail-command-bar{grid-template-columns:minmax(0,1fr) 44px;padding:6px 10px;}
+ #app .retail-page-title{display:none;}
+ #app .retail-quick-rail{padding:6px 10px;}
+ #app .retail-quick-rail button{min-height:56px;}
+ #app .retail-hero h2{font-size:22px;}
+}

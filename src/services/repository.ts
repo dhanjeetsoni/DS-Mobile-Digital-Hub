@@ -36,6 +36,13 @@ export type SyncOperation =
   | "snapshot";
 
 
+export async function resolveTransactionRefs(storeId:string,sale:{id?:string|null;invoiceNo?:string|null;syncOperationId?:string|null;customerId?:string|null},productIds:string[]) {
+  const {data,error}=await supabase.rpc("resolve_transaction_refs",{p_store_id:storeId,p_invoice_no:sale.invoiceNo??null,p_sale_id:sale.id??null,p_sale_operation_id:sale.syncOperationId??null,p_product_ids:productIds,p_customer_id:sale.customerId??null});
+  if(error)throw error;
+  if(!data?.saleId||!data?.productIds)throw new Error("SALE_NOT_SYNCED");
+  return data as {saleId:string;productIds:Record<string,string>;customerId:string|null};
+}
+
 export async function loadCloudState() {
   const profile = await getCurrentProfile();
   if (!profile?.store_id) return null;
@@ -677,18 +684,19 @@ async function processOperation(row: any, storeId: string) {
 
   if (type === "return") {
     const r = payload.returnRecord || payload;
+    const refs = await resolveTransactionRefs(storeId,{id:r.saleId,invoiceNo:r.invoiceNo,syncOperationId:r.syncOperationId,customerId:r.customerId},(r.items||[]).map((i:any)=>i.productId));
     const { data: returnNo, error } = await supabase.rpc("record_return", {
       p_store_id: storeId,
-      p_sale_id: isUuid(r.saleId) ? r.saleId : null,
+      p_sale_id: refs.saleId,
       p_return_no: r.returnNo || null,
-      p_customer_id: isUuid(r.customerId) ? r.customerId : null,
+      p_customer_id: refs.customerId,
       p_return_type: r.type || null,
       p_reason: r.reason || null,
       p_refund_method: r.refundMethod || null,
       p_notes: r.notes || null,
       p_idempotency_key: row.operation_id,
       p_items: (r.items || []).map((item: any) => ({
-        product_id: isUuid(item.productId) ? item.productId : null,
+        product_id: refs.productIds[item.productId],
         quantity: item.qty,
         unit_price: item.price,
         purchase_price: item.purchasePrice,
@@ -701,11 +709,12 @@ async function processOperation(row: any, storeId: string) {
 
   if (type === "exchange") {
     const ex = payload.exchangeRecord || payload;
+    const refs = await resolveTransactionRefs(storeId,{id:ex.saleId,invoiceNo:ex.invoiceNo,syncOperationId:ex.syncOperationId,customerId:ex.customerId},[...(ex.returnedItems||[]),...(ex.replacementItems||[])].map((i:any)=>i.productId));
     const { data: exchangeId, error } = await supabase.rpc("record_exchange", {
       p_store_id: storeId,
-      p_sale_id: isUuid(ex.saleId) ? ex.saleId : null,
+      p_sale_id: refs.saleId,
       p_exchange_no: ex.exchangeNo || null,
-      p_customer_id: isUuid(ex.customerId) ? ex.customerId : null,
+      p_customer_id: refs.customerId,
       p_returned_value: Number(ex.returnedValue || 0),
       p_replacement_value: Number(ex.replacementValue || 0),
       p_difference_amount: Number(ex.differenceAmount || 0),
@@ -713,13 +722,13 @@ async function processOperation(row: any, storeId: string) {
       p_reason: ex.reason || null,
       p_idempotency_key: row.operation_id,
       p_returned_items: (ex.returnedItems || []).map((item: any) => ({
-        product_id: isUuid(item.productId) ? item.productId : null,
+        product_id: refs.productIds[item.productId],
         quantity: item.qty,
         unit_price: item.price,
         purchase_price: item.purchasePrice,
       })),
       p_replacement_items: (ex.replacementItems || []).map((item: any) => ({
-        product_id: isUuid(item.productId) ? item.productId : null,
+        product_id: refs.productIds[item.productId],
         quantity: item.qty,
         unit_price: item.price,
         purchase_price: item.purchasePrice,
@@ -746,11 +755,12 @@ async function processOperation(row: any, storeId: string) {
       return { serverId: id };
     }
     const c = payload.claim || {};
+    const refs = await resolveTransactionRefs(storeId,{id:c.saleId,invoiceNo:c.invoiceNo,syncOperationId:c.syncOperationId,customerId:c.customerId},[c.productId]);
     const { data: id, error } = await supabase.rpc("record_warranty_claim", {
       p_store_id: storeId,
-      p_sale_id: isUuid(c.saleId) ? c.saleId : null,
-      p_product_id: isUuid(c.productId) ? c.productId : null,
-      p_customer_id: isUuid(c.customerId) ? c.customerId : null,
+      p_sale_id: refs.saleId,
+      p_product_id: refs.productIds[c.productId],
+      p_customer_id: refs.customerId,
       p_claim_no: c.claimNo || null,
       p_issue_description: c.issueDescription || null,
       p_idempotency_key: row.operation_id,

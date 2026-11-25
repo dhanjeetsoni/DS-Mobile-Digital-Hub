@@ -4,7 +4,7 @@ import { Database, Sale, ReturnRecord, ExchangeRecord, ReturnItem, WarrantyClaim
 import { inr } from "../utils/indianCurrency";
 import { todayStr, nowTimeStr, uid, addStockBatch, consumeFIFO } from "../utils/fifoEngine";
 import { supabase, isCloudConfigured } from "../services/supabaseClient";
-import { queueOfflineOperation } from "../services/repository";
+import { queueOfflineOperation, resolveTransactionRefs } from "../services/repository";
 import { requestReturnApproval, listReturnApprovalRequests, approveReturn, ReturnApprovalRequest } from "../services/phase6";
 
 interface ReturnsExchangesViewProps {
@@ -33,7 +33,7 @@ interface ReturnsExchangesViewProps {
 // offline queue forever. Only network/availability errors get queued for
 // the background worker. Same rule as StockAdjustView.
 function isBusinessRejection(message: string): boolean {
-  return /invalid quantity|not authorized|unknown product|insufficient inventory/i.test(message);
+  return /invalid quantity|not authorized|unknown product|insufficient inventory|over.return|invalid sale|staff return requires|invalid warranty/i.test(message);
 }
 
 // Local ids (sale.id / customerId) are only real cloud UUIDs once that
@@ -292,18 +292,19 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
           return;
         }
         try {
+          const refs = await resolveTransactionRefs(storeId,foundSale,returnItems.map(it=>it.productId));
           await requestReturnApproval({
             storeId,
-            saleId: isSaleUuid(foundSale.id) ? foundSale.id : null,
+            saleId: refs.saleId,
             returnNo,
-            customerId: isSaleUuid(foundSale.customerId) ? foundSale.customerId : null,
+            customerId: refs.customerId,
             returnType: returnItems.length === foundSale.items.length ? "full" : "partial",
             reason: returnReason,
             refundMethod,
             notes: returnNotes,
             idempotencyKey,
             items: returnItems.map((it) => ({
-              product_id: isSaleUuid(it.productId) ? it.productId : null,
+              product_id: refs.productIds[it.productId],
               quantity: it.qty,
               unit_price: it.price,
               purchase_price: it.purchasePrice,
@@ -325,18 +326,19 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
       // ledger below always applies regardless, and stays the offline cache.
       if (isCloudConfigured && storeId) {
         try {
+          const refs = await resolveTransactionRefs(storeId,foundSale,returnItems.map(it=>it.productId));
           const { error } = await supabase.rpc("record_return", {
             p_store_id: storeId,
-            p_sale_id: isSaleUuid(foundSale.id) ? foundSale.id : null,
+            p_sale_id: refs.saleId,
             p_return_no: returnNo,
-            p_customer_id: isSaleUuid(foundSale.customerId) ? foundSale.customerId : null,
+            p_customer_id: refs.customerId,
             p_return_type: returnItems.length === foundSale.items.length ? "full" : "partial",
             p_reason: returnReason,
             p_refund_method: refundMethod,
             p_notes: returnNotes,
             p_idempotency_key: idempotencyKey,
             p_items: returnItems.map((it) => ({
-              product_id: isSaleUuid(it.productId) ? it.productId : null,
+              product_id: refs.productIds[it.productId],
               quantity: it.qty,
               unit_price: it.price,
               purchase_price: it.purchasePrice,
@@ -355,13 +357,14 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
             // every single return. The shop's own local return must never
             // depend on that cloud table being in sync — only warn, then
             // keep going into the local save below.
-            toast(`Saved locally. Cloud sync skipped: ${msg || "rejected by server"}`, "amber");
+            toast(msg || "Transaction rejected by server.", "red");
+            return;
           } else {
             try {
               await queueOfflineOperation(
                 "return",
                 "returns",
-                { returnRecord: buildReturnPayload(returnNo, returnItems, totalRefund) },
+                { returnRecord: {...buildReturnPayload(returnNo, returnItems, totalRefund),syncOperationId:foundSale.syncOperationId} },
                 idempotencyKey
               );
             } catch {
@@ -498,11 +501,12 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
       // ledger below always applies regardless.
       if (isCloudConfigured && storeId) {
         try {
+          const refs = await resolveTransactionRefs(storeId,foundSale,[...returnedItemsList,...replacementItemsList].map(it=>it.productId));
           const { error } = await supabase.rpc("record_exchange", {
             p_store_id: storeId,
-            p_sale_id: isSaleUuid(foundSale.id) ? foundSale.id : null,
+            p_sale_id: refs.saleId,
             p_exchange_no: exchangeNo,
-            p_customer_id: isSaleUuid(foundSale.customerId) ? foundSale.customerId : null,
+            p_customer_id: refs.customerId,
             p_returned_value: returnedVal,
             p_replacement_value: replacementVal,
             p_difference_amount: diff,
@@ -510,13 +514,13 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
             p_reason: exchangeReason,
             p_idempotency_key: idempotencyKey,
             p_returned_items: returnedItemsList.map((it) => ({
-              product_id: isSaleUuid(it.productId) ? it.productId : null,
+              product_id: refs.productIds[it.productId],
               quantity: it.qty,
               unit_price: it.price,
               purchase_price: it.purchasePrice,
             })),
             p_replacement_items: replacementItemsList.map((it) => ({
-              product_id: isSaleUuid(it.productId) ? it.productId : null,
+              product_id: refs.productIds[it.productId],
               quantity: it.qty,
               unit_price: it.price,
               purchase_price: it.purchasePrice,
@@ -529,7 +533,8 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
             // Same fix as returns: cloud rejection (e.g. products table not
             // yet synced) must never block the local exchange. Warn and
             // continue into the local save below.
-            toast(`Saved locally. Cloud sync skipped: ${msg || "rejected by server"}`, "amber");
+            toast(msg || "Transaction rejected by server.", "red");
+            return;
           } else {
             try {
               await queueOfflineOperation(
@@ -537,7 +542,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
                 "exchanges",
                 {
                   exchangeRecord: {
-                    exchangeNo, saleId: foundSale.id, customerId: foundSale.customerId,
+                    exchangeNo, saleId: foundSale.id, invoiceNo:foundSale.invoiceNo, syncOperationId:foundSale.syncOperationId, customerId: foundSale.customerId,
                     returnedItems: returnedItemsList, replacementItems: replacementItemsList,
                     returnedValue: returnedVal, replacementValue: replacementVal, differenceAmount: diff,
                     settlementMethod: exchangePaymentMethod, reason: exchangeReason,
@@ -631,11 +636,12 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
 
       if (isCloudConfigured && storeId) {
         try {
+          const refs = await resolveTransactionRefs(storeId,foundSale,[item.productId]);
           const { error } = await supabase.rpc("record_warranty_claim", {
             p_store_id: storeId,
-            p_sale_id: isSaleUuid(foundSale.id) ? foundSale.id : null,
-            p_product_id: isSaleUuid(item.productId) ? item.productId : null,
-            p_customer_id: isSaleUuid(foundSale.customerId) ? foundSale.customerId : null,
+            p_sale_id: refs.saleId,
+            p_product_id: refs.productIds[item.productId],
+            p_customer_id: refs.customerId,
             p_claim_no: claimNo,
             p_issue_description: warrantyIssue,
             p_idempotency_key: idempotencyKey,
@@ -646,7 +652,8 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
           if (isBusinessRejection(msg)) {
             // Same fix as returns/exchanges: cloud rejection must never
             // block the local claim from being logged.
-            toast(`Saved locally. Cloud sync skipped: ${msg || "rejected by server"}`, "amber");
+            toast(msg || "Transaction rejected by server.", "red");
+            return;
           } else {
             try {
               await queueOfflineOperation(
@@ -655,6 +662,8 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
                 {
                   claim: {
                     saleId: foundSale.id,
+                    invoiceNo:foundSale.invoiceNo,
+                    syncOperationId:foundSale.syncOperationId,
                     productId: item.productId,
                     customerId: foundSale.customerId,
                     claimNo,

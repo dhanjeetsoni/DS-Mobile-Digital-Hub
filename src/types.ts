@@ -299,6 +299,7 @@ export interface MobileFinanceDetails {
 
 export interface Sale {
   id: string;
+  syncOperationId?: string;
   invoiceNo: string;
   date: string;
   time: string;

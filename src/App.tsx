@@ -2385,6 +2385,7 @@ export default function App() {
 
     const saleRecord: Sale = {
       id: uid("s"),
+      syncOperationId: idempotencyKey,
       invoiceNo,
       date: todayStr(),
       time: nowTimeStr(),

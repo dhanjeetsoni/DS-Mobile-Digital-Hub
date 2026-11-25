@@ -5,11 +5,24 @@ import {readFileSync} from "node:fs";
 const port=4179;
 const server=spawn(process.execPath,["node_modules/vite/bin/vite.js","preview","--host","127.0.0.1","--port",String(port),"--strictPort"],{stdio:"inherit",env:process.env});
 let browser;
+let apiServer;
 try{
  const url="http://127.0.0.1:"+port;
  let ready=false;
  for(let i=0;i<60;i++){try{const r=await fetch(url);if(r.ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,500));}
  assert(ready,"Production preview did not start");
+ // Production Express AI API must not promote anonymous callers when an
+ // environment Gemini key exists. This uses only dummy credentials.
+ const apiPort=4180;
+ apiServer=spawn(process.execPath,["dist/server.mjs"],{stdio:"inherit",env:{...process.env,NODE_ENV:"production",HOST:"127.0.0.1",PORT:String(apiPort),SUPABASE_URL:"",SUPABASE_ANON_KEY:"",SUPABASE_PUBLISHABLE_KEY:"",SUPABASE_SERVICE_ROLE_KEY:"",GEMINI_API_KEY:"ci-placeholder-not-a-real-key",DSMDH_LOCAL_AI:"false"}});
+ let apiReady=false;
+ for(let i=0;i<40;i++){try{if((await fetch("http://127.0.0.1:"+apiPort+"/api/health")).ok){apiReady=true;break;}}catch{}await new Promise(r=>setTimeout(r,250));}
+ assert(apiReady,"Production API failed to boot");
+ for(const route of ["ocr-phone","ai-pos-copilot","business-insights","ai-search-match"]){
+  const res=await fetch("http://127.0.0.1:"+apiPort+"/api/"+route,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
+  assert.equal(res.status,401,"Anonymous AI API request accepted: "+route);
+ }
+ console.log("PASS production API health and four anonymous AI endpoint denials");
  browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  const errors=[];page.on("pageerror",e=>errors.push(e.message));
@@ -91,4 +104,4 @@ try{
  console.log("PASS responsive mobile drawer, module search, navigation and viewport");
  assert.deepEqual(errors,[],"Uncaught browser errors");
  console.log("PASS production UI boot, local-mode entry, local owner/staff entry and inventory/POS navigation");
-}finally{await browser?.close();server.kill();}
+}finally{await browser?.close();apiServer?.kill();server.kill();}

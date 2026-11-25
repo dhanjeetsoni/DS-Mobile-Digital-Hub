@@ -30,10 +30,13 @@ const checks = [
   ["Staff-safe state write RPC is used", /save_store_state_scoped/.test(fs.readFileSync(path.join(root,"src/services/repository.ts"),"utf8"))],
   ["Telegram connect Edge Function exists", fs.existsSync(path.join(root,"supabase/functions/telegram-connect/index.ts"))],
   ["Staff cloud snapshot is not skipped", !/cloudProfile\.role === ["']staff["']/.test(fs.readFileSync(path.join(root,"src/App.tsx"),"utf8").match(/if \(!cloudReady[\s\S]{0,120}/)?.[0] || "")],
-  ["OCR endpoint requires Supabase auth", /requireSupabaseUser\(req, res\)/.test(fs.readFileSync(path.join(root,"server.ts"),"utf8"))],
+  ["OCR endpoint requires Supabase auth", /requireSupabaseUser\(req,\s*res\)/.test(fs.readFileSync(path.join(root,"server.ts"),"utf8"))],
   ["Rate limiter evicts expired entries", /rateMap\.delete\(ip\)/.test(fs.readFileSync(path.join(root,"server.ts"),"utf8"))],
   ["IndexedDB connections close after transactions", /req\.result\.close\(\)/.test(fs.readFileSync(path.join(root,"src/services/localSqlite.ts"),"utf8"))],
   ["Supabase client fails closed without env", (() => { const sb = fs.readFileSync(path.join(root,"src/services/supabaseClient.ts"),"utf8"); return /isCloudConfigured/.test(sb) && !/\|\|\s*["']https:\/\//.test(sb); })()],
+  ["All registered tool routes are implemented", (() => { const nav=fs.readFileSync(path.join(root,"src/components/Sidebar.tsx"),"utf8"); const app=fs.readFileSync(path.join(root,"src/App.tsx"),"utf8"); const keys=[...nav.matchAll(/\{\s*key:\s*"([^"]+)",\s*label:\s*"[^"]+"/g)].map(m=>m[1]);return keys.length>=52&&new Set(keys).size===keys.length&&keys.every(k=>app.includes('case "'+k+'":')); })()],
+  ["AI server checks current account access", (()=>{const server=fs.readFileSync(path.join(root,"server.ts"),"utf8");return server.includes('client.rpc("current_account_allowed")')&&server.includes('process.env.DSMDH_LOCAL_AI==="true"')&&!server.includes("storeIdByUserCache");})()],
+  ["Cloud backup uses verified checkpoint RPC", /export_shop_checkpoint/.test(fs.readFileSync(path.join(root,"src/services/repository.ts"),"utf8"))],
   ["FIFO sale preparation is caught", /FIFO sale preparation failed/.test(fs.readFileSync(path.join(root,"src/App.tsx"),"utf8"))],
 ];
 let failed=0;

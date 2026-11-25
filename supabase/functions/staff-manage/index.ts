@@ -31,15 +31,11 @@ const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SU
 const STAFF_EMAIL_DOMAIN = "staff.dsmdh.internal";
 const loginIdToEmail = (loginId: string) => `${loginId.trim().toLowerCase()}@${STAFF_EMAIL_DOMAIN}`;
 
-// 2026-09-05: tightened to letters+digits only — no dot/underscore/hyphen/
-// any other symbol, in either the Login ID or the Password. The built-in
-// generator (generateStaffLoginId/generateStaffPassword) already only ever
-// produces plain alphanumeric strings; this just makes the server reject
-// anything else too, including a hand-typed override.
+// Accept the built-in STAFF-XXXX generator and legacy alphanumeric IDs.
 function validateLoginId(id: string) {
   const v = String(id || "").trim();
-  if (!/^[a-zA-Z0-9]{3,24}$/.test(v)) {
-    throw new Error("Login ID sirf letters aur numbers ka ho sakta hai (3-24 characters), koi special character nahi.");
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,22}[a-zA-Z0-9]$/.test(v)) {
+    throw new Error("Login ID mein letters, numbers aur beech mein hyphen allowed hain (3-24 characters).");
   }
   return v;
 }

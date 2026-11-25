@@ -236,18 +236,18 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
 const storeIdByUserCache = new Map<string, { storeId: string | null; at: number }>();
 const STORE_ID_CACHE_MS = 60_000;
 
-async function requireUserAndStore(req: Request): Promise<{ userId: string; storeId: string | null } | null> {
-  const auth = req.headers.get("authorization") || "";
-  const token = auth.replace(/^Bearer\s+/i, "").trim();
-  if (!token || !SUPABASE_URL || !SERVICE_ROLE_KEY || !supabaseAdmin) return null;
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data.user) return null;
-  const cached = storeIdByUserCache.get(data.user.id);
-  if (cached && Date.now() - cached.at < STORE_ID_CACHE_MS) return { userId: data.user.id, storeId: cached.storeId };
-  const { data: profile } = await supabaseAdmin.from("profiles").select("store_id").eq("id", data.user.id).maybeSingle();
-  const storeId = profile?.store_id || null;
-  storeIdByUserCache.set(data.user.id, { storeId, at: Date.now() });
-  return { userId: data.user.id, storeId };
+async function requireUserAndStore(req: Request): Promise<{userId:string;storeId:string|null}|null>{
+  const token=(req.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim();
+  const clientKey=Deno.env.get("SUPABASE_ANON_KEY")||Deno.env.get("SUPABASE_PUBLISHABLE_KEY")||"";
+  if(!token||!SUPABASE_URL||!supabaseAdmin||!clientKey)return null;
+  const {data,error}=await supabaseAdmin.auth.getUser(token);
+  if(error||!data.user)return null;
+  const caller=createClient(SUPABASE_URL,clientKey,{global:{headers:{Authorization:"Bearer "+token}},auth:{persistSession:false}});
+  const {data:allowed,error:accessError}=await caller.rpc("current_account_allowed");
+  if(accessError||allowed!==true)return null;
+  const {data:profile,error:profileError}=await supabaseAdmin.from("profiles").select("store_id").eq("id",data.user.id).maybeSingle();
+  if(profileError||!profile?.store_id)return null;
+  return {userId:data.user.id,storeId:profile.store_id};
 }
 
 function decodeImage(image: unknown): { mimeType: string; base64Data: string } | null {

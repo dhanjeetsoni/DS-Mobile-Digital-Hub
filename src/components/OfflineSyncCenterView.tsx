@@ -16,12 +16,14 @@ import {
 } from "lucide-react";
 import { Database } from "../types";
 import { inr } from "../utils/indianCurrency";
+import { supabase } from "../services/supabaseClient";
 
 interface OfflineSyncCenterViewProps {
   db: Database;
   isOnline: boolean;
   cloudStatus: string;
-  onSyncNow?: () => void;
+  onSyncNow?: () => Promise<{processed:number;failed:number}>;
+  canManageRecovery?: boolean;
   onUpdateDb: (updater: (prev: Database) => Database) => void;
 }
 
@@ -30,12 +32,19 @@ export const OfflineSyncCenterView: React.FC<OfflineSyncCenterViewProps> = ({
   isOnline,
   cloudStatus,
   onSyncNow,
+  canManageRecovery=false,
   onUpdateDb,
 }) => {
   const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState<string>(new Date().toLocaleTimeString());
+  const [lastSyncTime, setLastSyncTime] = useState<string>("Not checked yet");
   const [syncMessage, setSyncMessage] = useState<string>("");
   const [dbSizeKb, setDbSizeKb] = useState<number>(0);
+  const [recovery,setRecovery]=useState<any>(null);
+  const [recoveryError,setRecoveryError]=useState("");
+  const [recoveryBusy,setRecoveryBusy]=useState(false);
+  const refreshRecovery=async()=>{if(!canManageRecovery||!isOnline)return;const {data,error}=await supabase.rpc("get_shop_recovery_status");if(error){setRecoveryError(error.message);return;}setRecovery(data);setRecoveryError("");};
+  useEffect(()=>{void refreshRecovery();},[canManageRecovery,isOnline]);
+  const checkpoint=async()=>{setRecoveryBusy(true);try{const {data,error}=await supabase.rpc("create_shop_checkpoint");if(error||data?.ok!==true)throw new Error(error?.message||"Backup verification failed");await refreshRecovery();}catch(e){setRecoveryError(e instanceof Error?e.message:"Checkpoint failed");}finally{setRecoveryBusy(false);}};
 
   // Compute local database size
   useEffect(() => {
@@ -52,16 +61,13 @@ export const OfflineSyncCenterView: React.FC<OfflineSyncCenterViewProps> = ({
     setIsSyncing(true);
     setSyncMessage("Syncing local records with Cloud...");
     try {
-      if (onSyncNow) {
-        await onSyncNow();
-      } else {
-        // Fallback simulate local persistence check
-        await new Promise((r) => setTimeout(r, 800));
-      }
+      if(!isOnline||!onSyncNow)throw new Error("Cloud sync is not available");
+      const result=await onSyncNow();
       setLastSyncTime(new Date().toLocaleTimeString());
-      setSyncMessage("All local records, bills, and stock synced successfully! ✓");
+      setSyncMessage(result.failed?result.processed+" operations uploaded; "+result.failed+" need retry/review.":result.processed+" queued operations processed. Snapshot and conflict status are shown separately.");
+      await refreshRecovery();
     } catch (err) {
-      setSyncMessage("Sync failed or offline. Retrying automatically when online.");
+      setSyncMessage("Sync unavailable or failed. Pending data has not been confirmed uploaded.");
     } finally {
       setIsSyncing(false);
     }
@@ -69,13 +75,15 @@ export const OfflineSyncCenterView: React.FC<OfflineSyncCenterViewProps> = ({
 
   // Export full local snapshot backup
   const handleExportBackup = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(db, null, 2));
+    if(!window.confirm("This local backup contains private business data. Keep it securely; it is not a complete server backup. Continue?"))return;
+    const dataStr = URL.createObjectURL(new Blob([JSON.stringify(db,null,2)],{type:"application/json"}));
     const downloadAnchor = document.createElement("a");
     downloadAnchor.setAttribute("href", dataStr);
     downloadAnchor.setAttribute("download", `DS_Mobile_Hub_Backup_${new Date().toISOString().split("T")[0]}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+    setTimeout(()=>URL.revokeObjectURL(dataStr),1000);
   };
 
   return (
@@ -101,12 +109,12 @@ export const OfflineSyncCenterView: React.FC<OfflineSyncCenterViewProps> = ({
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             {isOnline ? <Wifi size={24} color="#10b981" /> : <WifiOff size={24} color="#f59e0b" />}
             <h2 style={{ fontSize: "18px", fontWeight: 700, margin: 0, color: "var(--text, #f8fafc)" }}>
-              100% Offline SQLite & Cloud Auto-Sync Engine
+              Offline & Cloud Sync Center
             </h2>
           </div>
           <p style={{ fontSize: "12px", color: "var(--text-muted, #94a3b8)", margin: "4px 0 0 0" }}>
             {isOnline
-              ? "Online: Sabhi counter sales aur inventory instant cloud aur local IndexedDB dono par live hain."
+              ? "Network available. Check cloud status and pending operations below."
               : "Offline Mode Active: Internet band hone par bhi billing aur Xerox full speed me chalega."}
           </p>
         </div>
@@ -226,7 +234,7 @@ export const OfflineSyncCenterView: React.FC<OfflineSyncCenterViewProps> = ({
             {dbSizeKb} KB
           </div>
           <div style={{ fontSize: "10px", color: "var(--text-muted, #64748b)", marginTop: "2px" }}>
-            Encrypted in browser IndexedDB
+            Local snapshot size (not encrypted by this export)
           </div>
         </div>
 
@@ -245,10 +253,28 @@ export const OfflineSyncCenterView: React.FC<OfflineSyncCenterViewProps> = ({
             {lastSyncTime}
           </div>
           <div style={{ fontSize: "10px", color: "var(--text-muted, #64748b)", marginTop: "2px" }}>
-            Auto-syncs every minute
+            Last manual queue check
           </div>
         </div>
       </div>
+
+      {canManageRecovery && <div style={{border:"1px solid var(--border,#64748b)",borderRadius:12,padding:16,marginBottom:16}}>
+        <h3 style={{marginTop:0}}>Server backup & integrity</h3>
+        <p>Private database checkpoint, not an off-site or photo-file backup. Restore/reset requires operator maintenance.</p>
+        {recoveryError&&<p role="alert">{recoveryError}</p>}
+        {recovery&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:8,marginBottom:12}}>
+          <div>Last checkpoint: {recovery.backup?new Date(recovery.backup.createdAt).toLocaleString():"None"}</div>
+          <div>Checksum: {recovery.backup?.verified?"Verified":"Not verified"}</div>
+          <div>FIFO mismatches: {recovery.fifoMismatches}</div>
+          <div>Unknown sale cost lines: {recovery.unknownCostLines}</div>
+          <div>Pending cloud operations: {recovery.pendingOperations}</div>
+          <div>Abandoned operations: {recovery.abandonedOperations}</div>
+          <div>Telegram pending/failed: {recovery.pendingMessages}</div>
+        </div>}
+        <button className="btn primary" disabled={!isOnline||recoveryBusy} onClick={checkpoint}>{recoveryBusy?"Creating checkpoint...":"Create verified server checkpoint"}</button>{" "}
+        <button className="btn" disabled={!isOnline||recoveryBusy} onClick={()=>void refreshRecovery()}>Refresh integrity status</button>
+        <p style={{fontSize:12}}>A checkpoint created in the last 30 minutes is reused. No data is deleted.</p>
+      </div>}
 
       {/* Persistence Architecture Highlights */}
       <div
@@ -275,7 +301,7 @@ export const OfflineSyncCenterView: React.FC<OfflineSyncCenterViewProps> = ({
               1. Zero-Lag Local Engine
             </div>
             <div style={{ fontSize: "11px", color: "var(--text-muted, #94a3b8)", lineHeight: 1.4 }}>
-              Har bill create hone par 0.01 second me device ke local storage / IndexedDB me save hota hai.
+              Device par local snapshot aur pending operation recovery maintained hai.
             </div>
           </div>
 
@@ -307,7 +333,7 @@ export const OfflineSyncCenterView: React.FC<OfflineSyncCenterViewProps> = ({
               3. Offline Queue & Retry
             </div>
             <div style={{ fontSize: "11px", color: "var(--text-muted, #94a3b8)", lineHeight: 1.4 }}>
-              Internet break hone par saare actions queue me safe rehte hain aur reconnect par upload ho jate hain.
+              Account-scoped queued operations reconnect par retry hote hain; conflicts review ke liye preserve hote hain.
             </div>
           </div>
         </div>

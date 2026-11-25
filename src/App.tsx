@@ -4690,7 +4690,9 @@ export default function App() {
           <OfflineSyncCenterView
             db={db}
             isOnline={typeof navigator !== "undefined" ? navigator.onLine : true}
-            cloudStatus={isCloudConfigured ? "Connected" : "Local Only"}
+            cloudStatus={isCloudConfigured ? cloudStatus : "Local Only"}
+            canManageRecovery={cloudProfile?.role==="owner"}
+            onSyncNow={cloudProfile?.id?flushOfflineQueue:undefined}
             onUpdateDb={(nextDb) => {
               setDb(nextDb);
               saveState(nextDb);

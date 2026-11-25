@@ -325,14 +325,11 @@ Deno.serve(async (req) => {
             answerText = "❌ Deny kar diya.";
             footer = "\n\n❌ Denied.";
           } else {
-            const { data: stateRow } = await admin.from("store_state")
-              .select("state").eq("store_id", reqRow.store_id).maybeSingle();
-            const products = (stateRow?.state as { products?: unknown[] } | null)?.products;
-            const prod = Array.isArray(products)
-              ? (products as Array<Record<string, unknown>>).find((p) => p?.id === reqRow.product_id)
-              : undefined;
-            const price = prod && typeof prod.confidentialPrice === "number" ? prod.confidentialPrice : null;
-            if (price == null) {
+            const id=String(reqRow.product_id);
+            const q=admin.from("products").select("confidential_price").eq("store_id",reqRow.store_id);
+            const {data:prod}=await (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)?q.eq("id",id):q.eq("client_id",id)).maybeSingle();
+            const price=prod?.confidential_price==null?null:Number(prod.confidential_price);
+            if (price == null || !Number.isFinite(price) || price < 0) {
               await admin.from("confidential_price_requests")
                 .update({ status: "denied", responded_at: new Date().toISOString() })
                 .eq("id", requestId);
@@ -424,6 +421,9 @@ Deno.serve(async (req) => {
     const { data: profile } = await admin.from("profiles")
       .select("store_id,role,full_name,staff_name").eq("id", user.id).maybeSingle();
     if (!profile?.store_id) return json({ error: "Not authorized" }, 403);
+    const caller = createClient(url,anonKey,{global:{headers:{Authorization:req.headers.get("Authorization")||""}},auth:{persistSession:false}});
+    const {data:allowed,error:accessError}=await caller.rpc("current_account_allowed");
+    if(accessError||allowed!==true)return json({error:"Account access disabled or expired."},403);
 
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "status");
@@ -435,10 +435,15 @@ Deno.serve(async (req) => {
     // Owner's Telegram connection state directly (no begin/poll/test), it
     // only asks this function to relay one message on the Owner's behalf.
     if (action === "confidential_price_request") {
-      const productId = String(body.productId || "").trim();
-      const productName = String(body.productName || "").trim();
-      const productCategory = body.productCategory ? String(body.productCategory).trim() : null;
-      if (!productId || !productName) return json({ error: "Product detail missing." }, 400);
+      const suppliedId=String(body.productId||"").trim();
+      if(!suppliedId)return json({error:"Product detail missing."},400);
+      let productQuery=admin.from("products").select("id,client_id,model,category").eq("store_id",profile.store_id);
+      const isUuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(suppliedId);
+      const {data:product,error:productError}=await (isUuid?productQuery.eq("id",suppliedId):productQuery.eq("client_id",suppliedId)).maybeSingle();
+      if(productError||!product)return json({error:"Product not found in your shop."},404);
+      const productId=product.id;
+      const productName=product.model||"Product";
+      const productCategory=product.category||null;
 
       const { data: connection } = await admin.from("telegram_connections")
         .select("chat_id").eq("store_id", profile.store_id).maybeSingle();

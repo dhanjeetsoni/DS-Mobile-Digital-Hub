@@ -77,6 +77,9 @@ Deno.serve(async (req) => {
       return json({ error: "Only the shop owner or a manager can manage staff accounts." }, 403);
     }
     if (callerProfile.role === "manager" && (!callerProfile.access_enabled || (callerProfile.access_mode !== "no_restriction" && !(Date.parse(callerProfile.access_expires_at || "") > Date.now())))) return json({ error: "Manager access disabled or expired." }, 403);
+    const caller=createClient(url,anonKey,{global:{headers:{Authorization:req.headers.get("Authorization")||""}},auth:{persistSession:false}});
+    const {data:allowed,error:accessError}=await caller.rpc("current_account_allowed");
+    if(accessError||allowed!==true)return json({error:"Account session expired or access disabled."},403);
     const storeId = callerProfile.store_id;
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "");
@@ -138,6 +141,8 @@ Deno.serve(async (req) => {
       }
       const { error } = await admin.auth.admin.updateUserById(staffId, { password });
       if (error) return json({ error: error.message }, 400);
+      const {error:logoutError}=await admin.from("profiles").update({force_logout_at:new Date().toISOString()}).eq("id",staffId);
+      if(logoutError)return json({error:"Password updated, but session cutoff failed. Disable the account before issuing it."},500);
       return json({ ok: true });
     }
 

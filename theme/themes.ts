@@ -65,7 +65,7 @@ export const THEMES: readonly ThemeMeta[] = [
     defaultMode: "dark",
     swatch: {
       dark: ["#2e3440", "#333b49", "#88c0d0", "#b48ead"],
-      light: ["#eceff4", "#ffffff", "#4a7f95", "#8a5f86"],
+      light: ["#eceff4", "#ffffff", "#42758a", "#8a5f86"],
     },
   },
   {
@@ -75,7 +75,7 @@ export const THEMES: readonly ThemeMeta[] = [
     defaultMode: "dark",
     swatch: {
       dark: ["#071410", "#0f231d", "#2fbf7f", "#f5b544"],
-      light: ["#f2faf6", "#ffffff", "#0f8a5f", "#b4741a"],
+      light: ["#f2faf6", "#ffffff", "#08794f", "#936015"],
     },
   },
   {
@@ -95,7 +95,7 @@ export const THEMES: readonly ThemeMeta[] = [
     defaultMode: "dark",
     swatch: {
       dark: ["#180c07", "#26170f", "#ff7a2f", "#ffd166"],
-      light: ["#fff8f3", "#ffffff", "#d4550a", "#9a6600"],
+      light: ["#fff8f3", "#ffffff", "#bc4706", "#9a6600"],
     },
   },
   {
@@ -115,7 +115,7 @@ export const THEMES: readonly ThemeMeta[] = [
     defaultMode: "dark",
     swatch: {
       dark: ["#05070d", "#0b1120", "#00e5ff", "#ff2bd6"],
-      light: ["#f2f6f8", "#ffffff", "#0089a7", "#c0009c"],
+      light: ["#f2f6f8", "#ffffff", "#007b95", "#c0009c"],
     },
   },
   {

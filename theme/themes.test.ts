@@ -124,3 +124,21 @@ describe("theme stylesheet", () => {
     expect(stripped).not.toMatch(/#[0-9a-fA-F]{3,8}/);
   });
 });
+
+describe("retail palette readability",()=>{
+  function luminance(hex:string){
+    const channels=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=0.04045?v/12.92:((v+0.055)/1.055)**2.4);
+    return channels[0]*0.2126+channels[1]*0.7152+channels[2]*0.0722;
+  }
+  it.each([...THEME_IDS])("%s supports readable primary and accent buttons in both modes",(id)=>{
+    for(const mode of ["dark","light"] as const){
+      const body=block('[data-theme="'+id+'"]'+(mode==="light"?'[data-mode="light"]':''));
+      const color=(token:string)=>new RegExp("--"+token+"\\s*:\\s*(#[a-f0-9]{6})","i").exec(body)?.[1]??"";
+      for(const [a,b] of [["brand","brand-fg"],["accent","accent-fg"],["surface","ink"],["surface","ink-muted"]]){
+        expect(color(a)).toMatch(/^#[a-f0-9]{6}$/i);expect(color(b)).toMatch(/^#[a-f0-9]{6}$/i);
+        const x=luminance(color(a)),y=luminance(color(b));
+        expect((Math.max(x,y)+0.05)/(Math.min(x,y)+0.05),id+"/"+mode+"/"+a).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+});

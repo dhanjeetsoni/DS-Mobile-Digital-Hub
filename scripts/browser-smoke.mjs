@@ -27,6 +27,31 @@ try{
  await owner.getByRole("button",{name:"Unlock",exact:true}).click();
  await owner.getByText("All Products",{exact:true}).first().waitFor({timeout:30000});
  await owner.getByText("Sales / New Bill",{exact:true}).first().click();
+ // Exercise a real checkout in the isolated browser's local-only database.
+ // No customer phone, external notification, production account or real sale.
+ await owner.evaluate(()=>{window.print=()=>{};});
+ await owner.getByRole("button",{name:"+ Custom Service"}).click();
+ await owner.getByPlaceholder("e.g. SIM Cutting, Mobile Polish, Data Backup").fill("CI test service");
+ await owner.getByPlaceholder("e.g. 50",{exact:true}).fill("50");
+ await owner.getByRole("button",{name:/Add to Cart/}).click();
+ await owner.getByRole("button",{name:/Complete Checkout & Print Bill/}).click();
+ await owner.getByRole("button",{name:"Generate & Print Invoice"}).click();
+ await owner.waitForFunction(()=>{
+   try{
+     const raw=localStorage.getItem("dsmdh_cache_v4")||localStorage.getItem("dsmdh_db_v2");
+     return !!raw&&JSON.parse(raw).sales?.some(s=>s.items?.some(i=>i.name==="CI test service"&&i.isService===true));
+   }catch{return false;}
+ },{},{timeout:30000});
+ const record=await owner.evaluate(()=>{
+   const db=JSON.parse(localStorage.getItem("dsmdh_cache_v4")||localStorage.getItem("dsmdh_db_v2"));
+   return db.sales.find(s=>s.items.some(i=>i.name==="CI test service"));
+ });
+ assert.equal(record.items.length,1);
+ assert.equal(record.items[0].price,50);
+ assert.equal(record.items[0].cost,0);
+ assert.equal(record.status,"Paid");
+ assert.equal(record.amountPaid,record.total);
+ console.log("PASS actual local-only counter-service checkout, invoice and persisted payment");
  assert.deepEqual(errors,[],"Uncaught browser errors");
  console.log("PASS production UI boot, local-mode entry, local owner/staff entry and inventory/POS navigation");
 }finally{await browser?.close();server.kill();}

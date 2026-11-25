@@ -134,12 +134,12 @@ const MOBILE_PRO_PRIMARY_KEYS = ["sell", "gallaClosing"];
 
 // 6 Core Daily Counter Items for Ultra-Easy Counter Work
 export const PRIMARY_NAV_ITEMS = [
-  { key: "dashboard", label: "Dashboard ()", icon: LayoutDashboard },
+  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "sell", label: "Sales / New Bill", icon: ShoppingCart },
   { key: "imeiTracker", label: "Mobile & IMEI", icon: Smartphone },
-  { key: "xeroxGrid", label: "Xerox / Cyber 1-Tap ()", icon: Layers },
+  { key: "xeroxGrid", label: "Xerox / Cyber 1-Tap", icon: Layers },
   { key: "gallaClosing", label: "Daily Galla", icon: DollarSign },
-  { key: "jobs", label: "Repairs & Service ()", icon: Wrench },
+  { key: "jobs", label: "Repairs & Service", icon: Wrench },
   { key: "khata", label: "Customer Khata", icon: CreditCard },
   { key: "modelsearch", label: "Glass & Cover", icon: Search },
   { key: "photoFinder", label: "Photo Stock Finder", icon: Camera },
@@ -159,7 +159,7 @@ export const SECONDARY_NAV_ITEMS = [
   // Step 7.2 — Delete Policy: manual "combined PDF then clear old records"
   // tool. Owner-only (it permanently deletes sale history), separate from
   // the always-visible "Invoices & Receipts" list above it.
-  { key: "exportClear", label: "Export & Clear Old Invoices", icon: Archive, ownerOnly: true },
+  { key: "exportClear", label: "Export & Archive Old Invoices", icon: Archive, ownerOnly: true },
   { key: "returns", label: "Returns & Exchanges", icon: RotateCcw, ownerOnly: false },
   { key: "stockadjust", label: "Stock Adjustment", icon: Wrench, ownerOnly: true },
   { key: "purchases", label: "Purchase History", icon: Receipt, ownerOnly: true },
@@ -176,11 +176,11 @@ export const SECONDARY_NAV_ITEMS = [
   { key: "extraIncome", label: "Extra Income", icon: TrendingUp, ownerOnly: true },
   { key: "expPersonal", label: "Personal Drawings", icon: User, ownerOnly: true },
   { key: "ownerreports", label: "Owner Financial Reports", icon: Shield, ownerOnly: true },
-  { key: "staffAccess", label: "Android Access Area", icon: Users, ownerOnly: true },
+  { key: "staffAccess", label: "Staff Access & Permissions", icon: Users, ownerOnly: true },
   { key: "staffPerformance", label: "Staff Performance", icon: TrendingUp, ownerOnly: true },
   { key: "staffIncentives", label: "🏆 Staff Incentives & Commission", icon: Award, ownerOnly: false },
   { key: "securityAudit", label: "🚨 Anti-Theft & Suspicious Audit", icon: Shield, ownerOnly: true },
-  { key: "offlineSync", label: "📴 100% Offline SQLite Sync Engine", icon: DownloadCloud, ownerOnly: false },
+  { key: "offlineSync", label: "Offline & Cloud Sync Center", icon: DownloadCloud, ownerOnly: false },
   { key: "statusDashboard", label: "System Status Dashboard", icon: Activity, ownerOnly: true },
   { key: "auditLog", label: "Audit Log", icon: ClipboardList, ownerOnly: true },
   { key: "setupWizard", label: "🚀 Shuruaati Setup Checklist", icon: Rocket, ownerOnly: true },
@@ -192,7 +192,7 @@ export const SECONDARY_NAV_ITEMS = [
   { key: "staffAttendance", label: "⏱️ Staff Attendance & Shifts", icon: Clock, ownerOnly: false },
   { key: "backup", label: "Backup & Restore", icon: Save, ownerOnly: true },
   { key: "settings", label: "Shop Settings", icon: SettingsIcon, ownerOnly: true },
-  { key: "appearanceStudio", label: "🎨 Appearance Studio (New)", icon: Sparkles, ownerOnly: false },
+  { key: "appearanceStudio", label: "Appearance Studio", icon: Sparkles, ownerOnly: false },
 ];
 
 // Step 9.2 — Grouping Logic. Every SECONDARY_NAV_ITEMS key belongs to exactly
@@ -342,6 +342,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [showAllTools, setShowAllTools] = useState<boolean>(false);
   const [easyMode, setEasyMode] = useState<boolean>(false);
+  const [toolQuery,setToolQuery]=useState("");
+  const [allMobileTools,setAllMobileTools]=useState(false);
+  const staffKeys=Array.isArray(allowedSections)&&allowedSections.length?allowedSections:["sell","photoFinder"];
+  const visibleTools=[...PRIMARY_NAV_ITEMS,...SECONDARY_NAV_ITEMS].filter(item=>{
+    if(mobileStaffFixedNav)return ["sell","products","lowstock","salesToday"].includes(item.key);
+    if(mobileOwnerMode==="lite")return item.key==="sell";
+    if(!ownerMode||isStaffIdentity)return staffKeys.includes(item.key)&&!("ownerOnly" in item&&item.ownerOnly);
+    return true;
+  });
+  const toolResults=visibleTools.filter(item=>item.label.toLowerCase().includes(toolQuery.trim().toLowerCase())||item.key.toLowerCase().includes(toolQuery.trim().toLowerCase()));
+  useEffect(()=>{setToolQuery("");},[currentPage]);
+  useEffect(()=>{if(!isMobileOpen)return;const close=(e:KeyboardEvent)=>{if(e.key==="Escape")onCloseMobile?.();};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[isMobileOpen,onCloseMobile]);
 
   // Step 9.2 — which group card(s) are expanded. Whichever group holds the
   // currently active page always starts (and stays, on navigation) open, so
@@ -378,12 +390,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ).length;
 
   // Calculate live daily cash estimated in galla
-  const todaySales = db.sales.filter((s) => s.date === todayStr() && !s.isFinance && s.payment === "Cash");
+  const todaySales = db.sales.filter((s) => s.date === todayStr() && s.status !== "Cancelled" && !s.isFinance && s.payment === "Cash");
   const todaySalesCash = todaySales.reduce((a, s) => a + s.amountPaid, 0);
   const todayXeroxCash = (db.xeroxEntries || [])
     .filter((x) => x.date === todayStr() && x.paymentMethod === "Cash")
     .reduce((a, x) => a + x.totalAmount, 0);
-  const todayGallaCash = (db.settings.openingCashDefault || 5000) + todaySalesCash + todayXeroxCash;
+  const todayGallaCash = (db.settings.openingCashDefault ?? 0) + todaySalesCash + todayXeroxCash;
 
   const isCurrentSecondary = SECONDARY_NAV_ITEMS.some((s) => s.key === currentPage);
 
@@ -514,10 +526,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )}
 
       {/* Navigation List */}
-      <nav className="nav" id="navList">
+      <nav className="nav" id="navList" aria-label="Tools and modules">
+        <div className="tool-search">
+          <Search size={16} aria-hidden="true"/>
+          <input aria-label="Search tools" placeholder="Search tools, reports…" value={toolQuery} onChange={e=>setToolQuery(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&toolQuery.trim()&&toolResults.length){onNavigate(toolResults[0].key);setToolQuery("");}}}/>
+          {toolQuery&&<button type="button" aria-label="Clear tool search" onClick={()=>setToolQuery("")}>×</button>}
+        </div>
+        {toolQuery.trim() ? <div className="tool-search-results" aria-label="Tool search results">
+          <span className="grp-label">{toolResults.length} matching tools</span>
+          {toolResults.map(item=><button className="navitem" key={item.key} onClick={()=>{onNavigate(item.key);setToolQuery("");}}><span className="ic"><item.icon size={16}/></span><span>{item.label}</span></button>)}
+          {!toolResults.length&&<span className="grp-label">No matching tools. Try a different word.</span>}
+        </div>:<>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px 2px" }}>
           <span className="grp-label" style={{ padding: 0 }}>
-            {easyMode ? "⚡ Daily Counter ()" : "📌 Main Tasks"}
+            {easyMode ? "Daily Counter" : "Main Tasks"}
           </span>
           <button
             onClick={() => setEasyMode(!easyMode)}
@@ -533,10 +555,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               fontWeight: 700,
             }}
           >
-            {easyMode ? "✓ Easy Mode ON" : " "}
+            {easyMode ? "Easy mode on" : "Easy mode off"}
           </button>
         </div>
 
+        {mobileOwnerMode==="pro"&&<button className="navitem" onClick={()=>{setAllMobileTools(v=>!v);setShowAllTools(true);}} aria-expanded={allMobileTools}>{allMobileTools?"Show counter essentials":"Show all owner tools"}</button>}
         {/* Primary Counter Navigation — Staff view is restricted to Sales +
             Photo Stock Finder (Step 6.1/6.2 — this is a staff sales tool by
             design: snap a photo of what's in front of them, find it in
@@ -548,7 +571,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           // owner/manager signs in, so the very next check below would
           // otherwise show everything regardless of Lite/Pro.
           if (mobileOwnerMode === "lite") return PRIMARY_NAV_ITEMS.filter((i) => i.key === "sell");
-          if (mobileOwnerMode === "pro") return PRIMARY_NAV_ITEMS.filter((i) => MOBILE_PRO_PRIMARY_KEYS.includes(i.key));
+          if (mobileOwnerMode === "pro" && !allMobileTools) return PRIMARY_NAV_ITEMS.filter((i) => MOBILE_PRO_PRIMARY_KEYS.includes(i.key));
           // Phase 17.3 — DS Mobile's fixed staff set. Checked before the
           // allowedSections fallback below on purpose: this set is fixed
           // by design (§3 "no toggle"), not something an admin-configured
@@ -626,10 +649,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             else); in Pro mode it's filtered to MOBILE_PRO_SECONDARY_KEYS
             below via staffPolicyOk-style filtering, same pattern as the
             existing staff allowedSections check. */}
-        {!easyMode && ownerMode && mobileOwnerMode !== "lite" && (
+        {!easyMode && (ownerMode || (isStaffIdentity&&!mobileStaffFixedNav&&staffKeys.some(k=>SECONDARY_NAV_ITEMS.some(n=>n.key===k&&!n.ownerOnly)))) && mobileOwnerMode !== "lite" && (
           <div style={{ marginTop: "6px", borderTop: "1px solid var(--sidebar-border)", paddingTop: "6px" }}>
             <button
-              onClick={() => setShowAllTools(!showAllTools || isCurrentSecondary)}
+              onClick={() => setShowAllTools(v=>!v)}
               style={{
                 width: "100%",
                 display: "flex",
@@ -655,10 +678,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div style={{ marginTop: "4px", display: "flex", flexDirection: "column", gap: "4px" }}>
                 {SECONDARY_NAV_GROUPS.map((group) => {
                   const staffPolicyOk = (key: string) =>
-                    !isStaffIdentity || !Array.isArray(allowedSections) || allowedSections.length === 0 || allowedSections.includes(key);
+                    !isStaffIdentity || staffKeys.includes(key);
                   // Phase 17.4: Pro mode further narrows to the curated set,
                   // on top of (not instead of) the existing owner/staff checks.
-                  const mobileProOk = (key: string) => mobileOwnerMode !== "pro" || MOBILE_PRO_SECONDARY_KEYS.includes(key);
+                  const mobileProOk = (key: string) => mobileOwnerMode !== "pro" || allMobileTools || MOBILE_PRO_SECONDARY_KEYS.includes(key);
                   const visibleItems = group.itemKeys
                     .map((key) => SECONDARY_NAV_ITEMS.find((n) => n.key === key))
                     .filter((n): n is (typeof SECONDARY_NAV_ITEMS)[number] => !!n && (!n.ownerOnly || (ownerMode && !isStaffIdentity)) && staffPolicyOk(n.key) && mobileProOk(n.key));
@@ -729,6 +752,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
           </div>
         )}
+        </>}
       </nav>
 
       {/* Daily Galla Status Meter — Owner only */}
@@ -744,7 +768,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
           <span style={{ fontSize: "10px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--sidebar-text)" }}>
-            Daily Galla ()
+            Daily Galla estimate
           </span>
           <span style={{ color: "var(--green)", fontFamily: "var(--font-mono)", fontSize: "13px", fontWeight: 800 }}>
             {inr(todayGallaCash)}
@@ -820,7 +844,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 if (ownerMode) onToggleOwnerMode();
               }}
             >
-              Staff ()
+              Staff
             </button>
             <button
               id="btnOwnerMode"
@@ -829,7 +853,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 if (!ownerMode) onToggleOwnerMode();
               }}
             >
-              Owner ()
+              Owner
             </button>
           </div>
         )}

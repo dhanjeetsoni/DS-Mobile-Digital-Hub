@@ -52,6 +52,26 @@ try{
  assert.equal(record.status,"Paid");
  assert.equal(record.amountPaid,record.total);
  console.log("PASS actual local-only counter-service checkout, invoice and persisted payment");
+ // Test the new searchable module directory on both desktop and phone.
+ const search=owner.getByRole("textbox",{name:"Search tools"});
+ await search.fill("backup");
+ await owner.getByRole("button",{name:"Backup & Restore",exact:true}).first().waitFor();
+ await search.fill("");
+ const mobile=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+ mobile.on("pageerror",e=>errors.push(e.message));
+ await mobile.goto(url,{waitUntil:"domcontentloaded"});
+ await mobile.getByText("Owner Confidential Area",{exact:true}).first().click();
+ await mobile.getByPlaceholder("Enter Owner Device PIN").fill("1234");
+ await mobile.getByRole("button",{name:"Unlock",exact:true}).click();
+ await mobile.getByRole("button",{name:"More",exact:true}).click();
+ const mobileSearch=mobile.getByRole("textbox",{name:"Search tools"});
+ await mobileSearch.fill("backup");
+ await mobile.getByRole("button",{name:"Backup & Restore",exact:true}).first().click();
+ await mobile.waitForFunction(()=>!document.querySelector("#sidebar")?.classList.contains("mobile-open"));
+ const sizes=await mobile.evaluate(()=>({width:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,tab:document.querySelector(".bottom-tab-bar")?.getBoundingClientRect().height||0}));
+ assert(sizes.scroll<=sizes.width+1,"Mobile page horizontal overflow");
+ assert(sizes.tab>=48,"Mobile navigation touch target too small");
+ console.log("PASS responsive mobile drawer, module search, navigation and viewport");
  assert.deepEqual(errors,[],"Uncaught browser errors");
  console.log("PASS production UI boot, local-mode entry, local owner/staff entry and inventory/POS navigation");
 }finally{await browser?.close();server.kill();}

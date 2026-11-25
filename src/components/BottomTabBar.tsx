@@ -120,7 +120,7 @@ export default function BottomTabBar({
   const hasPolicy = isStaffIdentity && Array.isArray(allowedSections) && allowedSections.length > 0;
   const visibleTabs = TABS.filter((tab) => {
     if (tab.ownerOnly && isStaffIdentity) return false;
-    if (hasPolicy && (tab.page === "sell" || tab.page === "products") && !allowedSections!.includes(tab.page)) return false;
+    if (isStaffIdentity && !(hasPolicy ? allowedSections!.includes(tab.page) : ["sell","photoFinder"].includes(tab.page))) return false;
     return true;
   });
   return (

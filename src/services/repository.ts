@@ -802,7 +802,7 @@ async function flushOfflineQueueInner() {
     const operationId = String(local[0]);
     if (envelope.operationId !== operationId) continue;
     const { data: existing, error: lookupError } = await supabase.from("sync_queue")
-      .select("status").eq("store_id", profile.store_id).eq("operation_id", operationId).maybeSingle();
+      .select("status").eq("store_id", profile.store_id).eq("queued_by", profile.id).eq("operation_id", operationId).maybeSingle();
     if (lookupError) throw lookupError;
     if (existing?.status === "processed") { await sqliteRemove(operationId); continue; }
     if (existing || operation === "snapshot" || operation === "snapshot_conflict" || operation === "snapshot_recovery") continue;
@@ -828,6 +828,7 @@ async function flushOfflineQueueInner() {
     .from("sync_queue")
     .select("id,operation_id,operation,operation_type,entity,payload,retry_count,attempts,status,last_attempt_at")
     .eq("store_id", profile.store_id)
+    .eq("queued_by", profile.id)
     .or(`status.in.(pending,failed),and(status.eq.syncing,last_attempt_at.lt.${staleThreshold})`)
     .order("created_at", { ascending: true })
     .limit(50);

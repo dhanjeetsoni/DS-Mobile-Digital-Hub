@@ -89,14 +89,18 @@ function classifyGeminiFailure(err: any): "quota" | "invalid" | "unavailable" | 
   return null;
 }
 
-async function requireUserAndStore(req: Request): Promise<{ userId: string; storeId: string | null } | null> {
-  const auth = req.headers.get("authorization") || "";
-  const token = auth.replace(/^Bearer\s+/i, "").trim();
-  if (!token || !supabaseAdmin) return null;
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data.user) return null;
-  const { data: profile } = await supabaseAdmin.from("profiles").select("store_id").eq("id", data.user.id).maybeSingle();
-  return { userId: data.user.id, storeId: profile?.store_id || null };
+async function requireUserAndStore(req: Request): Promise<{userId:string;storeId:string|null}|null>{
+  const token=(req.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim();
+  const clientKey=Deno.env.get("SUPABASE_ANON_KEY")||Deno.env.get("SUPABASE_PUBLISHABLE_KEY")||"";
+  if(!token||!SUPABASE_URL||!supabaseAdmin||!clientKey)return null;
+  const {data,error}=await supabaseAdmin.auth.getUser(token);
+  if(error||!data.user)return null;
+  const caller=createClient(SUPABASE_URL,clientKey,{global:{headers:{Authorization:"Bearer "+token}},auth:{persistSession:false}});
+  const {data:allowed,error:accessError}=await caller.rpc("current_account_allowed");
+  if(accessError||allowed!==true)return null;
+  const {data:profile,error:profileError}=await supabaseAdmin.from("profiles").select("store_id").eq("id",data.user.id).maybeSingle();
+  if(profileError||!profile?.store_id)return null;
+  return {userId:data.user.id,storeId:profile.store_id};
 }
 
 Deno.serve(async (req: Request) => {

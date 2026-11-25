@@ -658,6 +658,11 @@ export default function App() {
     // never actually reachable from a staff session before this fix.
     const wantsOwnerAccessSpecifically = gateStage === "ownerAuth" || isOwnerLoginOpen;
     const isOwnerOrManager = cloudProfile?.role === "owner" || cloudProfile?.role === "manager";
+    if (wantsOwnerAccessSpecifically && cloudProfile?.role === "staff") {
+      showToast("Owner access requires signing in with an owner or manager account.", "red");
+      setGatePassInput("");
+      return;
+    }
     let correct = false;
     if (cloudProfile?.id && (!wantsOwnerAccessSpecifically || isOwnerOrManager)) {
       correct = await verifyPin(cloudProfile.id, gatePassInput);
@@ -769,6 +774,11 @@ export default function App() {
 
   const handleBiometricUnlock = async () => {
     if (!cloudProfile?.id) return;
+    if (navigator.onLine) await syncPinFromServer(cloudProfile.id);
+    if (!isBiometricEnabled(cloudProfile.id)) {
+      showToast("Please verify your personal PIN again.", "amber");
+      return;
+    }
     try {
       await authenticateBiometric(`Unlock as ${cloudProfile.staff_name || cloudProfile.full_name || "yourself"}`);
       // Success is a hard native OS guarantee (fingerprint/Face match) —
@@ -1094,6 +1104,19 @@ export default function App() {
         }
         const profile = await getCurrentProfile();
         setCloudProfile(profile);
+        if (profile?.role === "manager" && (!profile.access_enabled || isAccessWindowExpired(profile))) {
+          clearCachedStaffSession();
+          await supabase.auth.signOut().catch(() => {});
+          setCloudUser(null);
+          setCloudProfile(null);
+          setOwnerMode(false);
+          setStaffDeniedReason(!profile.access_enabled ? "disabled" : "expired");
+          setGateStage("staffDenied");
+          setGateUnlocked(false);
+          setCloudStatus("offline");
+          setCloudReady(true);
+          return;
+        }
         if (profile?.role === "owner" || profile?.role === "manager") setOwnerMode(true);
         if (profile?.role === "staff") {
           // A staff session survives a page reload (supabase-js persists it),
@@ -1112,7 +1135,24 @@ export default function App() {
             setCloudReady(true);
             return;
           } else {
+            const result: any = await getMyStaffAccessPolicy();
+            const policy = result?.policy || {};
+            if (isOutsideDailyWindow(policy.daily_start ?? null, policy.daily_end ?? null)) {
+              clearCachedStaffSession();
+              await supabase.auth.signOut().catch(() => {});
+              setCloudUser(null);
+              setCloudProfile(null);
+              setOwnerMode(false);
+              setStaffDeniedReason("outsideWindow");
+              setGateStage("staffDenied");
+              setGateUnlocked(false);
+              setCloudReady(true);
+              return;
+            }
             cacheStaffSession({
+              dailyStart: policy.daily_start ?? null,
+              dailyEnd: policy.daily_end ?? null,
+              allowedSections: Array.isArray(policy.allowed_sections) ? policy.allowed_sections : null,
               staffId: profile.id,
               staffName: profile.staff_name,
               accessMode: profile.access_mode,
@@ -1447,13 +1487,13 @@ export default function App() {
   // live kill signal for the session currently running on this device.
   const forceLogoutBaselineRef = useRef<string | null>(null);
   useEffect(() => {
-    if (gateUnlocked && cloudProfile?.role === "staff") {
+    if (gateUnlocked && ["staff","manager"].includes(cloudProfile?.role)) {
       forceLogoutBaselineRef.current = cloudProfile?.force_logout_at ?? null;
     }
   }, [gateUnlocked, cloudProfile?.role, cloudProfile?.id]);
 
   useEffect(() => {
-    if (!gateUnlocked || cloudProfile?.role !== "staff" || !cloudProfile?.id) return;
+    if (!gateUnlocked || !["staff","manager"].includes(cloudProfile?.role) || !cloudProfile?.id) return;
     const forceKickDeleted = () => {
       // Step 1.7: Delete must kick an already-open session just as
       // instantly as Pause does — not only block the *next* login attempt.
@@ -1487,20 +1527,20 @@ export default function App() {
             showToast("Owner ne aapko is device se turant logout kar diya.", "amber");
             return;
           }
-          if (!row.access_enabled) {
+          if (!row.access_enabled || isAccessWindowExpired(row)) {
             clearCachedStaffSession();
             supabase.auth.signOut().catch(() => {});
             setCloudUser(null);
             setCloudProfile(null);
             setOwnerMode(false);
-            setStaffDeniedReason("disabled");
+            setStaffDeniedReason(!row.access_enabled ? "disabled" : "expired");
             setGateStage("staffDenied");
             setGateUnlocked(false);
-            showToast("Owner ne aapka access band kar diya.", "amber");
+            showToast("Owner access disabled or expired.", "amber");
             return;
           }
-          // Access window changed (new grant / new expiry / new visibility_from) — refresh the cache the offline timer reads from.
-          cacheStaffSession({
+          // Preserve the cached policy while refreshing the profile fields.
+          if (row.role === "staff") cacheStaffSession({
             staffId: row.id,
             staffName: row.staff_name,
             accessMode: row.access_mode,
@@ -6690,8 +6730,9 @@ export default function App() {
           // had nothing to check against until an unrelated full page
           // reload happened to re-run the bootstrap effect. Mirror the same
           // call here so the PIN works immediately after this sign-in too.
-          if (profile?.id) {
-            await syncPinFromServer(profile.id);
+          if (profile?.id && await syncPinFromServer(profile.id)) {
+            setGateStage("personalPin");
+            setGateUnlocked(false);
           }
         } finally {
           setCloudReady(true);

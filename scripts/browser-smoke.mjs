@@ -18,11 +18,13 @@ try{
  let apiReady=false;
  for(let i=0;i<40;i++){try{if((await fetch("http://127.0.0.1:"+apiPort+"/api/health")).ok){apiReady=true;break;}}catch{}await new Promise(r=>setTimeout(r,250));}
  assert(apiReady,"Production API failed to boot");
- for(const route of ["ocr-phone","ai-pos-copilot","business-insights","ai-search-match"]){
+ const apiRoutes=[...readFileSync("server.ts","utf8").matchAll(/app\.post\("\/api\/([^"]+)"/g)].map(m=>m[1]);
+ assert(apiRoutes.length>=16,"API route registry unexpectedly shrank");
+ for(const route of apiRoutes){
   const res=await fetch("http://127.0.0.1:"+apiPort+"/api/"+route,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
   assert.equal(res.status,401,"Anonymous AI API request accepted: "+route);
  }
- console.log("PASS production API health and four anonymous AI endpoint denials");
+ console.log("PASS production API health and all registered anonymous AI endpoint denials");
  browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  const errors=[];page.on("pageerror",e=>errors.push(e.message));

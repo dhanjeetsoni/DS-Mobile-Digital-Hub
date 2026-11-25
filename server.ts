@@ -1096,7 +1096,8 @@ Respond strictly with valid JSON only in this exact shape, without markdown or e
 
 app.post("/api/generate-invoice-rules", rateLimit(60_000, 20), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const product = req.body || {};
     const result = await runGenerateInvoiceRules(storeId, product);
@@ -1168,7 +1169,8 @@ Respond strictly with valid JSON only in this exact shape:
 
 app.post("/api/ai-repair-diagnostics", rateLimit(60_000, 20), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const { device, issue, customerNote } = req.body || {};
     if (!issue && !device) return res.status(400).json({ success: false, error: "Device and issue required." });
@@ -1184,7 +1186,8 @@ app.post("/api/ai-repair-diagnostics", rateLimit(60_000, 20), async (req, res) =
 // Backward compatibility alias for ai-gateway repair-diagnosis
 app.post("/api/repair-diagnosis", rateLimit(60_000, 20), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const input = req.body?.input || req.body || {};
     const data = await runRepairDiagnostics(storeId, { device: input.device, issue: input.issue });
@@ -1256,7 +1259,8 @@ Respond strictly with valid JSON only in this exact shape:
 
 app.post("/api/ai-customer-message", rateLimit(60_000, 25), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const input = req.body || {};
     const data = await runCustomerMessage(storeId, input);
@@ -1271,7 +1275,8 @@ app.post("/api/ai-customer-message", rateLimit(60_000, 25), async (req, res) => 
 // Backward compatibility alias for ai-gateway due-reminder
 app.post("/api/due-reminder", rateLimit(60_000, 25), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const input = req.body?.input || req.body || {};
     const data = await runCustomerMessage(storeId, {
@@ -1347,7 +1352,8 @@ Respond strictly with valid JSON only in this exact shape:
 
 app.post("/api/ai-second-hand-valuation", rateLimit(60_000, 20), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const input = req.body || {};
     if (!input.brand || !input.modelName) return res.status(400).json({ success: false, error: "Brand and model name required." });
@@ -1404,7 +1410,8 @@ Respond strictly with valid JSON only in this exact shape:
 
 app.post("/api/ai-product-desc", rateLimit(60_000, 25), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const input = req.body || {};
     if (!input.name) return res.status(400).json({ success: false, error: "Product name required." });
@@ -1468,7 +1475,8 @@ Respond strictly with valid JSON only in this exact shape:
 
 app.post("/api/ai-dead-stock-strategy", rateLimit(60_000, 10), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const { items } = req.body || {};
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ success: false, error: "Items list required." });
@@ -1520,7 +1528,8 @@ Respond strictly with valid JSON only in this exact shape:
 
 app.post("/api/ai-pos-copilot", rateLimit(60_000, 30), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const { query, context } = req.body || {};
     if (!query || typeof query !== "string" || !query.trim()) return res.status(400).json({ success: false, error: "Query required." });
@@ -1567,7 +1576,8 @@ Respond strictly with valid JSON only:
 
 app.post("/api/ai-search-match", rateLimit(60_000, 40), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const { query, items } = req.body || {};
     if (!query || !Array.isArray(items)) return res.json({ success: true, matchedIds: [] });
@@ -1581,7 +1591,8 @@ app.post("/api/ai-search-match", rateLimit(60_000, 40), async (req, res) => {
 // Backward compatibility alias for ai-gateway reorder-suggestion
 app.post("/api/reorder-suggestion", rateLimit(60_000, 20), async (req, res) => {
   const ctx = await requireSupabaseUserAndStore(req, res);
-  const storeId = ctx?.storeId || null;
+  if (!ctx) return;
+  const storeId = ctx.storeId;
   try {
     const input = req.body?.input || req.body || {};
     if (!hasAI()) return res.json({ success: true, suggestion: `Suggest ordering ${Number(input.minStock || 5) * 2} units.` });

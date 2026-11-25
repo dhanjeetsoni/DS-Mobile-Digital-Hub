@@ -1,149 +1,112 @@
-// Phase 2: per-person 4-digit PIN lock.
-//
-// Every signed-in profile (owner, manager, or staff) gets their OWN PIN,
-// instead of the old single shared "Owner Device PIN"
-// (db.settings.ownerPasscode). The PIN must keep working fully OFFLINE for
-// everyday unlock — that's the entire point of it (a fast local lock on top
-// of an already long-lived Supabase session) — so verification never makes
-// a network call.
-//
-// How it works:
-//   - profiles.pin_hash / profiles.pin_salt are the durable, cross-device
-//     source of truth (set via the set_my_pin / admin_reset_pin RPCs).
-//   - After a real login on a device, we fetch this profile's own
-//     pin_hash/pin_salt once (already allowed by the existing
-//     "id = auth.uid()" self-select RLS policy) and cache them locally,
-//     keyed by profile id.
-//   - Every PIN check from then on is a local SHA-256(salt + pin) compare —
-//     no server round trip, works offline, and the raw PIN is never sent
-//     over the network, not even when first setting it.
-
+// Personal PIN: server verifies the PIN with a slow hash and a per-account lockout.
+// Offline unlock is available only after this device has successfully verified the
+// current PIN revision online. Never download the server hash or fail open on RPC errors.
 import { supabase } from "./supabaseClient";
 
-const CACHE_PREFIX = "dsmdh_pin_v1_";
-
-export interface CachedPin {
-  hash: string;
-  salt: string;
-}
-
-function cacheKey(profileId: string) {
-  return `${CACHE_PREFIX}${profileId}`;
-}
+const CACHE_PREFIX = "dsmdh_pin_v2_";
+const STATUS_PREFIX = "dsmdh_pin_status_v2_";
+export interface CachedPin { hash: string; salt: string; revision: string; }
+type PinStatus = { hasPin: boolean; revision: string; lockedUntil?: string | null };
 
 export function readCachedPin(profileId: string): CachedPin | null {
+  try { const raw = localStorage.getItem(CACHE_PREFIX + profileId); return raw ? JSON.parse(raw) as CachedPin : null; } catch { return null; }
+}
+function readStatus(profileId: string): PinStatus | null {
+  try { const raw = localStorage.getItem(STATUS_PREFIX + profileId); return raw ? JSON.parse(raw) as PinStatus : null; } catch { return null; }
+}
+function writeStatus(profileId: string, status: PinStatus) {
   try {
-    const raw = localStorage.getItem(cacheKey(profileId));
-    return raw ? (JSON.parse(raw) as CachedPin) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedPin(profileId: string, pin: CachedPin | null) {
-  try {
-    if (pin) localStorage.setItem(cacheKey(profileId), JSON.stringify(pin));
-    else localStorage.removeItem(cacheKey(profileId));
-  } catch {
-    // best-effort — a failed cache write just means the next unlock falls
-    // back to "no PIN configured" until the next successful sync
-  }
-}
-
-async function sha256Hex(text: string): Promise<string> {
-  const bytes = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function randomSalt(): string {
-  const arr = new Uint8Array(16);
-  crypto.getRandomValues(arr);
-  return Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/** Call once after a successful login to pull this profile's PIN (if any) down to this device. */
-export async function syncPinFromServer(profileId: string): Promise<CachedPin | null> {
-  try {
-    const { data, error } = await supabase.from("profiles").select("pin_hash,pin_salt").eq("id", profileId).maybeSingle();
-    if (error || !data) return readCachedPin(profileId);
-    if (data.pin_hash && data.pin_salt) {
-      const pin: CachedPin = { hash: data.pin_hash, salt: data.pin_salt };
-      writeCachedPin(profileId, pin);
-      return pin;
+    const cached = readCachedPin(profileId);
+    if (!status.hasPin || (cached && cached.revision !== status.revision)) {
+      localStorage.removeItem(CACHE_PREFIX + profileId);
+      setBiometricEnabled(profileId, false);
     }
-    // Server has no PIN for this profile (never set, or an owner/manager
-    // just cleared it) — reflect that locally too.
-    writeCachedPin(profileId, null);
-    return null;
-  } catch {
-    // Offline right after login (rare) — fall back to whatever was cached
-    // from a previous session on this device, if any.
-    return readCachedPin(profileId);
-  }
+    localStorage.setItem(STATUS_PREFIX + profileId, JSON.stringify(status));
+    localStorage.removeItem("dsmdh_pin_v1_" + profileId);
+  } catch {}
+}
+function randomSalt(): string {
+  const arr = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function deriveVerifier(pin: string, salt: string): Promise<string> {
+  const enc = new TextEncoder();
+  const material = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:enc.encode(salt),iterations:310000},material,256);
+  return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2,"0")).join("");
+}
+async function cacheVerifiedPin(profileId: string, pin: string, revision: string) {
+  if (!revision) return;
+  writeStatus(profileId,{hasPin:true,revision,lockedUntil:null});
+  try {
+    const salt = randomSalt();
+    const hash = await deriveVerifier(pin,salt);
+    localStorage.setItem(CACHE_PREFIX + profileId,JSON.stringify({hash,salt,revision}));
+  } catch { /* online unlock can succeed even when offline storage is unavailable */ }
+}
+async function isCurrentProfile(profileId: string): Promise<boolean> {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.user.id === profileId;
 }
 
-/** Pure local check — no network call, works offline. */
+/** True means lock the UI. Only an authoritative no-PIN status permits skipping it. */
+export async function syncPinFromServer(profileId: string): Promise<boolean> {
+  try {
+    if (!await isCurrentProfile(profileId)) return true;
+    if (!navigator.onLine) return readStatus(profileId)?.hasPin !== false;
+    const { data, error } = await supabase.rpc("get_own_pin_status");
+    if (error || typeof data?.hasPin !== "boolean" || !data.revision) return true;
+    writeStatus(profileId,{hasPin:data.hasPin,revision:String(data.revision),lockedUntil:data.lockedUntil ?? null});
+    return data.hasPin;
+  } catch { return true; }
+}
+
 export async function verifyPin(profileId: string, enteredPin: string): Promise<boolean> {
-  const cached = readCachedPin(profileId);
-  if (!cached) return false;
-  const hash = await sha256Hex(cached.salt + enteredPin);
-  return hash === cached.hash;
+  if (!/^\d{4}$/.test(enteredPin)) return false;
+  try {
+    if (!await isCurrentProfile(profileId)) return false;
+    if (navigator.onLine) {
+      const {data,error} = await supabase.rpc("verify_own_pin",{p_pin:enteredPin});
+      if (error || data?.ok !== true) return false;
+      await cacheVerifiedPin(profileId,enteredPin,String(data.revision || ""));
+      return true;
+    }
+    const cached = readCachedPin(profileId), status = readStatus(profileId);
+    if (!cached || !status?.hasPin || cached.revision !== status.revision) return false;
+    if (status.lockedUntil && Date.parse(status.lockedUntil) > Date.now()) return false;
+    return await deriveVerifier(enteredPin,cached.salt) === cached.hash;
+  } catch { return false; }
 }
 
 export function hasPinConfigured(profileId: string): boolean {
-  return !!readCachedPin(profileId);
+  return readStatus(profileId)?.hasPin === true;
 }
 
-/** Self-service: set or change your own PIN. Requires the current PIN if one is already set. */
-export async function setMyPin(profileId: string, newPin: string, currentPin?: string): Promise<{ ok: boolean; message: string }> {
-  if (!/^\d{4}$/.test(newPin)) return { ok: false, message: "PIN exactly 4 digits ka hona chahiye." };
-  const existing = readCachedPin(profileId);
-  let oldHash: string | undefined;
-  if (existing) {
-    if (!currentPin) return { ok: false, message: "Pehle apna current PIN daalein." };
-    oldHash = await sha256Hex(existing.salt + currentPin);
-    if (oldHash !== existing.hash) return { ok: false, message: "Current PIN galat hai." };
-  }
-  const newSalt = randomSalt();
-  const newHash = await sha256Hex(newSalt + newPin);
+export async function setMyPin(profileId: string,newPin: string,currentPin?: string): Promise<{ok:boolean;message:string}> {
+  if (!/^\d{4}$/.test(newPin)) return {ok:false,message:"PIN exactly 4 digits ka hona chahiye."};
   try {
-    const { error } = await supabase.rpc("set_my_pin", { p_new_hash: newHash, p_new_salt: newSalt, p_old_hash: oldHash ?? null });
-    if (error) return { ok: false, message: error.message || "PIN save nahi ho paya." };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "PIN save nahi ho paya." };
-  }
-  writeCachedPin(profileId, { hash: newHash, salt: newSalt });
-  return { ok: true, message: "" };
+    if (!await isCurrentProfile(profileId)) return {ok:false,message:"Please sign in again."};
+    const {data,error} = await supabase.rpc("change_my_pin",{p_new_pin:newPin,p_current_pin:currentPin ?? null});
+    if (error) return {ok:false,message:error.message};
+    if (data?.ok !== true) return {ok:false,message:data?.locked ? "Too many attempts. Try again in 2 minutes." : "Current PIN galat hai."};
+    await cacheVerifiedPin(profileId,newPin,String(data.revision || ""));
+    return {ok:true,message:""};
+  } catch(e) { return {ok:false,message:e instanceof Error ? e.message : "PIN save nahi ho paya."}; }
 }
 
-/** Owner/manager: force-set a staff or manager's PIN without knowing the old one. */
-export async function adminResetPin(targetProfileId: string, newPin: string): Promise<{ ok: boolean; message: string }> {
-  if (!/^\d{4}$/.test(newPin)) return { ok: false, message: "PIN exactly 4 digits ka hona chahiye." };
-  const newSalt = randomSalt();
-  const newHash = await sha256Hex(newSalt + newPin);
+export async function adminResetPin(targetProfileId:string,newPin:string):Promise<{ok:boolean;message:string}> {
+  if (!/^\d{4}$/.test(newPin)) return {ok:false,message:"PIN exactly 4 digits ka hona chahiye."};
   try {
-    const { error } = await supabase.rpc("admin_reset_pin", { p_target_id: targetProfileId, p_new_hash: newHash, p_new_salt: newSalt });
-    if (error) return { ok: false, message: error.message || "PIN reset nahi ho paya." };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "PIN reset nahi ho paya." };
-  }
-  // Only affects the cache if we happen to be resetting our own device's
-  // view of that profile (rare) — the target device picks it up on its own
-  // next syncPinFromServer() call (right after their next real login, or
-  // the next periodic sync — see App.tsx wiring).
-  return { ok: true, message: "" };
+    const {error}=await supabase.rpc("admin_reset_account_pin",{p_target_id:targetProfileId,p_new_pin:newPin});
+    return error ? {ok:false,message:error.message} : {ok:true,message:""};
+  } catch(e) { return {ok:false,message:e instanceof Error ? e.message : "PIN reset nahi ho paya."}; }
 }
 
-/** Owner/manager: remove a staff or manager's PIN entirely (they'll be prompted to set a new one). */
-export async function adminClearPin(targetProfileId: string): Promise<{ ok: boolean; message: string }> {
+export async function adminClearPin(targetProfileId:string):Promise<{ok:boolean;message:string}> {
   try {
-    const { error } = await supabase.rpc("admin_clear_pin", { p_target_id: targetProfileId });
-    if (error) return { ok: false, message: error.message || "PIN clear nahi ho paya." };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "PIN clear nahi ho paya." };
-  }
-  return { ok: true, message: "" };
+    const {error}=await supabase.rpc("admin_clear_pin",{p_target_id:targetProfileId});
+    return error ? {ok:false,message:error.message} : {ok:true,message:""};
+  } catch(e) { return {ok:false,message:e instanceof Error ? e.message : "PIN clear nahi ho paya."}; }
 }
 
 // Phase 6: Biometric (fingerprint/Face) unlock, layered ON TOP of the PIN
@@ -164,7 +127,8 @@ function biometricPrefKey(profileId: string) {
 
 export function isBiometricEnabled(profileId: string): boolean {
   try {
-    return localStorage.getItem(biometricPrefKey(profileId)) === "1";
+    const cached = readCachedPin(profileId), status = readStatus(profileId);
+    return !!cached && !!status?.hasPin && cached.revision === status.revision && !(status.lockedUntil && Date.parse(status.lockedUntil) > Date.now()) && localStorage.getItem(biometricPrefKey(profileId)) === "1";
   } catch {
     return false;
   }

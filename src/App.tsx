@@ -1348,10 +1348,10 @@ export default function App() {
       } catch(error){console.warn("Cloud snapshot save failed; local recovery retained",error);setCloudStatus("sync-error");}
       finally{savingCloudRef.current=false;}
     };
-    const timer=window.setTimeout(run,650), interval=window.setInterval(run,15000);
+    const timer=window.setTimeout(run,650), interval=window.setInterval(run,2000);
     window.addEventListener("online",run);
     return()=>{active=false;window.clearTimeout(timer);window.clearInterval(interval);window.removeEventListener("online",run);};
-  }, [db,cloudReady,cloudProfile?.store_id,cloudProfile?.id,gateUnlocked]);
+  }, [cloudReady,cloudProfile?.store_id,cloudProfile?.id,gateUnlocked]);
 
   useEffect(() => {
     if (!cloudUser) return;

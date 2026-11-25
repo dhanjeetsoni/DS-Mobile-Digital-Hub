@@ -1139,6 +1139,7 @@ export default function App() {
   // Supabase bootstrap, realtime sync, offline queue replay, and Telegram retry pump.
   useEffect(() => {
     let active = true;
+    let staffStatePoll: number|undefined;
     let channel: any = null;
     let stockChannel: any = null;
     let catalogChannel: any = null;
@@ -1331,23 +1332,18 @@ export default function App() {
             }
           }).subscribe();
         } else {
-          // 2026-09-05 fix: staff devices were never getting instant
-          // cross-device updates — realtime was skipped for them entirely.
-          // They can't subscribe to raw `store_state` (it has confidential
-          // fields like purchase price / lender data), but a redacted
-          // realtime mirror already exists server-side for exactly this —
-          // `store_state_staff_view`, kept in sync by a DB trigger, same
-          // redaction as the load_store_state_for_user() RPC (see migration
-          // 20260831064309_realtime_store_state_sync_v23.sql). Subscribing
-          // here is the missing wire-up: now a sale/stock change from
-          // Windows or another device reaches every staff Android device
-          // instantly, with no confidential data ever touching the socket.
-          channel = supabase.channel(`store-state-staff-${profile.store_id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'store_state_staff_view', filter: `store_id=eq.${profile.store_id}` }, (payload: any) => {
-            const row = payload.new;
-            if (row?.state) {
-              void acceptRemoteState(row.state,Number(row.version || 0),profile.id,profile.store_id);
-            }
-          }).subscribe();
+          // The shared mirror cannot enforce per-person history visibility.
+          // Poll the account-scoped state instead; live product stock retains
+          // its separate redacted catalog subscription.
+          const refreshStaffState=async()=>{
+            if(!active||!navigator.onLine||savingCloudRef.current)return;
+            try{
+              const fresh=await loadCloudState();
+              if(active&&fresh?.storeId===profile.store_id)await acceptRemoteState(fresh.state,fresh.version,profile.id,profile.store_id);
+            }catch(error){console.warn("Scoped staff state refresh unavailable",error);}
+          };
+          staffStatePoll=window.setInterval(()=>void refreshStaffState(),5000);
+
         }
         await flushOfflineQueue();
       } catch (e) { console.warn("Cloud bootstrap failed", e); setGateUnlocked(false);setOwnerMode(false);setCloudStatus("error"); setCloudReady(true); }
@@ -1355,7 +1351,7 @@ export default function App() {
     bootstrap();
     const reconnect=()=>{if(offlineBootstrapRef.current){const base=cloudBaseRef.current;if(base)cacheCloudSnapshot(base,dbRef.current);window.location.reload();}};
     window.addEventListener("online",reconnect);
-    return () => { window.removeEventListener("online",reconnect); active = false; if (channel) supabase.removeChannel(channel); if (stockChannel) supabase.removeChannel(stockChannel); if (catalogChannel) supabase.removeChannel(catalogChannel); };
+    return () => { window.removeEventListener("online",reconnect); active = false; if(staffStatePoll!==undefined)window.clearInterval(staffStatePoll); if (channel) supabase.removeChannel(channel); if (stockChannel) supabase.removeChannel(stockChannel); if (catalogChannel) supabase.removeChannel(catalogChannel); };
   }, []);
 
   useEffect(() => {

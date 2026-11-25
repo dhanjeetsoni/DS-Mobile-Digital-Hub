@@ -49,9 +49,9 @@ export async function loadCloudState() {
 
   // Read the redacted staff state and version atomically from the same row.
   if (profile.role === "staff") {
-    const { data, error } = await supabase.from("store_state_staff_view").select("state,version,store_id").eq("store_id",profile.store_id).maybeSingle();
-    if (error) throw error;
-    if (!data?.state) return null;
+    const {data,error}=await supabase.rpc("load_scoped_store_state");
+    if(error)throw error;
+    if(!data?.state||data.storeId!==profile.store_id)return null;
     return {state:data.state as Database,version:Number(data.version),storeId:profile.store_id};
   }
 
@@ -487,10 +487,9 @@ async function processOperation(row: any, storeId: string) {
     // Offline invoices may have a temporary number. The server allocates the
     // authoritative number before replay, preventing device collisions.
     if (!invoiceNo || invoiceNo.startsWith("OFF-")) {
-      const currentProfile=await getCurrentProfile();
-      const { data: prefixState } = await supabase.from(currentProfile?.role==="staff"?"store_state_staff_view":"store_state")
-        .select("state").eq("store_id", storeId).maybeSingle();
-      const prefix = prefixState?.state?.settings?.invoicePrefix || "DSM";
+      const prefixState=await loadCloudState();
+      if(!prefixState||prefixState.storeId!==storeId)throw new Error("Cloud state unavailable for invoice prefix");
+      const prefix=prefixState.state.settings?.invoicePrefix||"DSM";
       const { data: reserved, error: reserveError } = await supabase.rpc("reserve_invoice_number", {
         p_store_id: storeId,
         p_prefix: prefix,

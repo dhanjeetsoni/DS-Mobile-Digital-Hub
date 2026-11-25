@@ -853,53 +853,32 @@ ${JSON.stringify(summary)}`;
 // (OCR.space) provider to cross-check against.
 
 async function requireSupabaseUser(req: express.Request, res: express.Response) {
-  const auth = req.header("authorization") || "";
-  const token = auth.replace(/^Bearer\s+/i, "").trim();
-  const url = process.env.SUPABASE_URL || "";
-  const key = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || "";
-  if (!token || !url || !key) {
-    if (ENV_GEMINI_KEYS.length > 0 || process.env.GEMINI_API_KEY) {
-      return { id: "store-local-user", email: "store@local", role: "owner" } as any;
-    }
-    res.status(401).json({ success: false, error: "Authentication required." });
-    return null;
+  const token=(req.header("authorization")||"").replace(/^Bearer\s+/i,"").trim();
+  const url=process.env.SUPABASE_URL||"";
+  const key=process.env.SUPABASE_PUBLISHABLE_KEY||process.env.SUPABASE_ANON_KEY||"";
+  // Local mode must be explicitly configured and bound to loopback. Never
+  // fall back to an owner identity for an invalid cloud token.
+  if(!url&&!key&&!token&&process.env.DSMDH_LOCAL_AI==="true"&&process.env.HOST==="127.0.0.1"&&["127.0.0.1","::1","::ffff:127.0.0.1"].includes(req.socket.remoteAddress||"")){
+    return {id:"store-local-user",email:"store@local",role:"owner"} as any;
   }
-  const client = createClient(url, key, { global: { headers: { Authorization: `Bearer ${token}` } } });
-  const { data, error } = await client.auth.getUser(token);
-  if (error || !data.user) {
-    if (ENV_GEMINI_KEYS.length > 0 || process.env.GEMINI_API_KEY) {
-      return { id: "store-local-user", email: "store@local", role: "owner" } as any;
-    }
-    res.status(401).json({ success: false, error: "Invalid or expired session." });
-    return null;
-  }
-  return data.user;
+  if(!token||!url||!key){res.status(401).json({success:false,error:"Authentication required."});return null;}
+  try{
+    const client=createClient(url,key,{global:{headers:{Authorization:"Bearer "+token}},auth:{persistSession:false}});
+    const {data,error}=await client.auth.getUser(token);
+    if(error||!data.user){res.status(401).json({success:false,error:"Invalid or expired session."});return null;}
+    const {data:allowed,error:accessError}=await client.rpc("current_account_allowed");
+    if(accessError||allowed!==true){res.status(403).json({success:false,error:"Account access disabled or expired."});return null;}
+    return data.user;
+  }catch{res.status(503).json({success:false,error:"Account verification unavailable."});return null;}
 }
-
-// Short in-memory cache of user -> store_id, so every AI request doesn't
-// need an extra round trip to Postgres just to find which key pool to use.
-const storeIdByUserCache = new Map<string, { storeId: string | null; role: string | null; at: number }>();
-const STORE_ID_CACHE_MS = 60_000;
-
-// Same auth check as requireSupabaseUser, but also resolves the caller's
-// store_id (Step 2.1) using the service-role client, so a STAFF member's AI
-// request can draw from their own shop's key pool — staff can never read
-// the keys themselves (see the migration), but they can trigger AI calls
-// that use them, same as the Owner. Also resolves `role`, needed by the
-// /api/business-insights owner/manager gate (fix, 2026-09-04).
-async function requireSupabaseUserAndStore(req: express.Request, res: express.Response) {
-  const user = await requireSupabaseUser(req, res);
-  if (!user) return null;
-  if (!supabaseAdmin || user.id === "store-local-user") {
-    return { user, storeId: null as string | null, role: (user as any).role || "owner" };
-  }
-  const cached = storeIdByUserCache.get(user.id);
-  if (cached && Date.now() - cached.at < STORE_ID_CACHE_MS) return { user, storeId: cached.storeId, role: cached.role };
-  const { data } = await supabaseAdmin.from("profiles").select("store_id, role").eq("id", user.id).maybeSingle();
-  const storeId = data?.store_id || null;
-  const role = data?.role || null;
-  storeIdByUserCache.set(user.id, { storeId, role, at: Date.now() });
-  return { user, storeId, role };
+async function requireSupabaseUserAndStore(req:express.Request,res:express.Response){
+  const user=await requireSupabaseUser(req,res);
+  if(!user)return null;
+  if(user.id==="store-local-user")return {user,storeId:null as string|null,role:"owner"};
+  if(!supabaseAdmin){res.status(503).json({success:false,error:"Server account lookup unavailable."});return null;}
+  const {data,error}=await supabaseAdmin.from("profiles").select("store_id,role").eq("id",user.id).maybeSingle();
+  if(error||!data?.store_id||!["owner","manager","staff"].includes(data.role)){res.status(403).json({success:false,error:"Account profile unavailable."});return null;}
+  return {user,storeId:data.store_id as string,role:data.role as string};
 }
 
 app.get("/api/health", (_req, res) => {
@@ -1648,7 +1627,7 @@ async function start() {
     if (!res.headersSent) res.status(500).json({ error: "Internal server error." });
   });
 
-  app.listen(PORT, "0.0.0.0", () => console.log(`DS Mobile & Digital Hub running on http://0.0.0.0:${PORT}`));
+  app.listen(PORT, process.env.HOST === "127.0.0.1" ? "127.0.0.1" : "0.0.0.0", () => console.log(`DS Mobile & Digital Hub listening on port ${PORT}`));
 }
 
 start().catch((error) => {

@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 const port=4179;
 const server=spawn(process.execPath,["node_modules/vite/bin/vite.js","preview","--host","127.0.0.1","--port",String(port),"--strictPort"],{stdio:"inherit",env:process.env});
 let browser;
@@ -52,11 +53,27 @@ try{
  assert.equal(record.status,"Paid");
  assert.equal(record.amountPaid,record.total);
  console.log("PASS actual local-only counter-service checkout, invoice and persisted payment");
- // Test the new searchable module directory on both desktop and phone.
- const search=owner.getByRole("textbox",{name:"Search tools"});
- await search.fill("backup");
- await owner.getByRole("button",{name:"Backup & Restore",exact:true}).first().waitFor();
- await search.fill("");
+ // Exercise every registered module in a fresh local owner context.
+ const directory=await browser.newPage({viewport:{width:1440,height:900}});
+ directory.on("pageerror",e=>errors.push(e.message));
+ await directory.goto(url,{waitUntil:"domcontentloaded"});
+ await directory.getByText("Owner Confidential Area",{exact:true}).first().click();
+ await directory.getByPlaceholder("Enter Owner Device PIN").fill("1234");
+ await directory.getByRole("button",{name:"Unlock",exact:true}).click();
+ const navSource=readFileSync("src/components/Sidebar.tsx","utf8");
+ const modules=[...navSource.matchAll(/\{\s*key:\s*"([^"]+)",\s*label:\s*"([^"]+)"/g)].map(m=>({key:m[1],label:m[2]}));
+ assert(modules.length>=52,"Feature registry unexpectedly shrank");
+ assert.equal(new Set(modules.map(m=>m.key)).size,modules.length);
+ const search=directory.getByRole("textbox",{name:"Search tools"});
+ for(const module of modules){
+   await search.fill(module.key);
+   await directory.locator('[data-tool-key="'+module.key+'"]').click();
+   await directory.locator('#page[data-current-page="'+module.key+'"]').waitFor();
+   await directory.waitForFunction(()=>!document.querySelector("#page")?.textContent?.includes("Loading view..."));
+   assert((await directory.locator("#page").innerText()).trim().length>0,"Empty module "+module.key);
+   console.log("PASS module render:",module.key);
+ }
+ console.log("PASS registered owner modules:",modules.length);
  const mobile=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  mobile.on("pageerror",e=>errors.push(e.message));
  await mobile.goto(url,{waitUntil:"domcontentloaded"});

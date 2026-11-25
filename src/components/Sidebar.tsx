@@ -534,7 +534,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
         {toolQuery.trim() ? <div className="tool-search-results" aria-label="Tool search results">
           <span className="grp-label">{toolResults.length} matching tools</span>
-          {toolResults.map(item=><button className="navitem" key={item.key} onClick={()=>{onNavigate(item.key);setToolQuery("");}}><span className="ic"><item.icon size={16}/></span><span>{item.label}</span></button>)}
+          {toolResults.map(item=><button className="navitem" data-tool-key={item.key} key={item.key} onClick={()=>{onNavigate(item.key);setToolQuery("");}}><span className="ic"><item.icon size={16}/></span><span>{item.label}</span></button>)}
           {!toolResults.length&&<span className="grp-label">No matching tools. Try a different word.</span>}
         </div>:<>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px 2px" }}>

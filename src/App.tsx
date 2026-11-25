@@ -4773,16 +4773,17 @@ export default function App() {
                     const payload =
                       isCloudConfigured && cloudProfile?.store_id
                         ? await fetchFullBackup(cloudProfile.store_id, db)
-                        : db;
+                        : {format:"dsmdh-local-v1",exportedAt:new Date().toISOString(),blobState:db};
+                    if(!window.confirm("This file contains private business information. Save it securely. Continue?"))return;
                     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
                     const a = document.createElement("a");
                     a.href = URL.createObjectURL(blob);
                     a.download = `dsmdh-backup-${todayStr()}.json`;
-                    a.click();
+                    a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
                     if (!(isCloudConfigured && cloudProfile?.store_id)) {
-                      showToast("Offline hone ki wajah se sirf local settings backup hui — products/sales shamil nahi.", "amber");
+                      showToast("Local snapshot exported. It is not a complete server backup.", "amber");
                     } else {
-                      showToast("Backup downloaded — products/sales/purchases/etc. sab cloud tables se shamil hain.", "green");
+                      showToast("Verified business checkpoint downloaded. Storage object files are separate.", "green");
                     }
                   } catch (e) {
                     showToast(e instanceof Error ? e.message : "Backup fail ho gaya", "red");
@@ -4792,41 +4793,28 @@ export default function App() {
                 <Download size={14} /> Download JSON Backup
               </button>
             </div>
-            <p className="hint" style={{ marginTop: "8px" }}>
-              Backup mein settings/expenses/notes (blob) aur products/sales/purchases/etc. (cloud tables) dono shamil hain.
-              Neeche "Restore" sirf blob wale hisse ko wapas laata hai — products/sales cloud mein hi surakshit hain, unhe restore karne ki zaroorat nahi padti.
-            </p>
-
-            <p className="hint" style={{ marginTop: "10px" }}>
-              Ye backup export hamesha sabse latest stock aur catalog (photo, MRP, warranty, waghera)
-              use karta hai — jaisa is device par abhi dikh raha hai, waisa hi save hoga, chahe wo
-              stock kisi doosre device se update hua ho.
-            </p>
-
-            <div style={{ marginTop: "24px" }}>
-              <label className="hint">Restore from JSON backup:</label>
-              <br />
-              <input
-                type="file"
-                accept="application/json"
-                style={{ marginTop: "6px" }}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const r = new FileReader();
-                  r.onload = () => {
-                    try {
-                      const parsed = JSON.parse(r.result as string);
-                      saveState(parsed);
-                      showToast("Database restored successfully!", "green");
-                    } catch (err) {
-                      showToast("Invalid JSON file", "red");
-                    }
-                  };
-                  r.readAsText(file);
-                }}
-              />
-            </div>
+            <p className="hint">Cloud export uses a verified server business checkpoint. It does not include photo files, Auth credentials or project secrets. Keep a separate encrypted copy.</p>
+            {cloudProfile?.store_id || localStorage.getItem("dsmdh_cloud_identity_seen") ? (
+              <p className="hint">Cloud restore/reset is available only through the controlled operator recovery procedure. A device JSON file cannot overwrite the shared business ledger.</p>
+            ) : <div style={{marginTop:24}}>
+              <label className="hint">Restore a local JSON snapshot:</label><br/>
+              <input type="file" accept="application/json" onChange={async(e)=>{
+                const file=e.target.files?.[0];e.target.value="";if(!file)return;
+                if(file.size>50*1024*1024){showToast("Backup is too large to import safely.","red");return;}
+                try{
+                  const raw=JSON.parse(await file.text());
+                  const parsed=raw?.format==="dsmdh-local-v1"?raw.blobState:raw;
+                  if(!parsed||typeof parsed!=="object"||!parsed.settings||typeof parsed.settings!=="object"||!Array.isArray(parsed.products)||!Array.isArray(parsed.sales)||!Array.isArray(parsed.customers)||!Array.isArray(parsed.stockBatches))throw new Error("Invalid local backup format");
+                  const defaults=defaultDB();
+                  const candidate={...defaults,...parsed,settings:{...defaults.settings,...parsed.settings}} as Database;
+                  for(const product of candidate.products)if(typeof product.id!=="string"||!Number.isFinite(product.stock)||product.stock<0)throw new Error("Invalid product stock in backup");
+                  for(const sale of candidate.sales)if(typeof sale.id!=="string"||!Array.isArray(sale.items)||!Number.isFinite(sale.total)||sale.total<0)throw new Error("Invalid invoice in backup");
+                  if(!window.confirm("Replace this device's local data? Export your current local backup first."))return;
+                  persistLocalState(candidate);dbRef.current=candidate;setDb(candidate);
+                  showToast("Local snapshot restored.","green");
+                }catch(error){showToast(error instanceof Error?error.message:"Invalid JSON backup","red");}
+              }}/>
+            </div>}
           </div>
         );
 
@@ -6010,7 +5998,7 @@ export default function App() {
           })}
         </div>
 
-        <div id="page">
+        <div id="page" data-current-page={currentPage}>
           <React.Suspense
             fallback={
               <div className="section" style={{ padding: "48px 24px", textAlign: "center", color: "var(--ink-soft)" }}>

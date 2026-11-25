@@ -354,32 +354,11 @@ export async function setProductReviewStatus(storeId: string, productId: string,
  * alongside the blob (which still holds settings/whatever hasn't been
  * migrated) so a downloaded backup is actually complete.
  */
-export async function fetchFullBackup(storeId: string, blobState: Database): Promise<Record<string, unknown>> {
-  const tables = [
-    "products", "sales", "sale_items", "invoices", "purchases", "purchase_items",
-    "expenses", "personal_drawings", "returns", "exchanges", "exchange_items",
-    "warranty_claims", "suppliers", "supplier_transactions", "customers",
-    "customer_payments", "stock_movements", "stock_batches",
-  ] as const;
-  const relational: Record<string, unknown> = {};
-  await Promise.all(
-    tables.map(async (table) => {
-      try {
-        const { data, error } = await supabase.from(table).select("*").eq("store_id", storeId);
-        relational[table] = error ? { error: error.message } : data || [];
-      } catch (e) {
-        relational[table] = { error: e instanceof Error ? e.message : String(e) };
-      }
-    })
-  );
-  return {
-    exportedAt: new Date().toISOString(),
-    // Kept for transparency about the hybrid architecture — anything NOT
-    // yet migrated relationally (settings, and any field still blob-only)
-    // lives here; everything transactional lives in `relational` below.
-    blobState,
-    relational,
-  };
+export async function fetchFullBackup(storeId:string,_blobState:Database):Promise<Record<string,unknown>>{
+  const {data,error}=await supabase.rpc("export_shop_checkpoint");
+  if(error)throw error;
+  if(!data?.payload||data.storeId!==storeId||!data.sha256)throw new Error("Verified shop backup unavailable");
+  return data;
 }
 
 export async function saveCloudState(state: Database, expectedVersion: number, scope: {profileId:string;storeId:string}) {

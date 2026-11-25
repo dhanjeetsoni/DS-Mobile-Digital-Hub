@@ -16,7 +16,8 @@ import {
 import { inr, round2, numberToWordsIndian, computeSaleTotals, computeDiscountPercent } from "./utils/indianCurrency";
 import { uid, todayStr, nowTimeStr, genSku, backfillMissingSkus, addStockBatch, consumeFIFO, fifoCostTotal, getAvailableStock } from "./utils/fifoEngine";
 import { naturalMatch } from "./utils/naturalSearch";
-import { Sidebar, SECONDARY_NAV_ITEMS } from "./components/Sidebar";
+import { Sidebar, PRIMARY_NAV_ITEMS, SECONDARY_NAV_ITEMS } from "./components/Sidebar";
+import { RetailCommandBar, RetailQuickRail } from "./components/RetailCommandBar";
 import BottomTabBar from "./components/BottomTabBar";
 import { RetailHero } from "./components/RetailHero";
 // Phase 16: was a static import, which pulled the whole @zxing/browser barcode
@@ -5654,6 +5655,17 @@ export default function App() {
   // deliberately excludes these) for the Stock Review Queue's badge.
   const stockReviewPendingCount = db.products.filter((p) => p.reviewStatus === "pending_review").length;
 
+  const allowedRetailTools=[...PRIMARY_NAV_ITEMS,...SECONDARY_NAV_ITEMS].filter(item=>{
+    if(isMobileStaffFixedNavActive)return ["sell","products","lowstock","salesToday"].includes(item.key);
+    if(isMobileOwnerLiteProActive&&ownerMobileMode==="lite")return item.key==="sell";
+    if(isStaffIdentity){const keys=staffAllowedSections?.length?staffAllowedSections:["sell","photoFinder"];return keys.includes(item.key)&&!("ownerOnly" in item&&item.ownerOnly);}
+    if(!ownerMode)return ["sell","photoFinder"].includes(item.key);
+    return true;
+  });
+  const navigateRetail=(key:string)=>{
+    if(!allowedRetailTools.some(item=>item.key===key))return;
+    setCurrentPage(key);setIsMobileNavOpen(false);
+  };
   return (
     <div id="app" className={privacyMode ? "privacy-shield-active" : ""}>
       <MoneyAnimation />
@@ -5755,7 +5767,7 @@ export default function App() {
                   Airtel Mitra
                 </span>
                 <span style={{ fontSize: "13px", fontFamily: "var(--font-mono)", fontWeight: 800, color: "var(--ink)" }}>
-                  {inr((db.lapuWallets?.find(w => w.operator === "Airtel Mitra")?.actualBalance) || 12450.20)}
+                  {inr((db.lapuWallets?.find(w => w.operator === "Airtel Mitra")?.actualBalance) ?? 0)}
                 </span>
               </div>
               <div style={{ width: "1px", height: "24px", background: "var(--line)" }}></div>
@@ -5764,7 +5776,7 @@ export default function App() {
                   JioPOS Plus
                 </span>
                 <span style={{ fontSize: "13px", fontFamily: "var(--font-mono)", fontWeight: 800, color: "var(--ink)" }}>
-                  {inr((db.lapuWallets?.find(w => w.operator === "JioPOS Plus")?.actualBalance) || 8920.00)}
+                  {inr((db.lapuWallets?.find(w => w.operator === "JioPOS Plus")?.actualBalance) ?? 0)}
                 </span>
               </div>
             </div>
@@ -5816,7 +5828,7 @@ export default function App() {
                 cloud sign-in/sign-out — it's a different, shared account from their
                 own staffAuth login, and signing it out would break sync for everyone. */}
             {ownerMode && cloudProfile?.role !== "staff" && (
-              <button className="btn sm" onClick={() => setShowCloudAuth(true)} title="Cloud account — email/password, syncs data across all devices (alag hai Owner Device PIN se)"><span className={`status-dot ${cloudStatus}`}></span> {cloudUser ? "Cloud Online" : "Cloud Sign In"}</button>
+              <button className="btn sm" onClick={() => setShowCloudAuth(true)} title="Cloud account — email/password, syncs data across all devices (alag hai Owner Device PIN se)"><span className={`status-dot ${cloudStatus}`}></span> {cloudUser ? "Cloud Account" : "Cloud Sign In"}</button>
             )}
             {/* Step 4.4 — chhota, hamesha visible connection badge (Owner + Staff dono ko
                 dikhta hai). Owner-only bade Status Dashboard (Step 9) se alag purpose:
@@ -5967,58 +5979,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Quick Counter Strip for 1-Tap Counter Task Switching */}
-        <div
-          className="hscroll-fade"
-          style={{
-            background: "var(--card)",
-            borderBottom: "1px solid var(--line)",
-            padding: "8px 24px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            overflowX: "auto",
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ fontSize: "11px", fontWeight: 800, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.05em", marginRight: "4px" }}>
-            ⚡ Counter:
-          </span>
-          {[
-            { key: "dashboard", label: "🏠 Dashboard", color: "var(--brand)" },
-            { key: "sell", label: "🛒 New Bill ()", color: "var(--blue)" },
-            { key: "xeroxGrid", label: "🖨️ 1-Tap Xerox ()", color: "var(--green)" },
-            { key: "imeiTracker", label: "📱 Mobiles / IMEI", color: "var(--purple)" },
-            { key: "gallaClosing", label: "💰 Galla ()", color: "var(--amber)" },
-            { key: "jobs", label: "🔧 Repairs ()", color: "var(--purple)" },
-            { key: "khata", label: "📒 Khata ()", color: "var(--red)" },
-            { key: "modelsearch", label: "🔍 Glass/Cover Finder", color: "var(--accent)" },
-          ].map((tab) => {
-            const isActive = currentPage === tab.key;
-            return (
-              <button
-                key={tab.key}
-                onClick={() => setCurrentPage(tab.key)}
-                style={{
-                  padding: "5px 12px",
-                  borderRadius: "8px",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  border: "1px solid",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  transition: "all 0.15s ease",
-                  background: isActive ? tab.color : "var(--paper)",
-                  color: isActive ? "#ffffff" : "var(--ink)",
-                  borderColor: isActive ? tab.color : "var(--line)",
-                  boxShadow: isActive ? "0 2px 4px rgba(0,0,0,0.12)" : "none",
-                }}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
+        <RetailCommandBar tools={allowedRetailTools} currentPage={currentPage} onNavigate={navigateRetail}/>
+        <RetailQuickRail tools={allowedRetailTools} currentPage={currentPage} onNavigate={navigateRetail}/>
 
         <div id="page" data-current-page={currentPage}>
           <React.Suspense

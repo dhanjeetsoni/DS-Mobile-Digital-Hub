@@ -274,6 +274,7 @@ export default function App() {
   dbRef.current = db;
   const cloudBaseRef = useRef<{state:Database;version:number;profileId:string;storeId:string}|null>(null);
   const savingCloudRef = useRef(false);
+  const offlineBootstrapRef = useRef(false);
 
   const [ownerMode, setOwnerMode] = useState(false);
   const initialRoutePage = (() => {
@@ -1084,6 +1085,16 @@ export default function App() {
   const [editingJobCostId, setEditingJobCostId] = useState<string | null>(null);
   const [jobCostDraft, setJobCostDraft] = useState({ estCost: 0, otherCost: 0 });
 
+  // Never restore a different account's aggregate shop cache. A cached
+  // identity is only usable offline with the same persisted Auth session.
+  const profileCacheKey=(id:string)=>"dsmdh_verified_profile_v1_"+id;
+  const stateCacheKey=(id:string)=>"dsmdh_scoped_state_v1_"+id;
+  const cacheCloudIdentity=(profile:any)=>{
+    try{localStorage.setItem("dsmdh_cloud_identity_seen","1");localStorage.setItem(profileCacheKey(profile.id),JSON.stringify(profile));}catch(error){console.warn("Profile cache unavailable",error);}
+  };
+  const cacheCloudSnapshot=(base:{state:Database;version:number;profileId:string;storeId:string},local:Database)=>{
+    try{localStorage.setItem(stateCacheKey(base.profileId),JSON.stringify({storeId:base.storeId,version:base.version,base:base.state,local}));}catch(error){console.warn("Scoped cache unavailable",error);}
+  };
   const normalizeCloudState=(state:Database):Database=>{
     const defaults=defaultDB();
     return {...defaults,...state,settings:{...defaults.settings,...(state.settings||{})}};
@@ -1103,6 +1114,7 @@ export default function App() {
       }
     } catch(error){console.warn("Recovery read failed",error);setCloudStatus("sync-error");}
     dbRef.current=next;setDb(next);setCloudVersion(version);
+    cacheCloudSnapshot(cloudBaseRef.current!,next);
   };
   const acceptRemoteState=async(state:Database,version:number,profileId:string,storeId:string)=>{
     const base=cloudBaseRef.current;
@@ -1115,6 +1127,7 @@ export default function App() {
     }
     cloudBaseRef.current={...base,state:structuredClone(remote),version};
     dbRef.current=merged.state;setDb(merged.state);setCloudVersion(version);
+    cacheCloudSnapshot(cloudBaseRef.current!,merged.state);
   };
 
   // Supabase bootstrap, realtime sync, offline queue replay, and Telegram retry pump.
@@ -1126,10 +1139,32 @@ export default function App() {
     const bootstrap = async () => {
       try {
         setCloudStatus("connecting");
+        if(isCloudConfigured&&!navigator.onLine){
+          const {data:sessionData}=await supabase.auth.getSession();
+          const sessionUser=sessionData.session?.user;
+          if(sessionUser){
+            const profile=JSON.parse(localStorage.getItem(profileCacheKey(sessionUser.id))||"null");
+            const cached=JSON.parse(localStorage.getItem(stateCacheKey(sessionUser.id))||"null");
+            if(!profile||profile.id!==sessionUser.id||!cached?.base||!cached?.local||cached.storeId!==profile.store_id)throw new Error("Reconnect to verify account and load its offline data");
+            if(profile.role!=="owner"&&(!profile.access_enabled||isAccessWindowExpired(profile)))throw new Error("Account disabled or expired");
+            if(profile.role==="staff"){
+              const policy=readCachedStaffSession();
+              if(!policy||policy.staffId!==profile.id||isOutsideDailyWindow(policy.dailyStart??null,policy.dailyEnd??null))throw new Error("Reconnect to verify staff policy");
+            }
+            let next=normalizeCloudState(cached.local);
+            const pending=await readSnapshotRecovery(profile.id,profile.store_id);
+            if(pending)next=normalizeCloudState(pending.local);
+            cloudBaseRef.current={state:normalizeCloudState(cached.base),version:Number(cached.version),profileId:profile.id,storeId:profile.store_id};
+            dbRef.current=next;setDb(next);setCloudVersion(Number(cached.version));
+            setCloudUser(sessionUser);setCloudProfile(profile);setOwnerMode(profile.role==="owner"||profile.role==="manager");
+            setGateStage("personalPin");setGateUnlocked(!(await syncPinFromServer(profile.id)));
+            setCloudStatus("offline");setCloudReady(true);offlineBootstrapRef.current=true;return;
+          }
+        }
         const { data } = await supabase.auth.getUser();
         if (!active) return;
         setCloudUser(data.user ?? null);
-        if (!data.user) {
+        if (!data.user && !localStorage.getItem("dsmdh_cloud_identity_seen")) {
           try {
             const raw = localStorage.getItem("dsmdh_cache_v4") || localStorage.getItem("dsmdh_db_v2");
             if (raw) {
@@ -1143,6 +1178,7 @@ export default function App() {
         }
         const profile = await getCurrentProfile();
         setCloudProfile(profile);
+        if(data.user&&!profile)throw new Error("Signed-in account profile unavailable");
         if (profile?.role === "manager" && (!profile.access_enabled || isAccessWindowExpired(profile))) {
           clearCachedStaffSession();
           await supabase.auth.signOut().catch(() => {});
@@ -1216,6 +1252,7 @@ export default function App() {
         const remote = await loadCloudState();
         if (!remote?.state) throw new Error("Cloud state unavailable; autosave disabled");
         await initializeCloudState(remote.state,remote.version,profile.id,profile.store_id);
+        cacheCloudIdentity(profile);
         // Phase 1 (data architecture fix): seed the live-stock map once,
         // then keep it current via realtime — independent of the (slower,
         // conflict-prone) store_state blob save/load cycle above.
@@ -1300,7 +1337,9 @@ export default function App() {
       } catch (e) { console.warn("Cloud bootstrap failed", e); setCloudStatus("error"); setCloudReady(true); }
     };
     bootstrap();
-    return () => { active = false; if (channel) supabase.removeChannel(channel); if (stockChannel) supabase.removeChannel(stockChannel); if (catalogChannel) supabase.removeChannel(catalogChannel); };
+    const reconnect=()=>{if(offlineBootstrapRef.current){const base=cloudBaseRef.current;if(base)cacheCloudSnapshot(base,dbRef.current);window.location.reload();}};
+    window.addEventListener("online",reconnect);
+    return () => { window.removeEventListener("online",reconnect); active = false; if (channel) supabase.removeChannel(channel); if (stockChannel) supabase.removeChannel(stockChannel); if (catalogChannel) supabase.removeChannel(catalogChannel); };
   }, []);
 
   useEffect(() => {
@@ -1340,6 +1379,7 @@ export default function App() {
         }
         cloudBaseRef.current={...base,state:structuredClone(savedState),version};
         dbRef.current=after.state;
+        cacheCloudSnapshot(cloudBaseRef.current!,after.state);
         if(!sameState(latest,after.state))setDb(after.state);
         setCloudVersion(version);
         if(sameState(after.state,savedState)) await clearSnapshotRecovery(base.profileId,base.storeId);
@@ -1739,9 +1779,11 @@ export default function App() {
     // unconditionally here rather than trying to remember it at each of
     // the many stock-changing call sites.
     syncOutOfStockTimestamps(updated.products);
-    setDb(updated);
+    dbRef.current=updated;setDb(updated);
     try {
-      persistLocalState(updated);
+      const base=cloudBaseRef.current;
+      if(base)cacheCloudSnapshot(base,updated);
+      else if(!localStorage.getItem("dsmdh_cloud_identity_seen"))persistLocalState(updated);
     } catch (e) {
       console.error("Local cache save error", e);
     }
@@ -6732,47 +6774,10 @@ export default function App() {
         </div>
       )}
       {showCloudAuth && <CloudAuthPanel userEmail={cloudUser?.email} onClose={() => setShowCloudAuth(false)} onChanged={async () => {
-        // Step 1.3 fix: while we re-check who's signed in after a fresh
-        // sign-in/sign-out, mark cloudReady false so screens like Staff
-        // Access Manager show a loading state instead of a stale/premature
-        // "Store not set up" error during this brief refetch window.
-        setCloudReady(false);
+        // Rebuild all account-specific channels, cache scope and PIN gates
+        // rather than retaining the old identity in React state after login.
         cloudBaseRef.current=null;
-        try {
-          const { data } = await supabase.auth.getUser();
-          setCloudUser(data.user ?? null);
-          const profile = await getCurrentProfile();
-          setCloudProfile(profile);
-          // CRITICAL: must pull the real store_state down here, the exact
-          // same way the initial bootstrap effect does on app load. Without
-          // this, `db` stays whatever it already was in this session — on
-          // a fresh install/reinstall that's an empty defaultDB() — and the
-          // save-effect below (which fires the moment cloudReady flips back
-          // to true) then pushes that EMPTY state up to the cloud,
-          // permanently overwriting the real synced data. This was
-          // confirmed live: store_state had a high version number (many
-          // past syncs) but 0 products/0 sales — i.e. a sign-in had already
-          // wiped it this way before this fix.
-          if (profile?.store_id) {
-            const remote = await loadCloudState();
-            if (!remote?.state) throw new Error("Cloud state unavailable; autosave disabled");
-            await initializeCloudState(remote.state,remote.version,profile.id,profile.store_id);
-          }
-          // 2026-09-06 fix: this in-app "Settings → Cloud Sign In" path is a
-          // second, separate route into a real cloud session — distinct
-          // from the main bootstrap effect on app launch, which is the only
-          // place syncPinFromServer() was being called. Signing in here
-          // never cached this profile's PIN, so their PIN unlock silently
-          // had nothing to check against until an unrelated full page
-          // reload happened to re-run the bootstrap effect. Mirror the same
-          // call here so the PIN works immediately after this sign-in too.
-          if (profile?.id && await syncPinFromServer(profile.id)) {
-            setGateStage("personalPin");
-            setGateUnlocked(false);
-          }
-        } finally {
-          setCloudReady(true);
-        }
+        window.location.reload();
       }} />}
 
       {/* Quick Add Custom Service Modal */}

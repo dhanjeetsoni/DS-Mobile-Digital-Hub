@@ -98,6 +98,23 @@ try{
  await search.fill("dashboard");await directory.locator('[data-tool-key="dashboard"]').click();
  await directory.locator(".retail-hero-dashboard .retail-phone").waitFor();
  console.log("PASS motion preference and 3D dashboard artwork");
+ await directory.getByRole("button",{name:"Open global tool search"}).click();
+ await directory.getByRole("textbox",{name:"Find a tool"}).fill("appearanceStudio");
+ await directory.locator('[data-command-key="appearanceStudio"]').click();
+ await directory.locator('#page[data-current-page="appearanceStudio"]').waitFor();
+ const ids=[...readFileSync("theme/themes.ts","utf8").matchAll(/id: "([a-z]+)",/g)].map(m=>m[1]);
+ assert.equal(ids.length,11);
+ for(const id of ids){
+  await directory.locator('[data-theme-choice="'+id+'"]').click();
+  for(const mode of ["Light","Dark"]){
+   await directory.getByRole("button",{name:mode,exact:true}).click();
+   assert.equal(await directory.locator("html").getAttribute("data-theme"),id);
+   assert.equal(await directory.locator("html").getAttribute("data-mode"),mode.toLowerCase());
+   const tokens=await directory.evaluate(()=>["--canvas","--surface","--ink","--brand","--accent"].map(k=>getComputedStyle(document.documentElement).getPropertyValue(k).trim()));
+   assert(tokens.every(v=>/^#[0-9a-f]{6}$/i.test(v)),"Theme token missing: "+id+"/"+mode);
+  }
+ }
+ console.log("PASS all 22 light/dark palettes and global tool search");
  await search.fill("products");await directory.locator('[data-tool-key="products"]').click();
  await directory.getByRole("textbox",{name:"Search inventory"}).fill("zzzz-ci-no-matching-product");
  await directory.getByText("No matching products. Try another search or reset filters.").waitFor();

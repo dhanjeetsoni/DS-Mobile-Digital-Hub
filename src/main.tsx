@@ -13,6 +13,7 @@ import '../styles/index.css';
 import './theme-bridge.css';
 import './fx.css';
 import './retail-premium.css';
+import './retail-studio-v2.css';
 import {applyRetailMotion,getRetailMotion} from './components/RetailHero';
 import { startAppearanceSync } from '../theme';
 

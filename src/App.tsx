@@ -1104,7 +1104,13 @@ export default function App() {
     cloudBaseRef.current={state:structuredClone(remote),version,profileId,storeId};
     let next=remote;
     try {
-      const pending=await readSnapshotRecovery(profileId,storeId);
+      let pending=await readSnapshotRecovery(profileId,storeId);
+      // A synchronous saveState cache may be newer than the debounced
+      // SQLite recovery record (e.g. app closed immediately after editing).
+      const cached=JSON.parse(localStorage.getItem(stateCacheKey(profileId))||"null");
+      if(cached?.storeId===storeId&&cached.base&&cached.local&&!sameState(cached.base,cached.local)){
+        pending={scope:{profileId,storeId},base:cached.base,local:cached.local,version:Number(cached.version),conflicts:[]};
+      }
       if(pending){
         const result=mergeStoreState(pending.base,pending.local,remote);
         if(result.conflicts.length){
@@ -1153,7 +1159,7 @@ export default function App() {
             }
             let next=normalizeCloudState(cached.local);
             const pending=await readSnapshotRecovery(profile.id,profile.store_id);
-            if(pending)next=normalizeCloudState(pending.local);
+            if(pending&&sameState(cached.base,cached.local))next=normalizeCloudState(pending.local);
             cloudBaseRef.current={state:normalizeCloudState(cached.base),version:Number(cached.version),profileId:profile.id,storeId:profile.store_id};
             dbRef.current=next;setDb(next);setCloudVersion(Number(cached.version));
             setCloudUser(sessionUser);setCloudProfile(profile);setOwnerMode(profile.role==="owner"||profile.role==="manager");

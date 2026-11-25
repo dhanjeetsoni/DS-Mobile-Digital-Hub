@@ -25,7 +25,7 @@ export function RetailCommandBar({tools,currentPage,onNavigate}:Props){
    {open&&<div className="retail-command-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close();}}>
     <div ref={dialog} className="retail-command-dialog" role="dialog" aria-modal="true" aria-label="Global tool search" onKeyDown={e=>{
       if(e.key==="Escape"){e.stopPropagation();close();}
-      if(e.key==="Tab"){const f=Array.from(dialog.current?.querySelectorAll<HTMLElement>("button:not(:disabled),input")||[]);if(f.length&&e.shiftKey&&document.activeElement===f[0]){e.preventDefault();f[f.length-1].focus();}else if(f.length&&!e.shiftKey&&document.activeElement===f[f.length-1]){e.preventDefault();f[0].focus();}}
+      if(e.key==="Tab"){const f=Array.from(dialog.current?.querySelectorAll("button:not(:disabled),input")||[]) as HTMLElement[];if(f.length&&e.shiftKey&&document.activeElement===f[0]){e.preventDefault();f[f.length-1].focus();}else if(f.length&&!e.shiftKey&&document.activeElement===f[f.length-1]){e.preventDefault();f[0].focus();}}
     }}>
       <div className="retail-command-input"><Search size={22}/><input ref={input} aria-label="Find a tool" placeholder="Find billing, stock, reports…" value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&results.length)go(results[0].key);}}/><button type="button" className="retail-icon-button" aria-label="Close global search" onClick={close}><X size={20}/></button></div>
       <div className="retail-command-hint"><History size={14}/> {normalized?results.length+" results":"Favorites and recent tools first"}<span><Command size={12}/> K</span></div>

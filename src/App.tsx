@@ -2245,6 +2245,10 @@ export default function App() {
     // Validate every line before mutating local state. Staff cannot bypass this rule.
     for (const item of cart) {
       const prod = workingDb.products.find((p) => p.id === item.productId);
+      if (!prod && item.productId.startsWith("svc_") && item.isService) {
+        if(!item.name.trim()||!Number.isFinite(item.price)||item.price<0||!Number.isFinite(item.qty)||item.qty<=0){showToast("Invalid service line.","red");return;}
+        continue;
+      }
       if (!prod) { showToast("Product not found.", "red"); return; }
       // Step 4.1 fix: gate on the real FIFO batch total, not the denormalized
       // `product.stock` counter. The two can drift (see getAvailableStock's
@@ -2355,6 +2359,7 @@ export default function App() {
         selectedImeis: item.selectedImeis,
         mrp: item.mrp ?? null,
         isGift: item.isGift || false,
+        isService: item.isService === true,
         giftSellingPrice: item.giftSellingPrice ?? null,
         customTerms: item.customTerms || prod?.customTerms,
         customQuote: item.customQuote || prod?.customQuote,
@@ -2410,6 +2415,7 @@ export default function App() {
         // every sale of a locally-created product fails with an invalid-uuid
         // error and never reaches the server (see resolve_product_for_sale()).
         const resolvedItems = await Promise.all(saleItems.map(async (i) => {
+          if(i.isService)return {product_id:null,is_service:true,service_name:i.name,service_category:i.category,service_note:i.customQuote??null,quantity:i.qty,unit_price:i.price};
           const { data: realId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
             p_store_id: cloudProfile.store_id,
             p_local_id: String(i.productId),
@@ -6820,21 +6826,8 @@ export default function App() {
         <QuickServiceModal
           isOpen={isQuickServiceOpen}
           onClose={() => setIsQuickServiceOpen(false)}
-          onAddService={(serviceItem) => {
-            setCart((prev) => [
-              ...prev,
-              {
-                productId: serviceItem.productId,
-                name: serviceItem.name,
-                price: serviceItem.price,
-                qty: 1,
-                imei: "",
-                selectedImeis: [],
-              },
-            ]);
-            playScanPip();
-            showToast(`Added custom service: ${serviceItem.name} (${inr(serviceItem.price)})`, "green");
-          }}
+          onAddServiceToCart={(serviceItem) => setCart(prev=>[...prev,serviceItem])}
+          showToast={(msg,kind)=>showToast(msg,kind==="red"?"red":kind==="amber"?"amber":"green")}
         />
       )}
 

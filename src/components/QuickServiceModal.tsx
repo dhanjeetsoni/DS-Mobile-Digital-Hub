@@ -59,7 +59,8 @@ export const QuickServiceModal: React.FC<QuickServiceModalProps> = ({
     }
 
     const cartItem: CartItem = {
-      productId: `svc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      productId: `svc_${crypto.randomUUID()}`,
+      isService: true,
       name: serviceName.trim(),
       category: serviceCategory.trim() || "Counter Services",
       qty: 1,

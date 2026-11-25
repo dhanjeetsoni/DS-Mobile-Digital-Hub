@@ -505,6 +505,7 @@ async function processOperation(row: any, storeId: string) {
     // product id before replaying the sale, or it fails permanently with an
     // invalid-uuid error (see resolve_product_for_sale()).
     const resolvedItems = await Promise.all((sale.items || []).map(async (item: any) => {
+      if(item.isService===true)return {product_id:null,is_service:true,service_name:item.name,service_category:item.category,service_note:item.customQuote??null,quantity:item.qty,unit_price:item.price};
       const { data: realId, error: resolveError } = await supabase.rpc("resolve_product_for_sale", {
         p_store_id: storeId,
         p_local_id: String(item.productId),

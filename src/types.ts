@@ -216,6 +216,7 @@ export interface Product {
 
 export interface CartItem {
   productId: string;
+  isService?: boolean;
   name: string;
   category: string;
   qty: number;
@@ -248,6 +249,7 @@ export interface CartItem {
 
 export interface SaleItem {
   productId: string;
+  isService?: boolean;
   name: string;
   category: string;
   qty: number;

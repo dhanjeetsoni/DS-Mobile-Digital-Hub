@@ -98,6 +98,12 @@ try{
  await search.fill("dashboard");await directory.locator('[data-tool-key="dashboard"]').click();
  await directory.locator(".retail-hero-dashboard .retail-phone").waitFor();
  console.log("PASS motion preference and 3D dashboard artwork");
+ await search.fill("products");await directory.locator('[data-tool-key="products"]').click();
+ await directory.getByRole("textbox",{name:"Search inventory"}).fill("zzzz-ci-no-matching-product");
+ await directory.getByText("No matching products. Try another search or reset filters.").waitFor();
+ await directory.getByRole("button",{name:"Reset filters"}).click();
+ assert.equal(await directory.getByRole("textbox",{name:"Search inventory"}).inputValue(),"");
+ console.log("PASS inventory search and filter reset");
  const mobile=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  mobile.on("pageerror",e=>errors.push(e.message));
  await mobile.goto(url,{waitUntil:"domcontentloaded"});

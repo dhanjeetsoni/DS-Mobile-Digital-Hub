@@ -35,7 +35,7 @@ function getLayer(): HTMLDivElement {
  * appear). Cleans up after itself; safe to call repeatedly in a row.
  */
 export function celebrate(pieceCount = 18): void {
-  if (typeof document === "undefined" || prefersReducedMotion()) return;
+  if (typeof document === "undefined" || prefersReducedMotion() || document.hidden || document.documentElement.dataset.retailMotion==="quiet") return;
 
   const layer = getLayer();
   const originX = window.innerWidth - 140; // near the toast stack, top-right

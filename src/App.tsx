@@ -412,6 +412,10 @@ export default function App() {
   // Phase 7: Product Catalog view mode — "grid" (default, Amazon/Flipkart-
   // style photo-forward cards) or "table" (dense spreadsheet view, opt-in).
   const [productViewMode, setProductViewMode] = useState<"grid" | "table">("grid");
+  const [inventoryQuery,setInventoryQuery]=useState("");
+  const [inventoryCategory,setInventoryCategory]=useState("");
+  const [inventoryStock,setInventoryStock]=useState("all");
+  const [inventorySort,setInventorySort]=useState("name");
   // Phase 7: dedicated product detail page — set to a product id to show
   // a full-page takeover (App.tsx renders ProductDetailView instead of the
   // normal page body while this is set) instead of a modal, matching how
@@ -3995,7 +3999,13 @@ export default function App() {
       case "labels":
         return <BarcodeTagStudio db={catalogDb} />;
 
-      case "products":
+      case "products": {
+        const categories=[...new Set(catalogProducts.map(p=>p.category).filter(Boolean))].sort();
+        const query=inventoryQuery.trim();
+        const shown=catalogProducts.filter(p=>(!inventoryCategory||p.category===inventoryCategory)&&
+          (inventoryStock==="all"||(inventoryStock==="available"&&stockOf(p)>0)||(inventoryStock==="low"&&stockOf(p)>0&&stockOf(p)<=p.minStock)||(inventoryStock==="out"&&stockOf(p)<=0))&&
+          (!query||[p.name,p.brand,p.category,p.sku,p.barcode,...(p.compatibleModels||[]),...(p.units||[]).map(u=>u.imei1)].some(value=>naturalMatch(value||"",query))))
+          .sort((x,y)=>inventorySort==="priceLow"?x.sellingPrice-y.sellingPrice:inventorySort==="priceHigh"?y.sellingPrice-x.sellingPrice:inventorySort==="stock"?stockOf(y)-stockOf(x):x.name.localeCompare(y.name));
         return (
           <div>
             <RetailHero kind="products" title="Discover your inventory" subtitle="Browse product photos, prices and current stock. Open any item for full details." detail={`${catalogProducts.length} products`} onPrimary={ownerMode?()=>setIsAddProductOpen(true):undefined} primaryLabel="Add product"/>
@@ -4034,6 +4044,13 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="retail-catalog-filters">
+                <label className="retail-catalog-search"><Search size={19}/><input aria-label="Search inventory" placeholder="Search product, brand, SKU, barcode, IMEI…" value={inventoryQuery} onChange={e=>setInventoryQuery(e.target.value)}/>{inventoryQuery&&<button type="button" className="btn sm" aria-label="Clear inventory search" onClick={()=>setInventoryQuery("")}>×</button>}</label>
+                <label>Category<select aria-label="Inventory category" value={inventoryCategory} onChange={e=>setInventoryCategory(e.target.value)}><option value="">All categories</option>{categories.map(k=><option key={k} value={k}>{k}</option>)}</select></label>
+                <label>Stock<select aria-label="Inventory stock filter" value={inventoryStock} onChange={e=>setInventoryStock(e.target.value)}><option value="all">All stock</option><option value="available">In stock</option><option value="low">Low stock</option><option value="out">Out of stock</option></select></label>
+                <label>Sort<select aria-label="Inventory sort" value={inventorySort} onChange={e=>setInventorySort(e.target.value)}><option value="name">Name A–Z</option><option value="priceLow">Price: low to high</option><option value="priceHigh">Price: high to low</option><option value="stock">Stock: highest first</option></select></label>
+              </div>
+              <div className="retail-catalog-count" role="status">{shown.length} of {catalogProducts.length} products <button className="btn sm" onClick={()=>{setInventoryQuery("");setInventoryCategory("");setInventoryStock("all");setInventorySort("name");}}>Reset filters</button></div>
               {/* Phase 7 — Amazon/Flipkart-style photo-forward card grid,
                   now the DEFAULT product-list experience (not just a
                   mobile fallback like Phase 4's original .product-mobile-list
@@ -4046,14 +4063,14 @@ export default function App() {
                   900px regardless of this toggle (a 13-column table has no
                   usable form on a phone screen either way). */}
               <div className={`product-card-grid ${productViewMode === "table" ? "product-card-grid-hidden-for-table" : ""}`}>
-                {catalogProducts.map((p) => {
+                {shown.map((p) => {
                   const pct = p.category !== "Cyber Cafe" ? computeDiscountPercent(p.mrp, p.sellingPrice) : null;
                   const low = stockOf(p) <= p.minStock;
                   const out = stockOf(p) <= 0;
                   return (
                     <div key={p.id} className="product-card">
                       <div className="product-card-photo">
-                        <ProductThumb photo={p.photo} photos={p.photos} name={p.name} />
+                        <ProductThumb photo={p.photo} photos={p.photos} name={p.name} fullSize/>
                         {pct !== null && pct > 0 && <span className="product-card-discount-badge">{pct}% OFF</span>}
                         {out && <span className="product-card-oos-badge">Out of Stock</span>}
                         {p.photoIsAiGenerated && (
@@ -4096,8 +4113,8 @@ export default function App() {
                     </div>
                   );
                 })}
-                {catalogProducts.length === 0 && (
-                  <div className="empty" style={{ gridColumn: "1 / -1" }}>Koi product nahi mila.</div>
+                {shown.length === 0 && (
+                  <div className="empty" style={{ gridColumn: "1 / -1" }}>No matching products. Try another search or reset filters.</div>
                 )}
               </div>
 
@@ -4122,7 +4139,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {catalogProducts.map((p) => (
+                    {shown.map((p) => (
                       <tr key={p.id}>
                         <td><ProductThumb photo={p.photo} photos={p.photos} name={p.name} /></td>
                         <td><b>{p.name}</b></td>
@@ -4175,6 +4192,7 @@ export default function App() {
             </div>
           </div>
         );
+      }
 
       case "invoices":
         return (

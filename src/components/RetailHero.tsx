@@ -25,5 +25,5 @@ export function RetailHero({kind,title,subtitle,detail,onPrimary,onSecondary,pri
 }
 export type RetailMotion="cinematic"|"balanced"|"quiet";
 const KEY="dsmdh_retail_motion_v1";
-export function getRetailMotion():RetailMotion{try{const v=localStorage.getItem(KEY);return v==="cinematic"||v==="quiet"?v:"balanced";}catch{return "balanced";}}
+export function getRetailMotion():RetailMotion{try{const v=localStorage.getItem(KEY);return v==="balanced"||v==="quiet"?v:"cinematic";}catch{return "cinematic";}}
 export function applyRetailMotion(value:RetailMotion){document.documentElement.dataset.retailMotion=value;try{localStorage.setItem(KEY,value);}catch{}}

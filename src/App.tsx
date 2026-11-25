@@ -2323,10 +2323,10 @@ export default function App() {
             p_min_stock: i.minStock,
           });
           if (resolveError) throw resolveError;
-          return { product_id: realId, quantity: i.qty, unit_price: i.price };
+          return { product_id: realId, quantity: i.qty, unit_price: i.price, warranty_enabled: i.warrantyEnabled, warranty_months: i.warrantyMonths, warranty_start: i.warrantyStart ?? null, warranty_end: i.warrantyEnd ?? null };
         }));
 
-        const { data: atomicSaleId, error: atomicError } = await supabase.rpc("atomic_complete_sale", {
+        const { data: atomicSaleId, error: atomicError } = await supabase.rpc("atomic_complete_sale_v2", {
           p_store_id: cloudProfile.store_id,
           p_invoice_no: invoiceNo,
           p_customer_name: customerData.name || null,
@@ -2336,19 +2336,23 @@ export default function App() {
           p_tax: taxAmount,
           p_idempotency_key: idempotencyKey,
           p_items: resolvedItems,
+          p_amount_paid: amountPaid,
+          p_due_amount: dueAmount,
+          p_finance_loan_amount: financeDetails?.loanAmount ?? null,
+          p_finance_net_receivable: financeDetails?.netBankReceivable ?? null,
         });
         if (atomicError) throw atomicError;
         if (atomicSaleId) showToast("Cloud transaction committed atomically", "green");
       } catch (e: any) {
         const msg = String(e?.message || e || "");
-        const businessFailure = /insufficient|inventory mismatch|selling price|not authorized|invoice number already exists|invalid quantity/i.test(msg);
+        const businessFailure = /insufficient|inventory mismatch|selling price|not authorized|invoice number already exists|invalid quantity|invalid payment amount|hardening_nonnegative_stock/i.test(msg);
         if (businessFailure) {
           showToast(msg || "Sale rejected by server.", "red");
           return;
         }
         console.warn("Cloud sale unavailable; queuing offline transaction", e);
         try {
-          await queueOfflineOperation("sale", "sales", { invoiceNo, items: saleItems, total, payment: isFinanceMode ? `Finance (${financeForm.company})` : paymentMode, customer: customerData, discount: cartDiscount, taxAmount }, idempotencyKey);
+          await queueOfflineOperation("sale", "sales", { invoiceNo, items: saleItems, total, payment: isFinanceMode ? `Finance (${financeForm.company})` : paymentMode, customer: customerData, discount: cartDiscount, taxAmount, amountPaid, dueAmount, financeLoanAmount: financeDetails?.loanAmount ?? null, financeNetReceivable: financeDetails?.netBankReceivable ?? null }, idempotencyKey);
         } catch (queueError) {
           showToast("Sale could not be safely queued. Please retry.", "red");
           return;

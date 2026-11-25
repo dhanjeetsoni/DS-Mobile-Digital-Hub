@@ -509,10 +509,11 @@ async function processOperation(row: any, storeId: string) {
         p_min_stock: item.minStock ?? 0,
       });
       if (resolveError) throw resolveError;
-      return { product_id: realId, quantity: item.qty, unit_price: item.price };
+      return { product_id: realId, quantity: item.qty, unit_price: item.price, warranty_enabled: item.warrantyEnabled ?? false, warranty_months: item.warrantyMonths ?? null, warranty_start: item.warrantyStart ?? null, warranty_end: item.warrantyEnd ?? null };
     }));
 
-    const { data: saleId, error } = await supabase.rpc("atomic_complete_sale", {
+    const hasPaymentDetails = typeof sale.amountPaid === "number" && Number.isFinite(sale.amountPaid) && typeof sale.dueAmount === "number" && Number.isFinite(sale.dueAmount);
+    const { data: saleId, error } = await supabase.rpc(hasPaymentDetails ? "atomic_complete_sale_v2" : "atomic_complete_sale", {
       p_store_id: storeId,
       p_invoice_no: invoiceNo,
       p_customer_name: sale.customer?.name || null,
@@ -522,6 +523,7 @@ async function processOperation(row: any, storeId: string) {
       p_tax: Number(sale.taxAmount || 0),
       p_idempotency_key: row.operation_id,
       p_items: resolvedItems,
+      ...(hasPaymentDetails ? { p_amount_paid: sale.amountPaid, p_due_amount: sale.dueAmount, p_finance_loan_amount: sale.financeLoanAmount ?? null, p_finance_net_receivable: sale.financeNetReceivable ?? null } : {}),
     });
     if (error) throw error;
     return { serverId: saleId, invoiceNo };

@@ -46,7 +46,7 @@ function writeIndexedDb(bytes: Uint8Array): Promise<void> {
 
 async function readLegacyLocalStorage(): Promise<Uint8Array | undefined> {
   try {
-    const raw = localStorage.getItem(DB_KEY.replace("-v2", "-v1"));
+    const raw = localStorage.getItem(DB_KEY) || localStorage.getItem(DB_KEY.replace("-v2", "-v1"));
     if (!raw) return undefined;
     return Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
   } catch {

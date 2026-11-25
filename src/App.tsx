@@ -1318,7 +1318,7 @@ export default function App() {
         await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:base.state,local,version:base.version,conflicts:[]});
         if(!navigator.onLine){setCloudStatus("offline");return;}
         let version:number;
-        try{version=await saveCloudState(local,base.version);}
+        try{version=await saveCloudState(local,base.version,base);}
         catch(error:any){
           if(!String(error?.message||error).includes("VERSION_CONFLICT"))throw error;
           const remote=await loadCloudState();
@@ -1329,7 +1329,7 @@ export default function App() {
             setCloudStatus("sync-error");return;
           }
           savedState=merged.state;expectedVersion=remote.version;
-          version=await saveCloudState(savedState,expectedVersion);
+          version=await saveCloudState(savedState,expectedVersion,base);
         }
         if(!active||cloudBaseRef.current?.profileId!==base.profileId)return;
         const latest=structuredClone(dbRef.current);
@@ -1606,7 +1606,7 @@ export default function App() {
             const fresh = await loadCloudState();
             if (fresh?.state) {
               const base=cloudBaseRef.current;
-              if(base) await acceptRemoteState(fresh.state,fresh.version,base.profileId,base.storeId);
+              if(base&&fresh.storeId===base.storeId) await acceptRemoteState(fresh.state,fresh.version,base.profileId,base.storeId);
             }
           } catch (error) {
             console.warn("Cloud state refresh after sync failed", error);

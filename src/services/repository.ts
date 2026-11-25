@@ -375,22 +375,13 @@ export async function fetchFullBackup(storeId: string, blobState: Database): Pro
   };
 }
 
-export async function saveCloudState(state: Database, expectedVersion: number) {
-  const profile = await getCurrentProfile();
-  if (profile?.role === "staff") {
-    const { data, error } = await supabase.rpc("save_store_state_for_user", {
-      p_state: state,
-      p_expected_version: expectedVersion,
-    });
-    if (error) throw error;
-    return Number(data?.version ?? expectedVersion + 1);
-  }
-  const { data, error } = await supabase.rpc("save_store_state", {
-    p_state: state,
-    p_expected_version: expectedVersion,
+export async function saveCloudState(state: Database, expectedVersion: number, scope: {profileId:string;storeId:string}) {
+  const {data,error}=await supabase.rpc("save_store_state_scoped", {
+    p_store_id:scope.storeId,p_profile_id:scope.profileId,p_state:state,p_expected_version:expectedVersion
   });
-  if (error) throw error;
-  return Number(data ?? expectedVersion + 1);
+  if(error)throw error;
+  if(data===null||!Number.isSafeInteger(Number(data)))throw new Error("Invalid snapshot version");
+  return Number(data);
 }
 
 export function persistLocalState(state: Database) {

@@ -27,7 +27,7 @@ const checks = [
   ["Offline SQLite uses IndexedDB persistence", /indexedDB\.open\("ds-mobile-digital-hub"/.test(fs.readFileSync(path.join(root,"src/services/localSqlite.ts"),"utf8"))],
   ["Offline queue preserves operation id", /sqliteEnqueue\(operation, entity, \{ operationId, deviceId, payload, scope \}, operationId\)/.test(fs.readFileSync(path.join(root,"src/services/repository.ts"),"utf8"))],
   ["Offline replay retains original operation and account scope", (() => { const repo = fs.readFileSync(path.join(root,"src/services/repository.ts"),"utf8"); return repo.includes("envelope?.scope?.storeId !== profile.store_id") && repo.includes("envelope?.scope?.profileId !== profile.id") && repo.includes("envelope.operationId !== operationId") && repo.includes("ignoreDuplicates: true"); })()],
-  ["Staff-safe state write RPC is used", /save_store_state_for_user/.test(fs.readFileSync(path.join(root,"src/services/repository.ts"),"utf8"))],
+  ["Staff-safe state write RPC is used", /save_store_state_scoped/.test(fs.readFileSync(path.join(root,"src/services/repository.ts"),"utf8"))],
   ["Telegram connect Edge Function exists", fs.existsSync(path.join(root,"supabase/functions/telegram-connect/index.ts"))],
   ["Staff cloud snapshot is not skipped", !/cloudProfile\.role === ["']staff["']/.test(fs.readFileSync(path.join(root,"src/App.tsx"),"utf8").match(/if \(!cloudReady[\s\S]{0,120}/)?.[0] || "")],
   ["OCR endpoint requires Supabase auth", /requireSupabaseUser\(req, res\)/.test(fs.readFileSync(path.join(root,"server.ts"),"utf8"))],

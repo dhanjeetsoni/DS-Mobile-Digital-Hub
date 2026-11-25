@@ -106,6 +106,8 @@ import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueu
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { sqliteList } from "./services/localSqlite";
+import { mergeStoreState, sameState } from "./services/syncMerge";
+import { saveSnapshotRecovery, readSnapshotRecovery, clearSnapshotRecovery, archiveSnapshotRecovery } from "./services/repository";
 import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert } from "./services/telegram";
 import { getRepairDiagnosis, getDetailedRepairDiagnostics, DetailedRepairDiagnostics } from "./services/aiOps";
 import { findAiSearchMatches } from "./services/aiSearch";
@@ -268,6 +270,10 @@ export default function App() {
   // Start from an empty safe state. Local business cache is loaded only after
   // authentication is known, preventing a previous owner's data flashing on a staff device.
   const [db, setDb] = useState<Database>(() => defaultDB());
+  const dbRef = useRef(db);
+  dbRef.current = db;
+  const cloudBaseRef = useRef<{state:Database;version:number;profileId:string;storeId:string}|null>(null);
+  const savingCloudRef = useRef(false);
 
   const [ownerMode, setOwnerMode] = useState(false);
   const initialRoutePage = (() => {
@@ -1078,6 +1084,39 @@ export default function App() {
   const [editingJobCostId, setEditingJobCostId] = useState<string | null>(null);
   const [jobCostDraft, setJobCostDraft] = useState({ estCost: 0, otherCost: 0 });
 
+  const normalizeCloudState=(state:Database):Database=>{
+    const defaults=defaultDB();
+    return {...defaults,...state,settings:{...defaults.settings,...(state.settings||{})}};
+  };
+  const initializeCloudState=async(state:Database,version:number,profileId:string,storeId:string)=>{
+    const remote=normalizeCloudState(state);
+    cloudBaseRef.current={state:structuredClone(remote),version,profileId,storeId};
+    let next=remote;
+    try {
+      const pending=await readSnapshotRecovery(profileId,storeId);
+      if(pending){
+        const result=mergeStoreState(pending.base,pending.local,remote);
+        if(result.conflicts.length){
+          await archiveSnapshotRecovery({...pending,conflicts:result.conflicts});
+          setCloudStatus("sync-error");
+        } else next=result.state;
+      }
+    } catch(error){console.warn("Recovery read failed",error);setCloudStatus("sync-error");}
+    dbRef.current=next;setDb(next);setCloudVersion(version);
+  };
+  const acceptRemoteState=async(state:Database,version:number,profileId:string,storeId:string)=>{
+    const base=cloudBaseRef.current;
+    if(!base||base.profileId!==profileId||base.storeId!==storeId||version<=base.version||savingCloudRef.current)return;
+    const remote=normalizeCloudState(state), local=structuredClone(dbRef.current);
+    const merged=mergeStoreState(base.state,local,remote);
+    if(merged.conflicts.length){
+      try{await saveSnapshotRecovery({scope:{profileId,storeId},base:base.state,local,version:base.version,conflicts:merged.conflicts});}catch(error){console.warn("Recovery write failed",error);}
+      setCloudStatus("sync-error");return;
+    }
+    cloudBaseRef.current={...base,state:structuredClone(remote),version};
+    dbRef.current=merged.state;setDb(merged.state);setCloudVersion(version);
+  };
+
   // Supabase bootstrap, realtime sync, offline queue replay, and Telegram retry pump.
   useEffect(() => {
     let active = true;
@@ -1175,10 +1214,8 @@ export default function App() {
         }
         if (!profile?.store_id) { setCloudStatus("offline"); setCloudReady(true); return; }
         const remote = await loadCloudState();
-        if (remote?.state) {
-          setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
-          setCloudVersion(remote.version);
-        }
+        if (!remote?.state) throw new Error("Cloud state unavailable; autosave disabled");
+        await initializeCloudState(remote.state,remote.version,profile.id,profile.store_id);
         // Phase 1 (data architecture fix): seed the live-stock map once,
         // then keep it current via realtime — independent of the (slower,
         // conflict-prone) store_state blob save/load cycle above.
@@ -1237,8 +1274,7 @@ export default function App() {
           channel = supabase.channel(`store-state-${profile.store_id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'store_state', filter: `store_id=eq.${profile.store_id}` }, (payload: any) => {
             const row = payload.new;
             if (row?.state) {
-              setCloudVersion(Number(row.version || 0));
-              setDb(prev => ({ ...prev, ...row.state, settings: { ...prev.settings, ...(row.state.settings || {}) } }));
+              void acceptRemoteState(row.state,Number(row.version || 0),profile.id,profile.store_id);
             }
           }).subscribe();
         } else {
@@ -1256,8 +1292,7 @@ export default function App() {
           channel = supabase.channel(`store-state-staff-${profile.store_id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'store_state_staff_view', filter: `store_id=eq.${profile.store_id}` }, (payload: any) => {
             const row = payload.new;
             if (row?.state) {
-              setCloudVersion(Number(row.version || 0));
-              setDb(prev => ({ ...prev, ...row.state, settings: { ...prev.settings, ...(row.state.settings || {}) } }));
+              void acceptRemoteState(row.state,Number(row.version || 0),profile.id,profile.store_id);
             }
           }).subscribe();
         }
@@ -1269,65 +1304,54 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!cloudReady || !cloudProfile?.store_id) return;
-    const timer = window.setTimeout(async () => {
-      try { const v = await saveCloudState(db, cloudVersion); setCloudVersion(v); setCloudStatus("online"); }
-      catch (error: any) {
-        const isVersionConflict = String(error?.message || error || "").includes("VERSION_CONFLICT");
-        if (isVersionConflict) {
-          // Another device (owner/staff) already saved a newer version.
-          // Re-queuing OUR stale copy with the old version number would just
-          // fail the same way forever (this was the bug behind the
-          // permanent red "Sync Issue" badge and a growing pile of stuck
-          // sync_queue rows). Instead, pull the latest state so the local
-          // copy — and the version number used by the *next* autosave — is
-          // correct again.
-          console.warn("Cloud save hit a version conflict; refreshing from server instead of re-queuing stale data", error);
-          try {
-            const remote = await loadCloudState();
-            if (remote?.state) {
-              // BUG FIX (2026-09-04): this used to overwrite local `db`
-              // with `remote.state` unconditionally, discarding whatever
-              // hadn't been saved yet — e.g. the stock decrement from a
-              // sale that was still in-flight when the conflict hit. With
-              // two+ devices autosaving the whole store every ~650ms, this
-              // collided constantly (live sync_queue showed 8+ conflicts in
-              // under a minute), which is exactly what looked like "stock
-              // shows the new number for a moment, then reverts" — the sale
-              // itself always succeeded (it's committed atomically in
-              // Postgres separately), but the display-facing snapshot kept
-              // losing the local edit that would have shown it.
-              // Retrying the save against the now-current version resolves
-              // a single momentary race (the overwhelmingly common case)
-              // instead of throwing the local edit away immediately; only
-              // fall back to accepting the remote copy if that retry also
-              // collides.
-              try {
-                const retryVersion = await saveCloudState(db, remote.version);
-                setCloudVersion(retryVersion);
-                setCloudStatus("online");
-                return;
-              } catch (retryError) {
-                console.warn("Retry after version conflict also failed; accepting remote state instead", retryError);
-                setCloudVersion(remote.version);
-                setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
-              }
-            }
-            setCloudStatus("online");
-          } catch (refetchError) {
-            console.warn("Refetching latest state after version conflict failed", refetchError);
-            setCloudStatus("error");
+    if (!cloudReady || !cloudProfile?.store_id || !gateUnlocked) return;
+    let active=true;
+    const run=async()=>{
+      const base=cloudBaseRef.current;
+      if(!active||savingCloudRef.current||!base||base.profileId!==cloudProfile.id||base.storeId!==cloudProfile.store_id)return;
+      const local=structuredClone(dbRef.current);
+      if(sameState(local,base.state))return;
+      savingCloudRef.current=true;
+      let savedState=local,expectedVersion=base.version;
+      try{
+        // Durable local recovery precedes every cloud attempt.
+        await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:base.state,local,version:base.version,conflicts:[]});
+        if(!navigator.onLine){setCloudStatus("offline");return;}
+        let version:number;
+        try{version=await saveCloudState(local,base.version);}
+        catch(error:any){
+          if(!String(error?.message||error).includes("VERSION_CONFLICT"))throw error;
+          const remote=await loadCloudState();
+          if(!remote?.state||remote.storeId!==base.storeId)throw new Error("Cloud state unavailable");
+          const merged=mergeStoreState(base.state,local,normalizeCloudState(remote.state));
+          if(merged.conflicts.length){
+            await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:base.state,local,version:base.version,conflicts:merged.conflicts});
+            setCloudStatus("sync-error");return;
           }
-        } else {
-          console.warn("Cloud state save failed; queueing an idempotent snapshot bridge operation", error);
-          setCloudStatus("error");
-          try { await queueOfflineOperation("snapshot", "store_state", db); }
-          catch (queueError) { console.warn("Snapshot queue failed", queueError); }
+          savedState=merged.state;expectedVersion=remote.version;
+          version=await saveCloudState(savedState,expectedVersion);
         }
-      }
-    }, 650);
-    return () => window.clearTimeout(timer);
-  }, [db, cloudReady, cloudProfile?.store_id]);
+        if(!active||cloudBaseRef.current?.profileId!==base.profileId)return;
+        const latest=structuredClone(dbRef.current);
+        const after=mergeStoreState(local,latest,savedState);
+        if(after.conflicts.length){
+          await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:base.state,local:latest,version:base.version,conflicts:after.conflicts});
+          setCloudStatus("sync-error");return;
+        }
+        cloudBaseRef.current={...base,state:structuredClone(savedState),version};
+        dbRef.current=after.state;
+        if(!sameState(latest,after.state))setDb(after.state);
+        setCloudVersion(version);
+        if(sameState(after.state,savedState)) await clearSnapshotRecovery(base.profileId,base.storeId);
+        else await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:savedState,local:after.state,version,conflicts:[]});
+        setCloudStatus("online");
+      } catch(error){console.warn("Cloud snapshot save failed; local recovery retained",error);setCloudStatus("sync-error");}
+      finally{savingCloudRef.current=false;}
+    };
+    const timer=window.setTimeout(run,650), interval=window.setInterval(run,15000);
+    window.addEventListener("online",run);
+    return()=>{active=false;window.clearTimeout(timer);window.clearInterval(interval);window.removeEventListener("online",run);};
+  }, [db,cloudReady,cloudProfile?.store_id,cloudProfile?.id,gateUnlocked]);
 
   useEffect(() => {
     if (!cloudUser) return;
@@ -1581,9 +1605,8 @@ export default function App() {
           try {
             const fresh = await loadCloudState();
             if (fresh?.state) {
-              setDb(fresh.state);
-              setCloudVersion(fresh.version);
-              persistLocalState(fresh.state);
+              const base=cloudBaseRef.current;
+              if(base) await acceptRemoteState(fresh.state,fresh.version,base.profileId,base.storeId);
             }
           } catch (error) {
             console.warn("Cloud state refresh after sync failed", error);
@@ -5679,6 +5702,15 @@ export default function App() {
                 }
               }}
             />
+            {cloudProfile?.id && pendingSyncCount>0 && <button className="btn sm" title="Export this account's pending local recovery data" onClick={async()=>{
+              try{
+                const rows=(await sqliteList()).map(row=>({id:row[0],operation:row[1],entity:row[2],payload:JSON.parse(String(row[3]))})).filter(row=>row.payload?.scope?.profileId===cloudProfile.id && row.payload?.scope?.storeId===cloudProfile.store_id);
+                if(!rows.length){showToast("No account-scoped recovery entries to export.", "amber");return;}
+                const url=URL.createObjectURL(new Blob([JSON.stringify(rows,null,2)],{type:"application/json"}));
+                const link=document.createElement("a");link.href=url;link.download="dsmdh-sync-recovery-"+todayStr()+".json";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+                showToast("Recovery exported. Keep this file private.", "green");
+              }catch(error){showToast("Recovery export failed.","red");}
+            }}>Export pending data</button>}
             {/* Telegram connect/test is an owner-only concern (Master Plan 1.4) — only
                 the owner's own Telegram account is ever linked, and its bot is what
                 sends everyone's invoices/reports/alerts. Staff have no reason to see
@@ -6704,6 +6736,7 @@ export default function App() {
         // Access Manager show a loading state instead of a stale/premature
         // "Store not set up" error during this brief refetch window.
         setCloudReady(false);
+        cloudBaseRef.current=null;
         try {
           const { data } = await supabase.auth.getUser();
           setCloudUser(data.user ?? null);
@@ -6721,10 +6754,8 @@ export default function App() {
           // wiped it this way before this fix.
           if (profile?.store_id) {
             const remote = await loadCloudState();
-            if (remote?.state) {
-              setDb(prev => ({ ...prev, ...remote.state, settings: { ...prev.settings, ...(remote.state.settings || {}) } }));
-              setCloudVersion(remote.version);
-            }
+            if (!remote?.state) throw new Error("Cloud state unavailable; autosave disabled");
+            await initializeCloudState(remote.state,remote.version,profile.id,profile.store_id);
           }
           // 2026-09-06 fix: this in-app "Settings → Cloud Sign In" path is a
           // second, separate route into a real cloud session — distinct

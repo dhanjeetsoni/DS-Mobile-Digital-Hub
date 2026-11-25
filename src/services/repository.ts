@@ -1,6 +1,6 @@
 import { supabase, getCurrentProfile } from "./supabaseClient";
 import type { Database } from "../types";
-import { sqliteEnqueue, sqliteList, sqliteRemove } from "./localSqlite";
+import { sqliteEnqueue, sqliteList, sqliteRemove, sqliteReplace } from "./localSqlite";
 
 const LOCAL_KEY = "dsmdh_cache_v4";
 const DEVICE_ID_KEY = "dsmdh_device_id";
@@ -35,26 +35,17 @@ export type SyncOperation =
   | "supplier"
   | "snapshot";
 
-const STAFF_SAFE_STATE_RPC = "load_store_state_for_user";
 
 export async function loadCloudState() {
   const profile = await getCurrentProfile();
   if (!profile?.store_id) return null;
 
-  // SECURITY: staff never fetches the raw store_state row. The RPC projects
-  // only fields permitted to staff before any data enters the browser.
+  // Read the redacted staff state and version atomically from the same row.
   if (profile.role === "staff") {
-    const { data, error } = await supabase.rpc(STAFF_SAFE_STATE_RPC);
+    const { data, error } = await supabase.from("store_state_staff_view").select("state,version,store_id").eq("store_id",profile.store_id).maybeSingle();
     if (error) throw error;
-    if (!data) return null;
-    const { data: meta, error: metaError } = await supabase
-      .from("store_state_staff_view")
-      .select("version,store_id")
-      .eq("store_id", profile.store_id)
-      .maybeSingle();
-    if (metaError) throw metaError;
-    if (!meta) throw new Error("Staff state version unavailable");
-    return { state: data as Database, version: Number(meta.version), storeId: profile.store_id };
+    if (!data?.state) return null;
+    return {state:data.state as Database,version:Number(data.version),storeId:profile.store_id};
   }
 
   const { data: row, error } = await supabase
@@ -415,6 +406,25 @@ export function readLocalState(): Database | null {
   }
 }
 
+export type SnapshotRecovery = {scope:{profileId:string;storeId:string};base:Database;local:Database;version:number;conflicts:string[]};
+const recoveryId=(profileId:string,storeId:string)=>"snapshot-recovery:"+profileId+":"+storeId;
+export async function saveSnapshotRecovery(recovery:SnapshotRecovery) {
+  await sqliteReplace("snapshot_recovery","store_state",recovery,recoveryId(recovery.scope.profileId,recovery.scope.storeId));
+}
+export async function readSnapshotRecovery(profileId:string,storeId:string):Promise<SnapshotRecovery|null> {
+  const row=(await sqliteList()).find(x=>x[0]===recoveryId(profileId,storeId));
+  if(!row) return null;
+  const v=JSON.parse(String(row[3])) as SnapshotRecovery;
+  return v.scope?.profileId===profileId&&v.scope?.storeId===storeId?v:null;
+}
+export async function clearSnapshotRecovery(profileId:string,storeId:string) {
+  await sqliteRemove(recoveryId(profileId,storeId));
+}
+export async function archiveSnapshotRecovery(recovery:SnapshotRecovery) {
+  await sqliteEnqueue("snapshot_conflict","store_state",recovery);
+  await clearSnapshotRecovery(recovery.scope.profileId,recovery.scope.storeId);
+}
+
 // Only bind pending operations to a previously verified account/shop pair.
 function rememberOfflineQueueScope(profileId: string, storeId: string) {
   try { localStorage.setItem("dsmdh_queue_scope_" + profileId, storeId); } catch {}
@@ -440,7 +450,7 @@ export async function queueOfflineOperation(
   if (profile?.store_id) rememberOfflineQueueScope(String(profile.id), String(profile.store_id));
   await sqliteEnqueue(operation, entity, { operationId, deviceId, payload, scope }, operationId);
 
-  if (!profile?.store_id) return operationId;
+  if (!profile?.store_id || operation === "snapshot" || operation === "snapshot_conflict") return operationId;
 
   const { error } = await supabase.from("sync_queue").upsert({
     store_id: profile.store_id,
@@ -759,27 +769,7 @@ async function processOperation(row: any, storeId: string) {
   }
 
   if (type === "snapshot") {
-    // Compatibility bridge for legacy modules that still persist the aggregate state.
-    // Server-side version checking prevents silent last-write-wins overwrites.
-    const profile = await getCurrentProfile();
-    if (profile?.role === "staff") {
-      const { data: current, error: currentError } = await supabase
-        .from("store_state_staff_view").select("version").eq("store_id", storeId).maybeSingle();
-      if (currentError) throw currentError;
-      if (!current) throw new Error("Staff state version unavailable");
-      const { data, error } = await supabase.rpc("save_store_state_for_user", {
-        p_state: payload as any,
-        p_expected_version: Number(current?.version || 0),
-      });
-      if (error) throw error;
-      return { serverId: data?.store_id, version: data?.version };
-    }
-    const { data: current, error: currentError } = await supabase
-      .from("store_state").select("version").eq("store_id", storeId).maybeSingle();
-    if (currentError) throw currentError;
-    const version = Number(current?.version || 0);
-    const next = await saveCloudState(payload as Database, version);
-    return { serverId: storeId, version: next };
+    throw new Error("SNAPSHOT_REVIEW_REQUIRED: legacy full-state snapshot has no trusted base version");
   }
 
   // Other entity types are deliberately explicit. A module must register a
@@ -824,7 +814,7 @@ async function flushOfflineQueueInner() {
       .select("status").eq("store_id", profile.store_id).eq("operation_id", operationId).maybeSingle();
     if (lookupError) throw lookupError;
     if (existing?.status === "processed") { await sqliteRemove(operationId); continue; }
-    if (existing || operation === "snapshot") continue;
+    if (existing || operation === "snapshot" || operation === "snapshot_conflict" || operation === "snapshot_recovery") continue;
     const { error: uploadError } = await supabase.from("sync_queue").upsert({
       store_id: profile.store_id, client_id: deviceId, device_id: deviceId,
       operation, operation_id: operationId, operation_type: operation,
@@ -863,6 +853,11 @@ async function flushOfflineQueueInner() {
 
   let processed = 0, failed = 0;
   for (const row of rows || []) {
+    if (String(row.operation_type || row.operation) === "snapshot") {
+      await markSync(row.id,{status:"abandoned",last_error:"SNAPSHOT_REVIEW_REQUIRED: no trusted base version"});
+      failed++;
+      continue;
+    }
     if (Number(row.retry_count || 0) >= MAX_RETRIES) {
       const giveUpNote = `Gave up after ${MAX_RETRIES} failed attempts — needs manual review.`;
       try {

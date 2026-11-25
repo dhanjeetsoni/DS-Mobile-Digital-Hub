@@ -99,6 +99,12 @@ export async function sqliteEnqueue(operation: string, entity: string, payload: 
   return id;
 }
 
+export async function sqliteReplace(operation: string, entity: string, payload: unknown, id: string) {
+  const db=await openDb();
+  db.run("INSERT OR REPLACE INTO offline_queue (id,operation,entity,payload,created_at) VALUES (?,?,?,?,?)",[id,operation,entity,JSON.stringify(payload),new Date().toISOString()]);
+  await persist(db);
+}
+
 export async function sqliteList() {
   const db = await openDb();
   const result = db.exec(

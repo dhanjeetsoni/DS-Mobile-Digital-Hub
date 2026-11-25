@@ -30,3 +30,11 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Run built application in Chromium
         run: node scripts/browser-smoke.mjs
+      - name: Upload actual UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-review
+          path: visual-review/
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,13 +1,14 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
-import {readFileSync} from "node:fs";
+import {readFileSync,mkdirSync,writeFileSync} from "node:fs";
 const port=4179;
 const server=spawn(process.execPath,["node_modules/vite/bin/vite.js","preview","--host","127.0.0.1","--port",String(port),"--strictPort"],{stdio:"inherit",env:process.env});
 let browser;
 let apiServer;
 try{
  const url="http://127.0.0.1:"+port;
+ mkdirSync("visual-review",{recursive:true});
  let ready=false;
  for(let i=0;i<60;i++){try{const r=await fetch(url);if(r.ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,500));}
  assert(ready,"Production preview did not start");
@@ -110,12 +111,31 @@ try{
    await directory.getByRole("button",{name:mode,exact:true}).click();
    assert.equal(await directory.locator("html").getAttribute("data-theme"),id);
    assert.equal(await directory.locator("html").getAttribute("data-mode"),mode.toLowerCase());
-   const tokens=await directory.evaluate(()=>["--canvas","--surface","--ink","--brand","--accent"].map(k=>getComputedStyle(document.documentElement).getPropertyValue(k).trim()));
-   assert(tokens.every(v=>/^#[0-9a-f]{6}$/i.test(v)),"Theme token missing: "+id+"/"+mode);
+   // Minifiers may shorten #ffffff to #fff or emit named colors.
+   // Compare the actual rendered RGB against the authored palette, not the
+   // serialization of a custom property.
+   const palette=readFileSync("styles/themes.css","utf8");
+   const selector='[data-theme="'+id+'"]'+(mode==="Light"?'[data-mode="light"]':'');
+   const start=palette.indexOf(selector+" {");
+   assert(start>=0,"Missing authored palette "+id+"/"+mode);
+   const block=palette.slice(start,palette.indexOf("}",start));
+   const names=["canvas","surface","ink","brand","accent"];
+   const expected=names.map(k=>{const m=block.match(new RegExp("--"+k+"\\s*:\\s*([^;]+)"));assert(m,"Missing "+k);return m[1].trim();});
+   const verified=await directory.evaluate(({names,expected})=>{
+    const root=document.documentElement,style=getComputedStyle(root);
+    const probe=document.createElement("span");document.body.append(probe);
+    const rgb=value=>{if(!value||!CSS.supports("color",value))return null;probe.style.color=value;return getComputedStyle(probe).color;};
+    const result=names.map((name,i)=>({name,raw:style.getPropertyValue("--"+name).trim(),actual:rgb(style.getPropertyValue("--"+name).trim()),expected:rgb(expected[i])}));
+    probe.remove();return result;
+   },{names,expected});
+   for(const token of verified)assert(token.actual&&token.actual===token.expected,"Palette mismatch "+id+"/"+mode+": "+JSON.stringify(token));
+   await directory.screenshot({path:"visual-review/theme-"+id+"-"+mode.toLowerCase()+".png",animations:"disabled"});
+   console.log("PASS rendered palette:",id,mode,JSON.stringify(verified.map(v=>v.actual)));
   }
  }
  console.log("PASS all 22 light/dark palettes and global tool search");
  await search.fill("products");await directory.locator('[data-tool-key="products"]').click();
+ await directory.screenshot({path:"visual-review/windows-catalog.png",animations:"disabled"});
  await directory.getByRole("textbox",{name:"Search inventory"}).fill("zzzz-ci-no-matching-product");
  await directory.getByText("No matching products. Try another search or reset filters.").waitFor();
  await directory.getByRole("button",{name:"Reset filters"}).click();
@@ -125,6 +145,7 @@ try{
  mobile.on("pageerror",e=>errors.push(e.message));
  await mobile.goto(url,{waitUntil:"domcontentloaded"});
  await mobile.getByText("Owner Confidential Area",{exact:true}).first().click();
+ await mobile.screenshot({path:"visual-review/android-login.png",animations:"disabled"});
  await mobile.getByPlaceholder("Enter Owner Device PIN").fill("1234");
  await mobile.getByRole("button",{name:"Unlock",exact:true}).click();
  await mobile.getByRole("button",{name:"More",exact:true}).click();
@@ -136,6 +157,22 @@ try{
  assert(sizes.scroll<=sizes.width+1,"Mobile page horizontal overflow");
  assert(sizes.tab>=48,"Mobile navigation touch target too small");
  console.log("PASS responsive mobile drawer, module search, navigation and viewport");
+ for(const [key,label] of [["dashboard","dashboard"],["sell","billing"],["products","catalog"],["appearanceStudio","appearance"]]){
+   await mobile.getByRole("button",{name:"Open global tool search"}).click();
+   await mobile.getByRole("textbox",{name:"Find a tool"}).fill(key);
+   await mobile.locator('[data-command-key="'+key+'"]').click();
+   await mobile.locator('#page[data-current-page="'+key+'"]').waitFor();
+   await mobile.waitForFunction(()=>!document.querySelector("#page")?.textContent?.includes("Loading view..."));
+   const geometry=await mobile.evaluate(()=>({width:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,page:document.querySelector("#page").getBoundingClientRect().height}));
+   assert(geometry.scroll<=geometry.width+1&&geometry.page>150,"Mobile layout issue "+key+" "+JSON.stringify(geometry));
+   await mobile.screenshot({path:"visual-review/android-"+label+".png",animations:"disabled"});
+ }
+ for(const key of ["dashboard","sell"]){
+  await search.fill(key);await directory.locator('[data-tool-key="'+key+'"]').click();
+  await directory.locator('#page[data-current-page="'+key+'"]').waitFor();
+  await directory.screenshot({path:"visual-review/windows-"+key+".png",animations:"disabled"});
+ }
+ writeFileSync("visual-review/summary.json",JSON.stringify({moduleCount:modules.length,paletteCount:ids.length*2,mobileViewport:"390x844",desktopViewport:"1440x900",note:"Synthetic local data; native hardware not tested."},null,2));
  assert.deepEqual(errors,[],"Uncaught browser errors");
  console.log("PASS production UI boot, local-mode entry, local owner/staff entry and inventory/POS navigation");
 }finally{await browser?.close();apiServer?.kill();server.kill();}

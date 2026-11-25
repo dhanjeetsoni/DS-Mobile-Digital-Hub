@@ -89,6 +89,15 @@ try{
    console.log("PASS module render:",module.key);
  }
  console.log("PASS registered owner modules:",modules.length);
+ await search.fill("appearanceStudio");
+ await directory.locator('[data-tool-key="appearanceStudio"]').click();
+ await directory.getByRole("button",{name:/Cinematic 3D/}).click();
+ assert.equal(await directory.locator("html").getAttribute("data-retail-motion"),"cinematic");
+ await directory.getByRole("button",{name:/Minimal motion/}).click();
+ assert.equal(await directory.locator("html").getAttribute("data-retail-motion"),"quiet");
+ await search.fill("dashboard");await directory.locator('[data-tool-key="dashboard"]').click();
+ await directory.locator(".retail-hero-dashboard .retail-phone").waitFor();
+ console.log("PASS motion preference and 3D dashboard artwork");
  const mobile=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  mobile.on("pageerror",e=>errors.push(e.message));
  await mobile.goto(url,{waitUntil:"domcontentloaded"});

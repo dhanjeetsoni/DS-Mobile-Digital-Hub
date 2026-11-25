@@ -54,7 +54,7 @@ function rateLimit(windowMs = 60_000, max = 12) {
       lastRateMapSweep = now;
       for (const [ip, entry] of rateMap) if (entry.resetAt <= now) rateMap.delete(ip);
     }
-    const key = req.ip || "unknown";
+    const key = (req.ip || "unknown") + ":" + req.path;
     const current = rateMap.get(key);
     if (!current || current.resetAt <= now) {
       rateMap.set(key, { count: 1, resetAt: now + windowMs });

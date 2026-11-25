@@ -270,7 +270,15 @@ jobs:
           fi
 
       - name: Build ${{ matrix.variant }} Android APK
-        run: npm run android:${{ matrix.variant }}:build
+        shell: bash
+        run: |
+          # Retry transient Gradle/SDK download failures, not silently ignore them.
+          for attempt in 1 2 3; do
+            if npm run android:${{ matrix.variant }}:build; then exit 0; fi
+            if [ "$attempt" = "3" ]; then exit 1; fi
+            echo "::warning::Android build attempt $attempt failed; retrying"
+            sleep $((attempt * 15))
+          done
 
       - name: Rename APK with variant name (Tauri gives Staff and Owner builds the identical filename otherwise)
         # Both matrix jobs produce a file literally named e.g. "app-universal-release.apk"

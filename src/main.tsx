@@ -12,6 +12,8 @@ import './index.css';
 import '../styles/index.css';
 import './theme-bridge.css';
 import './fx.css';
+import './retail-premium.css';
+import {applyRetailMotion,getRetailMotion} from './components/RetailHero';
 import { startAppearanceSync } from '../theme';
 
 // Everything below used to run unguarded: if startAppearanceSync() or the
@@ -25,6 +27,7 @@ try {
   // Owns html[data-theme] / html[data-mode] for the entire app from now on.
   // Must run before the first paint so there's no flash of the old palette.
   startAppearanceSync();
+  applyRetailMotion(getRetailMotion());
 
   // Phase 5: automatic crash reporting. Registered here (not in index.html's
   // inline script) because it needs the Supabase client from the ES module

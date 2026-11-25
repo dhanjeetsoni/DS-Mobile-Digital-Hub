@@ -18,6 +18,7 @@ import { uid, todayStr, nowTimeStr, genSku, backfillMissingSkus, addStockBatch, 
 import { naturalMatch } from "./utils/naturalSearch";
 import { Sidebar, SECONDARY_NAV_ITEMS } from "./components/Sidebar";
 import BottomTabBar from "./components/BottomTabBar";
+import { RetailHero } from "./components/RetailHero";
 // Phase 16: was a static import, which pulled the whole @zxing/browser barcode
 // engine into the main entry chunk for every user on every cold start -- even
 // though this modal is already only rendered behind `isCameraScannerOpen`.
@@ -2956,7 +2957,7 @@ export default function App() {
     }
     switch (currentPage) {
       case "dashboard": {
-        const todaySales = visibleSales.filter((s) => s.date === todayStr());
+        const todaySales = visibleSales.filter((s) => s.date === todayStr() && s.status !== "Cancelled");
         const grossSalesRev = todaySales.reduce((a, s) => a + s.total, 0);
         const grossSalesCost = todaySales.reduce((a, s) => a + s.items.reduce((x, i) => x + i.cost, 0), 0);
         const returnsToday = visibleReturns.filter((r) => r.date === todayStr());
@@ -2970,12 +2971,13 @@ export default function App() {
         // Daily Galla Cash
         const todayCashSales = todaySales.filter((s) => !s.isFinance && s.payment === "Cash").reduce((a, s) => a + s.amountPaid, 0);
         const todayCashXerox = visibleXeroxEntries.filter((x) => x.date === todayStr() && x.paymentMethod === "Cash").reduce((a, x) => a + x.totalAmount, 0);
-        const currentGallaEst = (db.settings.openingCashDefault || 5000) + todayCashSales + todayCashXerox;
+        const currentGallaEst = (db.settings.openingCashDefault ?? 0) + todayCashSales + todayCashXerox;
 
         return (
           <div>
+            <RetailHero kind="dashboard" title="Your shop, at a glance" subtitle="Billing, inventory and everyday counter operations in one workspace." detail={`${todaySales.length} bills today · ${lowStock.length} low-stock items`} onPrimary={()=>setCurrentPage("sell")} primaryLabel="Start a bill" onSecondary={()=>setCurrentPage("products")} secondaryLabel="Browse stock"/>
             {/* 4 Core Essential Metrics */}
-            <div className="grid cols-4" style={{ marginBottom: "16px" }}>
+            <div className="grid cols-4 retail-metrics" style={{ marginBottom: "16px" }}>
               <div className="card accent fx-tilt">
                 <h3>Today's Total Sales</h3>
                 <div className="big blue">{inr(todayNetSales)}</div>
@@ -3421,6 +3423,7 @@ export default function App() {
 
         return (
           <>
+          <RetailHero kind="sell" title="New sale" subtitle="Search, scan, add items and create a customer invoice." detail={`${filteredProds.length} available items · ${cart.reduce((n,i)=>n+i.qty,0)} in cart`} onPrimary={()=>setIsCameraScannerOpen(true)} primaryLabel="Scan item"/>
           <div className="grid cols-2" style={{ alignItems: "flex-start", gap: "16px" }}>
             {/* Catalog Selection */}
             <div className="section">
@@ -3995,6 +3998,7 @@ export default function App() {
       case "products":
         return (
           <div>
+            <RetailHero kind="products" title="Discover your inventory" subtitle="Browse product photos, prices and current stock. Open any item for full details." detail={`${catalogProducts.length} products`} onPrimary={ownerMode?()=>setIsAddProductOpen(true):undefined} primaryLabel="Add product"/>
             <div className="section">
               <div className="section-head">
                 <h2>Product Catalog &amp; Inventory ({catalogProducts.length})</h2>

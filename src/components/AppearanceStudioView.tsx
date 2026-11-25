@@ -1,4 +1,6 @@
 import { Sparkles } from "lucide-react";
+import {useState} from "react";
+import {applyRetailMotion,getRetailMotion,type RetailMotion} from "./RetailHero";
 
 import { Badge } from "@/ui/Badge";
 import { Button } from "@/ui/Button";
@@ -22,6 +24,7 @@ export default function AppearanceStudioView() {
   const mode = useAppearance((s) => s.mode);
   const density = useAppearance((s) => s.density);
   const textSize = useAppearance((s) => s.textSize);
+  const [motion,setMotion]=useState<RetailMotion>(getRetailMotion);
 
   return (
     <div className="section">
@@ -31,12 +34,12 @@ export default function AppearanceStudioView() {
           Appearance Studio (New Design Kit)
         </h2>
       </div>
-      <p className="hint" style={{ marginBottom: 16 }}>
-        Ye ek naya, alag design system hai (10 themes, light/dark, density &amp; text-size
-        control) jo is update mein add kiya gaya hai. Ye poori tarah is card ke andar hi kaam
-        karta hai — baaki poori app (aur sidebar ka purana "Theme" dropdown) bilkul pehle jaisa
-        hi rahega, iska usse koi lena-dena nahi.
-      </p>
+      <p className="hint">Personalize the app's themes, density, text and retail animation style. Your device preference is saved automatically.</p>
+      <h3>3D effects & motion</h3>
+      <div className="retail-motion-options">
+        {([{id:"cinematic",label:"Cinematic 3D",description:"Floating graphics and staged cards"},{id:"balanced",label:"Balanced",description:"Smooth, lightweight interactions"},{id:"quiet",label:"Minimal motion",description:"Static graphics and fewer effects"}] as const).map(option=><button key={option.id} type="button" className={"btn "+(motion===option.id?"primary":"")} aria-pressed={motion===option.id} onClick={()=>{setMotion(option.id);applyRetailMotion(option.id);}}>{option.label}<span>{option.description}</span></button>)}
+      </div>
+      <p className="hint">System reduced-motion preferences override animation effects. The 3D graphics use CSS, not a heavy graphics engine.</p>
 
       <div
         className="ds-scope"

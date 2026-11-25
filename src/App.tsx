@@ -1185,6 +1185,16 @@ export default function App() {
         const profile = await getCurrentProfile();
         setCloudProfile(profile);
         if(data.user&&!profile)throw new Error("Signed-in account profile unavailable");
+        if(profile&&profile.role!=="owner"){
+          const {data:allowed,error}=await supabase.rpc("current_account_allowed");
+          if(error)throw error;
+          if(allowed!==true){
+            clearCachedStaffSession();
+            await supabase.auth.signOut().catch(()=>{});
+            setCloudUser(null);setCloudProfile(null);setOwnerMode(false);setGateUnlocked(false);
+            setStaffDeniedReason("kicked");setGateStage("staffDenied");setCloudStatus("offline");setCloudReady(true);return;
+          }
+        }
         if (profile?.role === "manager" && (!profile.access_enabled || isAccessWindowExpired(profile))) {
           clearCachedStaffSession();
           await supabase.auth.signOut().catch(() => {});
@@ -1340,7 +1350,7 @@ export default function App() {
           }).subscribe();
         }
         await flushOfflineQueue();
-      } catch (e) { console.warn("Cloud bootstrap failed", e); setCloudStatus("error"); setCloudReady(true); }
+      } catch (e) { console.warn("Cloud bootstrap failed", e); setGateUnlocked(false);setOwnerMode(false);setCloudStatus("error"); setCloudReady(true); }
     };
     bootstrap();
     const reconnect=()=>{if(offlineBootstrapRef.current){const base=cloudBaseRef.current;if(base)cacheCloudSnapshot(base,dbRef.current);window.location.reload();}};
@@ -1547,6 +1557,9 @@ export default function App() {
         const profile=await getCurrentProfile();
         if(cancelled)return;
         if(!profile||profile.id!==cloudProfile.id)return;
+        const {data:allowed,error:guardError}=await supabase.rpc("current_account_allowed");
+        if(cancelled)return;
+        if(!guardError&&allowed!==true){void forceStaffLogout("disabled");return;}
         if(!profile.access_enabled){void forceStaffLogout("disabled");return;}
         if(isAccessWindowExpired(profile)){void forceStaffLogout("expired");return;}
         if(profile.role==="staff"){

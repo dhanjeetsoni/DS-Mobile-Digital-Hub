@@ -201,7 +201,10 @@ export function isOutsideDailyWindow(dailyStart: string | null, dailyEnd: string
   const startMin = toMinutes(dailyStart);
   const endMin = toMinutes(dailyEnd);
   if (startMin === null || endMin === null) return false;
-  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const parts = new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(now);
+  const hour = Number(parts.find(p=>p.type==="hour")?.value);
+  const minute = Number(parts.find(p=>p.type==="minute")?.value);
+  const nowMin = hour * 60 + minute;
   if (startMin === endMin) return false; // same-value guard mirrors the RPC's own validation
   if (startMin < endMin) {
     // Normal same-day window, e.g. 09:00-18:00.

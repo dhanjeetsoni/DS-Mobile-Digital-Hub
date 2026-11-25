@@ -1504,7 +1504,8 @@ export default function App() {
   // has no internet connection right now. Runs every 5s; also once
   // immediately when a staff session starts.
   useEffect(() => {
-    if (!gateUnlocked || cloudProfile?.role !== "staff") return;
+    if (!gateUnlocked || !["staff","manager"].includes(cloudProfile?.role)) return;
+    let cancelled=false;
     const forceStaffLogout = async (reason: "disabled" | "expired" | "outsideWindow") => {
       clearCachedStaffSession();
       await supabase.auth.signOut().catch(() => {});
@@ -1522,8 +1523,12 @@ export default function App() {
       );
     };
     const check = () => {
+      if(cloudProfile.role==="manager"){
+        if(isAccessWindowExpired(cloudProfile))void forceStaffLogout("expired");
+        return;
+      }
       const cached = readCachedStaffSession();
-      if (!cached) return;
+      if (!cached || cached.staffId!==cloudProfile.id) {void forceStaffLogout("disabled");return;}
       if (cached.accessMode !== "no_restriction" && cached.accessExpiresAt && new Date(cached.accessExpiresAt).getTime() <= Date.now()) {
         forceStaffLogout("expired");
         return;
@@ -1536,10 +1541,28 @@ export default function App() {
         forceStaffLogout("outsideWindow");
       }
     };
-    check();
-    const t = window.setInterval(check, 5000);
-    return () => window.clearInterval(t);
-  }, [gateUnlocked, cloudProfile?.role]);
+    const refresh=async()=>{
+      if(!navigator.onLine||cancelled)return;
+      try{
+        const profile=await getCurrentProfile();
+        if(cancelled)return;
+        if(!profile||profile.id!==cloudProfile.id)return;
+        if(!profile.access_enabled){void forceStaffLogout("disabled");return;}
+        if(isAccessWindowExpired(profile)){void forceStaffLogout("expired");return;}
+        if(profile.role==="staff"){
+          const response:any=await getMyStaffAccessPolicy();
+          if(cancelled)return;
+          const policy=response?.policy||{};
+          if(isOutsideDailyWindow(policy.daily_start??null,policy.daily_end??null)){void forceStaffLogout("outsideWindow");return;}
+          cacheStaffSession({staffId:profile.id,staffName:profile.staff_name,accessMode:profile.access_mode,accessExpiresAt:profile.access_expires_at,visibilityFrom:profile.visibility_from,dailyStart:policy.daily_start??null,dailyEnd:policy.daily_end??null,allowedSections:Array.isArray(policy.allowed_sections)?policy.allowed_sections:null});
+        }
+        cacheCloudIdentity(profile);setCloudProfile(profile);
+      }catch(error){console.warn("Access refresh unavailable",error);}
+    };
+    check();void refresh();
+    const t=window.setInterval(check,5000), poll=window.setInterval(refresh,30000);
+    return()=>{cancelled=true;window.clearInterval(t);window.clearInterval(poll);};
+  }, [gateUnlocked,cloudProfile?.role,cloudProfile?.id]);
 
   // Same access window, but pushed live from the owner's side: if the shop
   // is online, an owner turning access OFF (or changing the window) reaches
@@ -1636,10 +1659,16 @@ export default function App() {
   // owner-only screen before the owner passcode has been entered this session.
   useEffect(() => {
     const isOwnerOnlyPage = SECONDARY_NAV_ITEMS.some((item) => item.key === currentPage && item.ownerOnly);
+    if(cloudProfile?.role==="staff"){
+      const configured=readCachedStaffSession()?.allowedSections;
+      const allowed=APP_VARIANT==="mobile"?["sell","products","lowstock","salesToday"]:(Array.isArray(configured)&&configured.length?configured:["sell","photoFinder"]);
+      if(isOwnerOnlyPage||!allowed.includes(currentPage)){const fallback=allowed.find(key=>!SECONDARY_NAV_ITEMS.some(item=>item.key===key&&item.ownerOnly))||"sell";if(currentPage!==fallback)setCurrentPage(fallback);}
+      return;
+    }
     if (isOwnerOnlyPage && !ownerMode) {
       setCurrentPage("dashboard");
     }
-  }, [currentPage, ownerMode]);
+  }, [currentPage, ownerMode, cloudProfile]);
 
   // Automatic reconnect/background sync. Non-essential polling is paused while the tab is hidden.
   useEffect(() => {

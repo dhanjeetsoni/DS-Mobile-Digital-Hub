@@ -202,6 +202,11 @@ async function getCallerStoreId(req: Request): Promise<string | null> {
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
   if (userErr || !userData?.user) return null;
+  const clientKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+  if (!clientKey) return null;
+  const caller = createClient(SUPABASE_URL,clientKey,{global:{headers:{Authorization:`Bearer ${jwt}`}},auth:{persistSession:false}});
+  const {data:allowed,error:accessError}=await caller.rpc("current_account_allowed");
+  if(accessError||allowed!==true)return null;
   const { data: profile } = await admin
     .from("profiles")
     .select("store_id")
@@ -218,6 +223,11 @@ async function getCallerStoreAndRole(req: Request): Promise<{ storeId: string; r
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
   if (userErr || !userData?.user) return null;
+  const clientKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || "";
+  if (!clientKey) return null;
+  const caller = createClient(SUPABASE_URL,clientKey,{global:{headers:{Authorization:`Bearer ${jwt}`}},auth:{persistSession:false}});
+  const {data:allowed,error:accessError}=await caller.rpc("current_account_allowed");
+  if(accessError||allowed!==true)return null;
   const { data: profile } = await admin
     .from("profiles")
     .select("store_id,role")
@@ -302,8 +312,8 @@ Deno.serve(async (req: Request) => {
   // Auth is required for every PUT/DELETE, and for every GET on the private (kyc) kind.
   const needsAuth = req.method === "PUT" || req.method === "DELETE" || isPrivate;
   if (needsAuth) {
-    const storeId = await getCallerStoreId(req);
-    if (!storeId || storeId !== parsed.storeId) {
+    const caller = await getCallerStoreAndRole(req);
+    if (!caller || caller.storeId !== parsed.storeId || ((kind === "app" || (kind === "kyc" && req.method !== "PUT")) && !["owner","manager"].includes(caller.role))) {
       return Response.json({ error: "Access denied — login/store mismatch." }, { status: 403, headers: CORS_HEADERS });
     }
   }
@@ -326,7 +336,7 @@ Deno.serve(async (req: Request) => {
       }
       const headers = new Headers(CORS_HEADERS);
       headers.set("Content-Type", r2res.headers.get("content-type") || "application/octet-stream");
-      headers.set("Cache-Control", isPrivate ? "private, max-age=60" : "public, max-age=31536000, immutable");
+      headers.set("Cache-Control", isPrivate ? "private, no-store" : "public, max-age=31536000, immutable");
       return new Response(r2res.body, { status: 200, headers });
     }
 

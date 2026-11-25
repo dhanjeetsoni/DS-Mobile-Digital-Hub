@@ -21,7 +21,7 @@ interface StockAdjustViewProps {
 // fail again on retry — queuing those would spam the offline queue forever.
 // Only network/availability errors get queued for the background worker.
 function isBusinessRejection(message: string): boolean {
-  return /invalid quantity|not authorized|unknown product/i.test(message);
+  return /invalid quantity|not authorized|unknown product|insufficient inventory|hardening_nonnegative_stock|hardening_valid_fifo_qty/i.test(message);
 }
 
 export const StockAdjustView: React.FC<StockAdjustViewProps> = ({

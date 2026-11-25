@@ -443,7 +443,7 @@ export async function queueOfflineOperation(
   payload: unknown,
   operationId = crypto.randomUUID()
 ) {
-  const profile = await getCurrentProfile();
+  const profile = await getCurrentProfile().catch(() => null);
   const scope = profile?.store_id ? { storeId: String(profile.store_id), profileId: String(profile.id) } : await readOfflineQueueScope();
   if (profile?.store_id) rememberOfflineQueueScope(String(profile.id), String(profile.store_id));
   await sqliteEnqueue(operation, entity, { operationId, deviceId, payload, scope }, operationId);
@@ -472,7 +472,7 @@ async function markSync(id: string, patch: Record<string, unknown>) {
   const { error } = await supabase.from("sync_queue").update({
     ...patch,
     updated_at: new Date().toISOString(),
-  }).eq("id", id);
+  }).eq("id", id).select("id").single();
   if (error) throw error;
 }
 
@@ -487,7 +487,8 @@ async function processOperation(row: any, storeId: string) {
     // Offline invoices may have a temporary number. The server allocates the
     // authoritative number before replay, preventing device collisions.
     if (!invoiceNo || invoiceNo.startsWith("OFF-")) {
-      const { data: prefixState } = await supabase.from("store_state")
+      const currentProfile=await getCurrentProfile();
+      const { data: prefixState } = await supabase.from(currentProfile?.role==="staff"?"store_state_staff_view":"store_state")
         .select("state").eq("store_id", storeId).maybeSingle();
       const prefix = prefixState?.state?.settings?.invoicePrefix || "DSM";
       const { data: reserved, error: reserveError } = await supabase.rpc("reserve_invoice_number", {

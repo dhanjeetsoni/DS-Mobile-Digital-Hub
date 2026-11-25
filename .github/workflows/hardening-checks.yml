@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - 'hardening/**'
+      - main
+concurrency:
+  group: hardening-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:

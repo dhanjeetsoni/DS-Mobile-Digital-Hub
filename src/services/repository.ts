@@ -48,12 +48,13 @@ export async function loadCloudState() {
     if (error) throw error;
     if (!data) return null;
     const { data: meta, error: metaError } = await supabase
-      .from("store_state")
+      .from("store_state_staff_view")
       .select("version,store_id")
       .eq("store_id", profile.store_id)
       .maybeSingle();
     if (metaError) throw metaError;
-    return { state: data as Database, version: Number(meta?.version || 0), storeId: profile.store_id };
+    if (!meta) throw new Error("Staff state version unavailable");
+    return { state: data as Database, version: Number(meta.version), storeId: profile.store_id };
   }
 
   const { data: row, error } = await supabase
@@ -414,6 +415,20 @@ export function readLocalState(): Database | null {
   }
 }
 
+// Only bind pending operations to a previously verified account/shop pair.
+function rememberOfflineQueueScope(profileId: string, storeId: string) {
+  try { localStorage.setItem("dsmdh_queue_scope_" + profileId, storeId); } catch {}
+}
+async function readOfflineQueueScope(): Promise<{ storeId: string; profileId: string } | null> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const profileId = data.session?.user.id;
+    if (!profileId) return null;
+    const storeId = localStorage.getItem("dsmdh_queue_scope_" + profileId);
+    return storeId ? { storeId, profileId } : null;
+  } catch { return null; }
+}
+
 export async function queueOfflineOperation(
   operation: SyncOperation | string,
   entity: string,
@@ -421,7 +436,9 @@ export async function queueOfflineOperation(
   operationId = crypto.randomUUID()
 ) {
   const profile = await getCurrentProfile();
-  await sqliteEnqueue(operation, entity, { operationId, deviceId, payload }, operationId);
+  const scope = profile?.store_id ? { storeId: String(profile.store_id), profileId: String(profile.id) } : await readOfflineQueueScope();
+  if (profile?.store_id) rememberOfflineQueueScope(String(profile.id), String(profile.store_id));
+  await sqliteEnqueue(operation, entity, { operationId, deviceId, payload, scope }, operationId);
 
   if (!profile?.store_id) return operationId;
 
@@ -444,10 +461,11 @@ export async function queueOfflineOperation(
 }
 
 async function markSync(id: string, patch: Record<string, unknown>) {
-  await supabase.from("sync_queue").update({
+  const { error } = await supabase.from("sync_queue").update({
     ...patch,
     updated_at: new Date().toISOString(),
   }).eq("id", id);
+  if (error) throw error;
 }
 
 async function processOperation(row: any, storeId: string) {
@@ -744,8 +762,9 @@ async function processOperation(row: any, storeId: string) {
     const profile = await getCurrentProfile();
     if (profile?.role === "staff") {
       const { data: current, error: currentError } = await supabase
-        .from("store_state").select("version").eq("store_id", storeId).maybeSingle();
+        .from("store_state_staff_view").select("version").eq("store_id", storeId).maybeSingle();
       if (currentError) throw currentError;
+      if (!current) throw new Error("Staff state version unavailable");
       const { data, error } = await supabase.rpc("save_store_state_for_user", {
         p_state: payload as any,
         p_expected_version: Number(current?.version || 0),
@@ -788,6 +807,29 @@ export async function flushOfflineQueue() {
 async function flushOfflineQueueInner() {
   const profile = await getCurrentProfile();
   if (!profile?.store_id) return { processed: 0, failed: 0 };
+  rememberOfflineQueueScope(String(profile.id), String(profile.store_id));
+
+  // Restore device-only entries without resetting previously processed server rows.
+  // Unscoped legacy entries and stale full-state snapshots require reconciliation.
+  for (const local of await sqliteList()) {
+    let envelope: any;
+    try { envelope = JSON.parse(String(local[3])); } catch { continue; }
+    if (envelope?.scope?.storeId !== profile.store_id || envelope?.scope?.profileId !== profile.id || envelope?.deviceId !== deviceId) continue;
+    const operation = String(local[1]);
+    const operationId = String(local[0]);
+    if (envelope.operationId !== operationId) continue;
+    const { data: existing, error: lookupError } = await supabase.from("sync_queue")
+      .select("status").eq("store_id", profile.store_id).eq("operation_id", operationId).maybeSingle();
+    if (lookupError) throw lookupError;
+    if (existing?.status === "processed") { await sqliteRemove(operationId); continue; }
+    if (existing || operation === "snapshot") continue;
+    const { error: uploadError } = await supabase.from("sync_queue").upsert({
+      store_id: profile.store_id, client_id: deviceId, device_id: deviceId,
+      operation, operation_id: operationId, operation_type: operation,
+      entity: String(local[2]), payload: envelope.payload, status: "pending", retry_count: 0, attempts: 0,
+    }, { onConflict: "store_id,operation_id", ignoreDuplicates: true });
+    if (uploadError) throw uploadError;
+  }
 
   // BUG FIX (2026-09-04): a row is marked "syncing" the instant a flush
   // attempt starts (see markSync below), *before* the RPC call — if the

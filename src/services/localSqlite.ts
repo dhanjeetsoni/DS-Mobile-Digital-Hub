@@ -30,16 +30,17 @@ function readIndexedDb(): Promise<Uint8Array | undefined> {
 
 function writeIndexedDb(bytes: Uint8Array): Promise<void> {
   if (!idbAvailable()) return Promise.resolve();
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const req = indexedDB.open("ds-mobile-digital-hub", 1);
     req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
     req.onsuccess = () => {
       const tx = req.result.transaction(DB_STORE, "readwrite");
       tx.objectStore(DB_STORE).put(bytes.buffer, DB_KEY);
       tx.oncomplete = () => { try { req.result.close(); } catch {} ; resolve(); };
-      tx.onerror = () => { try { req.result.close(); } catch {} ; resolve(); };
+      tx.onerror = () => { try { req.result.close(); } catch {} ; reject(tx.error || new Error("Offline queue persistence failed")); };
+      tx.onabort = () => { try { req.result.close(); } catch {} ; reject(tx.error || new Error("Offline queue persistence aborted")); };
     };
-    req.onerror = () => resolve();
+    req.onerror = () => reject(req.error || new Error("Offline queue storage unavailable"));
   });
 }
 

@@ -234,7 +234,9 @@ export interface CachedStaffSession {
  */
 export function cacheStaffSession(session: CachedStaffSession) {
   try {
-    localStorage.setItem(STAFF_SESSION_CACHE_KEY, JSON.stringify(session));
+    const prior = readCachedStaffSession();
+    const merged = prior?.staffId === session.staffId ? { ...prior, ...session } : session;
+    localStorage.setItem(STAFF_SESSION_CACHE_KEY, JSON.stringify(merged));
   } catch {}
 }
 
@@ -287,12 +289,6 @@ export async function staffSignIn(loginId: string, password: string): Promise<St
     await supabase.auth.signOut();
     return { status: "error", message: "Ye account is login form se sign in ke liye valid nahi hai." };
   }
-  if (profile.role === "manager") {
-    // Manager (owner-level) credentials have no access_enabled/time-window
-    // gate — that's a staff-only concept. Full access, same as the owner.
-    supabase.rpc("touch_staff_last_active").then(() => {}, () => {});
-    return { status: "ok", profile };
-  }
   if (!profile.access_enabled) {
     await supabase.auth.signOut();
     return { status: "disabled" };
@@ -302,15 +298,13 @@ export async function staffSignIn(loginId: string, password: string): Promise<St
     return { status: "expired" };
   }
 
+  if (profile.role === "manager") {
+    supabase.rpc("touch_staff_last_active").then(() => {}, () => {});
+    return { status: "ok", profile };
+  }
+
   // Phase 6: recurring daily time-of-day window (separate from the
-  // access_expires_at countdown just checked above). Best-effort fetch —
-  // a policy read failure must never block an otherwise-valid sign-in;
-  // it just means this staff member gets no daily-window/section
-  // restriction for this session (same fail-open posture the rest of the
-  // policy wiring takes, since the alternative — hard-blocking sign-in
-  // over a policy-table read hiccup — would be a worse outcome for a
-  // shopkeeper's business than an unenforced restriction until their next
-  // successful sign-in).
+  // access_expires_at countdown just checked above). Fail closed if the policy cannot be verified.
   let dailyStart: string | null = null;
   let dailyEnd: string | null = null;
   let allowedSections: string[] | null = null;
@@ -323,7 +317,8 @@ export async function staffSignIn(loginId: string, password: string): Promise<St
       allowedSections = Array.isArray(policy.allowed_sections) ? policy.allowed_sections : null;
     }
   } catch {
-    // fail-open, see comment above
+    await supabase.auth.signOut();
+    return { status: "error", message: "Staff access policy could not be verified. Please reconnect and retry." };
   }
   if (isOutsideDailyWindow(dailyStart, dailyEnd)) {
     await supabase.auth.signOut();

@@ -1,6 +1,6 @@
 import { supabase, getCurrentProfile } from "./supabaseClient";
 import type { Database } from "../types";
-import { sqliteEnqueue, sqliteList, sqliteRemove } from "./localSqlite";
+import { sqliteEnqueue, sqliteList, sqliteRemove, sqliteReplace } from "./localSqlite";
 
 const LOCAL_KEY = "dsmdh_cache_v4";
 const DEVICE_ID_KEY = "dsmdh_device_id";
@@ -35,25 +35,17 @@ export type SyncOperation =
   | "supplier"
   | "snapshot";
 
-const STAFF_SAFE_STATE_RPC = "load_store_state_for_user";
 
 export async function loadCloudState() {
   const profile = await getCurrentProfile();
   if (!profile?.store_id) return null;
 
-  // SECURITY: staff never fetches the raw store_state row. The RPC projects
-  // only fields permitted to staff before any data enters the browser.
+  // Read the redacted staff state and version atomically from the same row.
   if (profile.role === "staff") {
-    const { data, error } = await supabase.rpc(STAFF_SAFE_STATE_RPC);
+    const { data, error } = await supabase.from("store_state_staff_view").select("state,version,store_id").eq("store_id",profile.store_id).maybeSingle();
     if (error) throw error;
-    if (!data) return null;
-    const { data: meta, error: metaError } = await supabase
-      .from("store_state")
-      .select("version,store_id")
-      .eq("store_id", profile.store_id)
-      .maybeSingle();
-    if (metaError) throw metaError;
-    return { state: data as Database, version: Number(meta?.version || 0), storeId: profile.store_id };
+    if (!data?.state) return null;
+    return {state:data.state as Database,version:Number(data.version),storeId:profile.store_id};
   }
 
   const { data: row, error } = await supabase
@@ -383,22 +375,13 @@ export async function fetchFullBackup(storeId: string, blobState: Database): Pro
   };
 }
 
-export async function saveCloudState(state: Database, expectedVersion: number) {
-  const profile = await getCurrentProfile();
-  if (profile?.role === "staff") {
-    const { data, error } = await supabase.rpc("save_store_state_for_user", {
-      p_state: state,
-      p_expected_version: expectedVersion,
-    });
-    if (error) throw error;
-    return Number(data?.version ?? expectedVersion + 1);
-  }
-  const { data, error } = await supabase.rpc("save_store_state", {
-    p_state: state,
-    p_expected_version: expectedVersion,
+export async function saveCloudState(state: Database, expectedVersion: number, scope: {profileId:string;storeId:string}) {
+  const {data,error}=await supabase.rpc("save_store_state_scoped", {
+    p_store_id:scope.storeId,p_profile_id:scope.profileId,p_state:state,p_expected_version:expectedVersion
   });
-  if (error) throw error;
-  return Number(data ?? expectedVersion + 1);
+  if(error)throw error;
+  if(data===null||!Number.isSafeInteger(Number(data)))throw new Error("Invalid snapshot version");
+  return Number(data);
 }
 
 export function persistLocalState(state: Database) {
@@ -414,6 +397,39 @@ export function readLocalState(): Database | null {
   }
 }
 
+export type SnapshotRecovery = {scope:{profileId:string;storeId:string};base:Database;local:Database;version:number;conflicts:string[]};
+const recoveryId=(profileId:string,storeId:string)=>"snapshot-recovery:"+profileId+":"+storeId;
+export async function saveSnapshotRecovery(recovery:SnapshotRecovery) {
+  await sqliteReplace("snapshot_recovery","store_state",recovery,recoveryId(recovery.scope.profileId,recovery.scope.storeId));
+}
+export async function readSnapshotRecovery(profileId:string,storeId:string):Promise<SnapshotRecovery|null> {
+  const row=(await sqliteList()).find(x=>x[0]===recoveryId(profileId,storeId));
+  if(!row) return null;
+  const v=JSON.parse(String(row[3])) as SnapshotRecovery;
+  return v.scope?.profileId===profileId&&v.scope?.storeId===storeId?v:null;
+}
+export async function clearSnapshotRecovery(profileId:string,storeId:string) {
+  await sqliteRemove(recoveryId(profileId,storeId));
+}
+export async function archiveSnapshotRecovery(recovery:SnapshotRecovery) {
+  await sqliteEnqueue("snapshot_conflict","store_state",recovery);
+  await clearSnapshotRecovery(recovery.scope.profileId,recovery.scope.storeId);
+}
+
+// Only bind pending operations to a previously verified account/shop pair.
+function rememberOfflineQueueScope(profileId: string, storeId: string) {
+  try { localStorage.setItem("dsmdh_queue_scope_" + profileId, storeId); } catch {}
+}
+async function readOfflineQueueScope(): Promise<{ storeId: string; profileId: string } | null> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const profileId = data.session?.user.id;
+    if (!profileId) return null;
+    const storeId = localStorage.getItem("dsmdh_queue_scope_" + profileId);
+    return storeId ? { storeId, profileId } : null;
+  } catch { return null; }
+}
+
 export async function queueOfflineOperation(
   operation: SyncOperation | string,
   entity: string,
@@ -421,9 +437,11 @@ export async function queueOfflineOperation(
   operationId = crypto.randomUUID()
 ) {
   const profile = await getCurrentProfile();
-  await sqliteEnqueue(operation, entity, { operationId, deviceId, payload }, operationId);
+  const scope = profile?.store_id ? { storeId: String(profile.store_id), profileId: String(profile.id) } : await readOfflineQueueScope();
+  if (profile?.store_id) rememberOfflineQueueScope(String(profile.id), String(profile.store_id));
+  await sqliteEnqueue(operation, entity, { operationId, deviceId, payload, scope }, operationId);
 
-  if (!profile?.store_id) return operationId;
+  if (!profile?.store_id || operation === "snapshot" || operation === "snapshot_conflict") return operationId;
 
   const { error } = await supabase.from("sync_queue").upsert({
     store_id: profile.store_id,
@@ -444,10 +462,11 @@ export async function queueOfflineOperation(
 }
 
 async function markSync(id: string, patch: Record<string, unknown>) {
-  await supabase.from("sync_queue").update({
+  const { error } = await supabase.from("sync_queue").update({
     ...patch,
     updated_at: new Date().toISOString(),
   }).eq("id", id);
+  if (error) throw error;
 }
 
 async function processOperation(row: any, storeId: string) {
@@ -491,10 +510,11 @@ async function processOperation(row: any, storeId: string) {
         p_min_stock: item.minStock ?? 0,
       });
       if (resolveError) throw resolveError;
-      return { product_id: realId, quantity: item.qty, unit_price: item.price };
+      return { product_id: realId, quantity: item.qty, unit_price: item.price, warranty_enabled: item.warrantyEnabled ?? false, warranty_months: item.warrantyMonths ?? null, warranty_start: item.warrantyStart ?? null, warranty_end: item.warrantyEnd ?? null };
     }));
 
-    const { data: saleId, error } = await supabase.rpc("atomic_complete_sale", {
+    const hasPaymentDetails = typeof sale.amountPaid === "number" && Number.isFinite(sale.amountPaid) && typeof sale.dueAmount === "number" && Number.isFinite(sale.dueAmount);
+    const { data: saleId, error } = await supabase.rpc(hasPaymentDetails ? "atomic_complete_sale_v2" : "atomic_complete_sale", {
       p_store_id: storeId,
       p_invoice_no: invoiceNo,
       p_customer_name: sale.customer?.name || null,
@@ -504,6 +524,7 @@ async function processOperation(row: any, storeId: string) {
       p_tax: Number(sale.taxAmount || 0),
       p_idempotency_key: row.operation_id,
       p_items: resolvedItems,
+      ...(hasPaymentDetails ? { p_amount_paid: sale.amountPaid, p_due_amount: sale.dueAmount, p_finance_loan_amount: sale.financeLoanAmount ?? null, p_finance_net_receivable: sale.financeNetReceivable ?? null } : {}),
     });
     if (error) throw error;
     return { serverId: saleId, invoiceNo };
@@ -739,26 +760,7 @@ async function processOperation(row: any, storeId: string) {
   }
 
   if (type === "snapshot") {
-    // Compatibility bridge for legacy modules that still persist the aggregate state.
-    // Server-side version checking prevents silent last-write-wins overwrites.
-    const profile = await getCurrentProfile();
-    if (profile?.role === "staff") {
-      const { data: current, error: currentError } = await supabase
-        .from("store_state").select("version").eq("store_id", storeId).maybeSingle();
-      if (currentError) throw currentError;
-      const { data, error } = await supabase.rpc("save_store_state_for_user", {
-        p_state: payload as any,
-        p_expected_version: Number(current?.version || 0),
-      });
-      if (error) throw error;
-      return { serverId: data?.store_id, version: data?.version };
-    }
-    const { data: current, error: currentError } = await supabase
-      .from("store_state").select("version").eq("store_id", storeId).maybeSingle();
-    if (currentError) throw currentError;
-    const version = Number(current?.version || 0);
-    const next = await saveCloudState(payload as Database, version);
-    return { serverId: storeId, version: next };
+    throw new Error("SNAPSHOT_REVIEW_REQUIRED: legacy full-state snapshot has no trusted base version");
   }
 
   // Other entity types are deliberately explicit. A module must register a
@@ -788,6 +790,29 @@ export async function flushOfflineQueue() {
 async function flushOfflineQueueInner() {
   const profile = await getCurrentProfile();
   if (!profile?.store_id) return { processed: 0, failed: 0 };
+  rememberOfflineQueueScope(String(profile.id), String(profile.store_id));
+
+  // Restore device-only entries without resetting previously processed server rows.
+  // Unscoped legacy entries and stale full-state snapshots require reconciliation.
+  for (const local of await sqliteList()) {
+    let envelope: any;
+    try { envelope = JSON.parse(String(local[3])); } catch { continue; }
+    if (envelope?.scope?.storeId !== profile.store_id || envelope?.scope?.profileId !== profile.id || envelope?.deviceId !== deviceId) continue;
+    const operation = String(local[1]);
+    const operationId = String(local[0]);
+    if (envelope.operationId !== operationId) continue;
+    const { data: existing, error: lookupError } = await supabase.from("sync_queue")
+      .select("status").eq("store_id", profile.store_id).eq("queued_by", profile.id).eq("operation_id", operationId).maybeSingle();
+    if (lookupError) throw lookupError;
+    if (existing?.status === "processed") { await sqliteRemove(operationId); continue; }
+    if (existing || operation === "snapshot" || operation === "snapshot_conflict" || operation === "snapshot_recovery") continue;
+    const { error: uploadError } = await supabase.from("sync_queue").upsert({
+      store_id: profile.store_id, client_id: deviceId, device_id: deviceId,
+      operation, operation_id: operationId, operation_type: operation,
+      entity: String(local[2]), payload: envelope.payload, status: "pending", retry_count: 0, attempts: 0,
+    }, { onConflict: "store_id,operation_id", ignoreDuplicates: true });
+    if (uploadError) throw uploadError;
+  }
 
   // BUG FIX (2026-09-04): a row is marked "syncing" the instant a flush
   // attempt starts (see markSync below), *before* the RPC call — if the
@@ -803,6 +828,7 @@ async function flushOfflineQueueInner() {
     .from("sync_queue")
     .select("id,operation_id,operation,operation_type,entity,payload,retry_count,attempts,status,last_attempt_at")
     .eq("store_id", profile.store_id)
+    .eq("queued_by", profile.id)
     .or(`status.in.(pending,failed),and(status.eq.syncing,last_attempt_at.lt.${staleThreshold})`)
     .order("created_at", { ascending: true })
     .limit(50);
@@ -819,6 +845,11 @@ async function flushOfflineQueueInner() {
 
   let processed = 0, failed = 0;
   for (const row of rows || []) {
+    if (String(row.operation_type || row.operation) === "snapshot") {
+      await markSync(row.id,{status:"abandoned",last_error:"SNAPSHOT_REVIEW_REQUIRED: no trusted base version"});
+      failed++;
+      continue;
+    }
     if (Number(row.retry_count || 0) >= MAX_RETRIES) {
       const giveUpNote = `Gave up after ${MAX_RETRIES} failed attempts — needs manual review.`;
       try {

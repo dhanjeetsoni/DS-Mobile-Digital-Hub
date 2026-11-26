@@ -29,6 +29,12 @@ try{
  browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  const errors=[];page.on("pageerror",e=>errors.push(e.message));
+ const setupLocalOwner=async p=>{
+  await p.getByPlaceholder("Create Owner Device PIN").fill("5826");
+  await p.getByPlaceholder("Confirm Owner Device PIN").fill("5826");
+  await p.getByRole("button",{name:"Create PIN & Unlock",exact:true}).click();
+  await p.locator("#app").waitFor({timeout:30000});
+ };
  await page.goto(url,{waitUntil:"domcontentloaded"});
  await page.getByText("Owner Confidential Area",{exact:true}).first().waitFor({timeout:30000});
  await page.getByText("Login (ID / Password)",{exact:true}).click();
@@ -40,9 +46,14 @@ try{
  owner.on("pageerror",e=>errors.push(e.message));
  await owner.goto(url,{waitUntil:"domcontentloaded"});
  await owner.getByText("Owner Confidential Area",{exact:true}).first().click();
- await owner.getByPlaceholder("Enter Owner Device PIN").fill("1234");
+ await setupLocalOwner(owner);
+ await owner.getByText("All Products",{exact:true}).first().waitFor({timeout:30000});
+ await owner.reload({waitUntil:"domcontentloaded"});
+ await owner.getByText("Owner Confidential Area",{exact:true}).first().click();
+ await owner.getByPlaceholder("Enter Owner Device PIN").fill("5826");
  await owner.getByRole("button",{name:"Unlock",exact:true}).click();
  await owner.getByText("All Products",{exact:true}).first().waitFor({timeout:30000});
+ console.log("PASS local owner PIN creation and persistent unlock");
  await owner.getByText("Sales / New Bill",{exact:true}).first().click();
  // Exercise a real checkout in the isolated browser's local-only database.
  // No customer phone, external notification, production account or real sale.
@@ -74,8 +85,7 @@ try{
  directory.on("pageerror",e=>errors.push(e.message));
  await directory.goto(url,{waitUntil:"domcontentloaded"});
  await directory.getByText("Owner Confidential Area",{exact:true}).first().click();
- await directory.getByPlaceholder("Enter Owner Device PIN").fill("1234");
- await directory.getByRole("button",{name:"Unlock",exact:true}).click();
+ await setupLocalOwner(directory);
  const navSource=readFileSync("src/components/Sidebar.tsx","utf8");
  const modules=[...navSource.matchAll(/\{\s*key:\s*"([^"]+)",\s*label:\s*"([^"]+)"/g)].map(m=>({key:m[1],label:m[2]}));
  assert(modules.length>=52,"Feature registry unexpectedly shrank");
@@ -146,8 +156,7 @@ try{
  await mobile.goto(url,{waitUntil:"domcontentloaded"});
  await mobile.getByText("Owner Confidential Area",{exact:true}).first().click();
  await mobile.screenshot({path:"visual-review/android-login.png",animations:"disabled"});
- await mobile.getByPlaceholder("Enter Owner Device PIN").fill("1234");
- await mobile.getByRole("button",{name:"Unlock",exact:true}).click();
+ await setupLocalOwner(mobile);
  await mobile.getByRole("button",{name:"More",exact:true}).click();
  const mobileSearch=mobile.getByRole("textbox",{name:"Search tools"});
  await mobileSearch.fill("backup");

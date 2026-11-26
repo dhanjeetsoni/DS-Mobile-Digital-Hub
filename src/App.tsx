@@ -501,6 +501,8 @@ export default function App() {
     } catch {}
   };
   const [gatePassInput, setGatePassInput] = useState("");
+  const [gatePinConfirm, setGatePinConfirm] = useState("");
+  const [gatePinError, setGatePinError] = useState("");
   // Staff Access Manager (Part 1): staff sign in with an owner-issued Login ID
   // + password instead of walking straight into Staff Area. If cloud sync
   // isn't configured on this device, no staff accounts can exist yet, so we
@@ -636,40 +638,9 @@ export default function App() {
     e.preventDefault();
     if (gateAttempts.lockUntil > Date.now()) return;
 
-    // Phase 2 (2026-09-06): two different things share this same screen —
-    // 1) A real signed-in person (owner/manager) re-entering their own
-    //    PIN after an app relaunch — checked against their personal
-    //    profiles.pin_hash via pinAuth.ts.
-    // 2) The old fully-offline "Owner Confidential Area" device passcode,
-    //    reachable with NO cloud account signed in at all (db.settings.
-    //    ownerPasscode, "1234" default) — kept exactly as before so a
-    //    mostly-offline shop doesn't lose local owner-mode access.
-    //
-    // Bug fix (2026-09-12): this same handler is ALSO used by gateStage
-    // "personalPin" — a signed-in STAFF (or owner/manager) member just
-    // resuming their own already-unlocked session with their own PIN
-    // after a relaunch, which correctly must check verifyPin(their own
-    // id, ...) regardless of role. That is genuinely different from a
-    // signed-in STAFF member specifically asking for OWNER access
-    // (gateStage "ownerAuth", or the "Owner Re-Auth Modal" mid-session —
-    // isOwnerLoginOpen) — those two cases were being lumped together as
-    // "any signed-in profile -> check their own PIN", which for a staff
-    // person asking for OWNER access always checked their own PIN against
-    // whatever they'd typed as "the owner's password" — that can never
-    // match; this device has no cached PIN for the owner's profile at
-    // all, it's only ever synced after a real login as that person. Exact
-    // match for the report: "works when the app first opens [nobody
-    // signed in yet], not when switching from staff mode".
-    //
-    // Fix: only use the signed-in person's own PIN when they're either
-    // just resuming their own session (personalPin) or they themselves
-    // already ARE owner/manager asking for owner access (their own PIN
-    // legitimately IS the owner credential in that case). Every other
-    // case asking specifically for OWNER access (staff on gateStage
-    // "ownerAuth", or the mid-session modal) falls through to the same
-    // device-level ownerPasscode as (2) above — the intentionally-
-    // preserved "escape hatch" this comment already described, just
-    // never actually reachable from a staff session before this fix.
+    setGatePinError("");
+    // Cloud profiles verify their own server PIN; standalone devices must
+    // explicitly configure a local PIN instead of accepting a known default.
     const wantsOwnerAccessSpecifically = gateStage === "ownerAuth" || isOwnerLoginOpen;
     const isOwnerOrManager = cloudProfile?.role === "owner" || cloudProfile?.role === "manager";
     if (wantsOwnerAccessSpecifically && cloudProfile?.role === "staff") {
@@ -681,14 +652,35 @@ export default function App() {
     if (cloudProfile?.id && (!wantsOwnerAccessSpecifically || isOwnerOrManager)) {
       correct = await verifyPin(cloudProfile.id, gatePassInput);
     } else {
+      if (!cloudReady) { setGatePinError("Finishing device setup. Please try again."); return; }
+      if (localStorage.getItem("dsmdh_cloud_identity_seen")) {
+        setGatePinError("Sign in to your cloud owner account to access this device.");
+        return;
+      }
       const configuredPass = db.settings.ownerPasscode || "";
-      // IMPORTANT: this PIN must ALWAYS be checked on its own merits — see
-      // the long-standing comment history on this check. It must never be
-      // silently bypassed just because some other session state looks
-      // authenticated.
-      correct =
-        (!!configuredPass && gatePassInput === configuredPass) ||
-        (!configuredPass && gatePassInput === "1234");
+      if (!configuredPass) {
+        if (!/^\d{4}$/.test(gatePassInput) || /^(1234|0000|1111|2222|3333|4444|5555|6666|7777|8888|9999)$/.test(gatePassInput)) {
+          setGatePinError("Choose a different 4-digit device PIN.");
+          return;
+        }
+        if (gatePassInput !== gatePinConfirm) {
+          setGatePinError("PINs do not match.");
+          return;
+        }
+        const updated = {...db,settings:{...db.settings,ownerPasscode:gatePassInput}};
+        try {
+          persistLocalState(updated);
+          dbRef.current = updated;
+          setDb(updated);
+        } catch {
+          setGatePinError("Could not save PIN on this device. Please free storage and retry.");
+          return;
+        }
+        setGatePinConfirm("");
+        correct = true;
+      } else {
+        correct = gatePassInput === configuredPass;
+      }
     }
 
     if (correct) {
@@ -703,6 +695,8 @@ export default function App() {
       if (wantsOwnerAccessSpecifically || isOwnerOrManager) setOwnerMode(true);
       setGateUnlocked(true);
       setGatePassInput("");
+      setGatePinConfirm("");
+      setGatePinError("");
       setIsOwnerLoginOpen(false);
       if (ownerLoginPurpose === "proMode") {
         // DS Mobile Owner Lite/Pro (§4.3): this modal was opened by
@@ -5357,6 +5351,7 @@ export default function App() {
   if (!gateUnlocked) {
     const shopInitials = (db.settings.shopName || "DS").trim().slice(0, 2).toUpperCase();
     const locked = gateAttempts.lockUntil > Date.now();
+    const settingLocalPin = !cloudProfile && !db.settings.ownerPasscode && !localStorage.getItem("dsmdh_cloud_identity_seen");
     return (
       <div className="gate-screen">
         <div className="gate-orb" style={{ width: 340, height: 340, top: "-8%", left: "-6%", background: "#2563eb" }} />
@@ -5369,20 +5364,20 @@ export default function App() {
               <p>Select how you're signing in</p>
             </div>
             <div className="gate-options">
-              <div className="gate-option staff" onClick={handleGateStaffAreaTap}>
+              <button type="button" className="gate-option staff" onClick={handleGateStaffAreaTap}>
                 <div className="icon-wrap"><Users size={24} /></div>
                 <h3>Login (ID / Password)</h3>
                 <p>Android Access Area se mila Login ID + Password daalo — Staff ya Owner-level, dono is se sign in hote hain.</p>
                 <ArrowRightIcon size={18} className="go-arrow" color="#60a5fa" />
-              </div>
-              <div className="gate-option owner" onClick={() => setGateStage("ownerAuth")}>
+              </button>
+              <button type="button" className="gate-option owner" onClick={() => { setGatePinError(""); setGatePinConfirm(""); setGatePassInput(""); setGateStage("ownerAuth"); }}>
                 <div className="icon-wrap"><ShieldAlert size={24} /></div>
                 <h3>Owner Confidential Area</h3>
                 <p>Full access — purchase cost, reports, settings &amp; backups. Passcode protected.</p>
                 <p className="hint" style={{ marginTop: 4 }}>Yeh ek chhota device PIN hai (Settings mein set hota hai) — aapke Cloud account password se alag.</p>
                 <div className="gate-warning-strip"><Lock size={12} /> Restricted &amp; Monitored</div>
                 <ArrowRightIcon size={18} className="go-arrow" color="#f87171" />
-              </div>
+              </button>
             </div>
           </div>
         )}
@@ -5393,7 +5388,7 @@ export default function App() {
               <div className="warn-badge"><ShieldAlert size={22} /></div>
               <div>
                 <h3>{cloudProfile ? `Welcome back${cloudProfile.staff_name ? `, ${cloudProfile.staff_name}` : ""}` : "Owner Confidential Area"}</h3>
-                <p>{cloudProfile ? "Enter your PIN to continue" : "Authorized personnel only"}</p>
+                <p>{cloudProfile ? "Enter your PIN to continue" : settingLocalPin ? "Create a private device PIN" : "Authorized personnel only"}</p>
               </div>
             </div>
 
@@ -5411,10 +5406,13 @@ export default function App() {
                   inputMode="numeric"
                   maxLength={4}
                   autoFocus
-                  placeholder={cloudProfile ? "Enter your 4-digit PIN" : "Enter Owner Device PIN"}
+                  aria-label={settingLocalPin ? "Create Owner Device PIN" : "Enter Owner Device PIN"}
+                  placeholder={cloudProfile ? "Enter your 4-digit PIN" : settingLocalPin ? "Create Owner Device PIN" : "Enter Owner Device PIN"}
                   value={gatePassInput}
                   onChange={(e) => setGatePassInput(e.target.value)}
                 />
+                {settingLocalPin && <input className="gate-pass-input gate-pin-confirm" type="password" inputMode="numeric" maxLength={4} aria-label="Confirm Owner Device PIN" placeholder="Confirm Owner Device PIN" value={gatePinConfirm} onChange={e=>setGatePinConfirm(e.target.value)} />}
+                {gatePinError && <div className="gate-pin-error" role="alert">{gatePinError}</div>}
                 <div className="hint" style={{ marginTop: 6 }}>
                   {cloudProfile
                     ? "Ye aapka apna personal PIN hai (Settings mein badal sakte ho) — aapke Cloud login password se alag."
@@ -5427,7 +5425,7 @@ export default function App() {
                 </div>
                 <div className="modal-actions" style={{ marginTop: 18 }}>
                   <button type="submit" className="btn primary" style={{ width: "100%", justifyContent: "center", background: "#dc2626" }} disabled={gateBusy}>
-                    {gateBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {gateBusy ? "Sending alert…" : "Unlock"}
+                    {gateBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {gateBusy ? "Sending alert…" : settingLocalPin ? "Create PIN & Unlock" : "Unlock"}
                   </button>
                 </div>
                 {gateStage === "personalPin" && biometricAvailable && (
@@ -5443,6 +5441,7 @@ export default function App() {
               </form>
             )}
 
+            {!cloudProfile && isCloudConfigured && <button type="button" className="gate-back-link" onClick={()=>setShowCloudAuth(true)}>Sign in with cloud owner email</button>}
             {cloudProfile ? (
               <button
                 className="gate-back-link"
@@ -5463,6 +5462,8 @@ export default function App() {
                 onClick={() => {
                   setGateStage(gateBackStage);
                   setGatePassInput("");
+                  setGatePinConfirm("");
+                  setGatePinError("");
                 }}
               >
                 ← Back to selection
@@ -5570,6 +5571,7 @@ export default function App() {
             </button>
           </div>
         )}
+        {showCloudAuth && <CloudAuthPanel userEmail={cloudUser?.email} onClose={()=>setShowCloudAuth(false)} onChanged={async()=>window.location.reload()} />}
       </div>
     );
   }

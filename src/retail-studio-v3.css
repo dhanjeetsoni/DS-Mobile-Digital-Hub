@@ -1,0 +1,113 @@
+/* DS Retail Studio 3. Shared visual system; print invoices intentionally unaffected.
+   Uses existing 11 palettes, no new dependencies, no external assets. */
+@media screen {
+:root {
+  --ds-panel-radius: 20px;
+  --ds-control-radius: 12px;
+  --ds-shadow: 0 1px 2px #1018280d, 0 10px 32px -24px var(--shade);
+  --ds-hover-shadow: 0 14px 34px -22px var(--shade);
+}
+#app #main { background: var(--canvas); background-image: radial-gradient(ellipse at 100% 0%, color-mix(in srgb,var(--brand) 7%,transparent),transparent 42%); }
+#app #sidebar { background:var(--surface); box-shadow: 1px 0 0 var(--line); }
+#app .brand { border-bottom:1px solid var(--line); margin:0 12px 8px; padding:18px 4px; }
+#app .brand .logo-badge { border:1px solid color-mix(in srgb,var(--brand-fg) 30%,transparent); border-radius:16px; }
+#app .brand .name { letter-spacing:-.025em; font-weight:800; }
+#app .nav { padding-inline:12px; }
+#app .nav .navitem { min-height:42px; font-weight:600; border:1px solid transparent; }
+#app .nav .navitem.active { background:var(--brand-soft); color:var(--ink); border-color:color-mix(in srgb,var(--brand) 32%,var(--line)); box-shadow:inset 3px 0 0 var(--brand); }
+#app .nav .navitem.active .ic { color:var(--brand); }
+#app .nav-group-header { color:var(--ink); min-height:38px; border-radius:10px; }
+#app .tool-search { background:var(--surface-2); border-radius:12px; }
+#app #topbar { background:var(--surface); border-bottom:1px solid var(--line); box-shadow:none; }
+#app .retail-command-bar { padding-block:10px; gap:12px; }
+#app .retail-page-title strong { font-size:18px; font-weight:800; letter-spacing:-.025em; }
+#app .retail-command-trigger { min-height:46px; border-radius:14px; background:var(--canvas); }
+#app .retail-theme-toggle { background:var(--canvas); border-radius:14px; }
+#app .retail-quick-rail { background:var(--surface); }
+#app .retail-quick-rail button { min-height:42px; border-radius:13px; }
+#app .retail-quick-rail button[aria-current=page] { box-shadow:inset 0 0 0 1px var(--brand); }
+#app #page { scroll-padding-top:12px; }
+#app .section,#app .card { border-radius:var(--ds-panel-radius); box-shadow:var(--ds-shadow); }
+#app .section-head { border-bottom:1px solid var(--line); flex-wrap:wrap; }
+#app .section-head h2 { font-size:clamp(16px,1.35vw,20px); font-weight:800; line-height:1.35; letter-spacing:-.035em; }
+#app .card h3 { font-size:12px; letter-spacing:.015em; text-transform:none; }
+#app .card .big { font-variant-numeric:tabular-nums; letter-spacing:-.045em; }
+#app .card.dark { background:var(--surface-3); color:var(--ink); border-color:var(--line); }
+#app .card.dark h3,#app .card.dark .foot { color:var(--ink-muted); }
+#app .retail-metrics .card { background:var(--surface); background-image:linear-gradient(145deg,transparent 62%,color-mix(in srgb,var(--brand) 8%,transparent)); }
+#app .btn { border-radius:var(--ds-control-radius); font-weight:700; }
+#app .btn.primary { box-shadow:0 5px 14px -8px var(--brand); }
+#app input:not([type=checkbox]):not([type=radio]):not([type=range]),#app select,#app textarea { border-radius:var(--ds-control-radius); }
+#app :where(button,input,select,textarea,a,[tabindex]):focus-visible,.gate-screen :where(button,input,a,[tabindex]):focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+#app .table-wrap { border:1px solid var(--line); border-radius:14px; }
+#app .table-wrap th { letter-spacing:.025em; }
+#app .table-wrap td { font-variant-numeric:tabular-nums; }
+#app .table-wrap tbody tr:last-child td { border-bottom:0; }
+#app .product-card { border-radius:18px; box-shadow:var(--ds-shadow); }
+#app .product-card-photo { background:var(--surface-2); background-image:radial-gradient(ellipse at center,var(--surface),transparent 75%); }
+#app .product-card-body { padding:12px; }
+#app .product-card-name { font-weight:750; letter-spacing:-.015em; }
+#app .product-card-price { font-weight:850; font-variant-numeric:tabular-nums; }
+#app .product-card-actions .btn { min-height:40px; }
+#app .cart-line { border:1px solid var(--line); border-radius:14px; }
+#app .pos-checkout-btn { min-height:52px; border-radius:14px; font-weight:800; }
+#app .modal { border-radius:22px; box-shadow:0 24px 70px -20px var(--shade); }
+#app .modal-head h3 { letter-spacing:-.025em; }
+.retail-hero,.retail-hero-sell,.retail-hero-products { isolation:isolate; border-radius:24px; background:#111d35; background-image:radial-gradient(ellipse at 86% 10%,color-mix(in srgb,var(--brand) 85%,#132547),transparent 69%),linear-gradient(125deg,#101a2d,#182e51); box-shadow:0 18px 38px -24px #111d3599; }
+.retail-hero::before { content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(120deg,#ffffff0c,transparent 50%); border:1px solid #ffffff20; border-radius:inherit; }
+.retail-hero .retail-hero-copy { background:transparent; padding:6px; }
+.retail-hero .retail-eyebrow { color:#d5e5ff; letter-spacing:.12em; }
+.retail-hero h2 { color:#fff; font-weight:850; letter-spacing:-.045em; }
+.retail-hero p { color:#dce7f9; }
+.retail-hero .retail-hero-detail { color:#f0f6ff; background:#ffffff10; border-color:#ffffff2c; }
+.retail-hero .retail-action-primary { background:#fff; color:#142641; }
+.retail-hero .retail-action-secondary { background:#ffffff12; color:#fff; border:1px solid #ffffff3b; }
+.retail-command-dialog { border-radius:24px; }
+.retail-tool-icon { border-radius:12px; }
+.gate-screen { background:var(--canvas); background-image:radial-gradient(ellipse at 12% 10%,var(--brand-soft),transparent 45%),radial-gradient(ellipse at 92% 90%,var(--accent-soft),transparent 38%); }
+.gate-screen .gate-orb { opacity:.12; }
+.gate-screen .gate-card { max-width:880px; }
+.gate-screen .gate-brand { margin-bottom:26px; }
+.gate-screen .gate-brand h1 { font-size:clamp(22px,3vw,32px); letter-spacing:-.04em; }
+.gate-screen .gate-brand .badge { width:68px;height:68px; background:var(--brand);color:var(--brand-fg); }
+.gate-screen .gate-brand p { letter-spacing:.08em; }
+.gate-screen .gate-option { display:block;width:100%;border-radius:22px; padding:24px; font:inherit; border:1px solid var(--line); }
+.gate-screen .gate-option .icon-wrap { background:var(--brand-soft); color:var(--brand); }
+.gate-screen .gate-option.owner .icon-wrap { background:var(--danger-soft);color:var(--danger); }
+.gate-screen .gate-auth-card { border-radius:24px; }
+.gate-screen .gate-auth-card .gate-pass-input { min-height:50px; }
+.gate-pin-confirm { margin-top:12px; }
+.gate-pin-error { color:var(--danger); font-size:13px; margin-top:10px; line-height:1.4; }
+@media (hover:hover) and (pointer:fine) {
+  html:not([data-retail-motion=quiet]) #app .product-card:hover { transform:translateY(-3px); box-shadow:var(--ds-hover-shadow); }
+  #app .nav .navitem:hover:not(.active) { background:var(--surface-2); }
+  #app .btn:hover:not(:disabled) { filter:brightness(.98); }
+  .gate-screen .gate-option:hover { transform:translateY(-3px);box-shadow:var(--ds-hover-shadow);border-color:var(--brand); }
+}
+@media (max-width:900px) {
+  #app .section,#app .card { border-radius:16px; }
+  #app .section { padding:14px; margin-bottom:12px; }
+  #app .card { padding:14px; }
+  #app .section-head { margin-bottom:12px;padding-bottom:10px; }
+  #app .retail-command-bar { padding:6px 10px; gap:8px; }
+  #app .retail-quick-rail button { min-height:56px; }
+  #app .bottom-tab-bar { padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px)); box-shadow:0 -6px 24px -14px var(--shade); }
+  #app .bottom-tab-btn { min-height:44px; border-radius:12px; }
+  #app .bottom-tab-btn.active { background:var(--brand-soft); color:var(--brand); }
+  #app .bottom-tab-btn.active svg { box-shadow:none; }
+  #app .product-card-body { padding:10px; }
+  #app .product-card-actions .btn { min-height:44px; }
+  #app .retail-hero { border-radius:18px; }
+  #app .retail-hero h2 { font-size:clamp(20px,5vw,26px); }
+  .gate-screen .gate-option { padding:18px; }
+  .gate-screen .gate-brand { margin-bottom:20px; }
+}
+@media(max-width:380px) {
+  #app .product-card-grid:not(.product-card-grid-hidden-for-table) { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  #app .product-card-body { padding:8px; }
+  #app .product-card-actions { flex-wrap:wrap; }
+}
+@media(prefers-reduced-motion:reduce) {
+  #app .product-card,#app .btn,#app .navitem,.gate-screen .gate-option { transition:none!important;transform:none!important; }
+}
+}

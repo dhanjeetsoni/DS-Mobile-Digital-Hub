@@ -4,6 +4,7 @@ import { Database } from "../types";
 import { inr, round2 } from "../utils/indianCurrency";
 import { AiAdviceCard } from "./AiAdviceCard";
 import { RetailFinancePreview } from "./RetailFinancePreview";
+import {CloudPosJournal} from "./CloudPosJournal";
 import { saleCost, xeroxCost, xeroxProfit, jobCost, jobCharge, jobProfit } from "../utils/profitEngine";
 import { MiniShareBars } from "./MiniCharts";
 import { supabase } from "../services/supabaseClient";
@@ -136,6 +137,7 @@ export const OwnerReportsView: React.FC<OwnerReportsViewProps> = ({ db, toast })
 
   return (
     <div>
+      <CloudPosJournal/>
       <RetailFinancePreview db={db}/>
       <div className="section">
         <div className="section-head">

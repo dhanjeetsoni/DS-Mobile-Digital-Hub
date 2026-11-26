@@ -1,4 +1,4 @@
-import {describe,it,expect} from "vitest";import {saleReceipts,paymentAllocationValid,previewSalesJournal,suggestCompatibleAccessories,supplierComparison,upcomingSupplierDues} from "./retailIntegrity";import type {Sale,Product,CartItem,Database} from "../types";
+import {describe,it,expect} from "vitest";import {validateDeviceIdentifiers,saleReceipts,paymentAllocationValid,previewSalesJournal,suggestCompatibleAccessories,supplierComparison,upcomingSupplierDues} from "./retailIntegrity";import type {Sale,Product,CartItem,Database} from "../types";
 const sale=(extra:Partial<Sale>={})=>({id:"s",invoiceNo:"S1",date:"2026-11-26",status:"Paid",total:118,amountPaid:118,dueAmount:0,taxAmount:18,payment:"Cash",items:[{cost:40}],...extra} as Sale);
 describe("retail integrity",()=>{
 it("counts split payments without counting credit as cash",()=>{expect(saleReceipts(sale({payment:"Split Payment",splitPayments:{cash:30,upi:40,card:20,credit:28},amountPaid:90,dueAmount:28}))).toEqual({cash:30,online:60});});
@@ -10,3 +10,5 @@ it("only suggests stocked accessories with explicit matching model metadata",()=
 it("weights supplier unit cost by quantity",()=>{const purchases=[{productId:"p",supplier:"A",qty:1,total:10,date:"2026-11-20"},{productId:"p",supplier:"A",qty:3,total:60,date:"2026-11-22"},{productId:"p",supplier:"B",qty:1,total:16,date:"2026-11-22"}] as Database["purchases"];expect(supplierComparison({purchases},"p").map(r=>[r.name,r.average])).toEqual([["B",16],["A",17.5]]);});
 it("does not invent dates or include settled suppliers",()=>{const suppliers=[{id:"a",name:"A",totalPayable:100,nextRepaymentDueDate:"2026-11-20"},{id:"b",name:"B",totalPayable:20},{id:"c",name:"C",totalPayable:0}] as Database["suppliers"];expect(upcomingSupplierDues({suppliers},"2026-11-26").map(x=>[x.id,x.overdue])).toEqual([["a",true],["b",false]]);});
 });
+
+it("blocks malformed and cross-slot duplicate IMEIs",()=>{expect(validateDeviceIdentifiers("123","",[])).not.toBeNull();expect(validateDeviceIdentifiers("123456789012345","123456789012345",[])).not.toBeNull();expect(validateDeviceIdentifiers("123456789012345","",[{imei1:"111111111111111",imei2:"123456789012345"}])).not.toBeNull();expect(validateDeviceIdentifiers("123456789012345","",[])).toBeNull();});

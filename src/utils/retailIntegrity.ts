@@ -40,3 +40,12 @@ export function supplierComparison(db:Pick<Database,"purchases">,productId:strin
 export function upcomingSupplierDues(db:Pick<Database,"suppliers">,today:string){
  return db.suppliers.filter(s=>s.totalPayable>0).map(s=>({id:s.id,name:s.name,amount:round2(s.totalPayable),date:s.nextRepaymentDueDate||"",overdue:!!s.nextRepaymentDueDate&&s.nextRepaymentDueDate<today})).sort((a,b)=>(a.date||"9999").localeCompare(b.date||"9999"));
 }
+
+export function validateDeviceIdentifiers(first:string,second:string,existing:{imei1:string;imei2?:string}[]):string|null{
+ const a=first.trim(),b=second.trim();
+ if(!/^\d{15}$/.test(a)||b&&!/^\d{15}$/.test(b))return "IMEI must contain exactly 15 digits.";
+ if(b&&a===b)return "IMEI 1 and IMEI 2 must be different.";
+ const used=new Set(existing.flatMap(u=>[u.imei1.trim(),u.imei2?.trim()]).filter(Boolean));
+ if(used.has(a)||b&&used.has(b))return "This IMEI is already registered. Check both SIM slots.";
+ return null;
+}

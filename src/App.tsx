@@ -24,6 +24,7 @@ import { RetailHero } from "./components/RetailHero";
 import { PersonalizedMetrics } from "./components/PersonalizedMetrics";
 import {paymentAllocationValid,saleReceipts,suggestCompatibleAccessories} from "./utils/retailIntegrity";
 import {RetailBusinessCopilot} from "./components/RetailBusinessCopilot";
+import {CustomerShareStudio} from "./components/CustomerShareStudio";
 // Keep scanner code available before the first tap; camera permission is still requested only when opened.
 import { CameraScannerModal } from "./components/CameraScannerModal";
 import { AddProductModal } from "./components/AddProductModal";
@@ -1064,7 +1065,7 @@ export default function App() {
   const [splitCredit, setSplitCredit] = useState<number | "">("");
 
   // Customer Checkout WhatsApp & VIP Discount
-  const [autoSendWhatsApp, setAutoSendWhatsApp] = useState<boolean>(true);
+  const [autoSendWhatsApp, setAutoSendWhatsApp] = useState<boolean>(false);
 
   // Repair ticket states
   const [isJobModalOpen, setIsJobModalOpen] = useState(false);
@@ -2544,7 +2545,7 @@ export default function App() {
       })
         .then((res) => {
           if (res.success) {
-            showToast(`⚡ WhatsApp Invoice sent to ${customerData.phone}!`, "green");
+            showToast("WhatsApp invoice text prepared. Confirm Send in WhatsApp.", "green");
           }
         })
         .catch((e) => console.error("WhatsApp delivery error:", e));
@@ -2589,6 +2590,7 @@ export default function App() {
   // typed, so "9876" alone can find "9876543210". Closed the moment a
   // suggestion is tapped or the field is cleared.
   const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
+  useEffect(()=>setAutoSendWhatsApp(false),[checkoutCustomer.phone]);
 
   const handleStartCheckout = () => {
     if (cart.length === 0) {
@@ -2609,6 +2611,7 @@ export default function App() {
       }));
     }
 
+    setAutoSendWhatsApp(false);
     setIsCustomerModalOpen(true);
   };
 
@@ -4377,7 +4380,7 @@ export default function App() {
         );
 
       case "customerDirectory":
-        return <CustomerDirectoryView key={customerFocusRevision} db={db} toast={showToast} focusCustomerId={focusCustomerId} />;
+        return <><CustomerShareStudio settings={db.settings} products={catalogProducts}/><CustomerDirectoryView key={customerFocusRevision} db={db} toast={showToast} focusCustomerId={focusCustomerId} /></>;
 
       case "jobs":
         return (
@@ -6422,10 +6425,11 @@ export default function App() {
                       <input
                         type="checkbox"
                         checked={autoSendWhatsApp}
+                        disabled={!checkoutCustomer.phone.trim()}
                         onChange={(e) => setAutoSendWhatsApp(e.target.checked)}
                       />
                       <span style={{ fontWeight: 700, color: "var(--ink)" }}>
-                        ⚡ Instant WhatsApp Invoice Bot (Sends PDF invoice in 1 second without saving contact)
+                        Customer agrees to WhatsApp invoice text — open WhatsApp after billing (manual Send)
                       </span>
                     </label>
                   </div>

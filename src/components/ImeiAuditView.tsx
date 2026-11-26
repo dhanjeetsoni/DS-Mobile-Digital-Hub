@@ -7,6 +7,7 @@ import { BoxOcrModal } from "./BoxOcrModal";
 import { OcrPhoneResult } from "../utils/aiOcr";
 import { ModelAutoSuggestInput } from "./ModelAutoSuggestInput";
 import { PasteButton } from "./PasteButton";
+import {validateDeviceIdentifiers} from "../utils/retailIntegrity";
 
 interface ImeiAuditViewProps {
   db: Database;
@@ -133,10 +134,8 @@ export const ImeiAuditView: React.FC<ImeiAuditViewProps> = ({
       toast("Brand aur Model naam daalna zaroori hai", "red");
       return;
     }
-    if (!phoneForm.imei1.trim() || phoneForm.imei1.trim().length < 14) {
-      toast("Sahi 15-digit IMEI 1 daalna zaroori hai", "red");
-      return;
-    }
+    const validation=validateDeviceIdentifiers(phoneForm.imei1,phoneForm.imei2,[...(db.imeiRegistry||[]),...db.products.flatMap(p=>p.units||[])]);
+    if(validation){toast(validation,"red");return;}
     // Step 3.3 — same 4-Tier Pricing ordering rule as AddProductModal /
     // EditProductModal: Original ≤ Confidential ≤ Selling.
     if (phoneForm.confidentialPrice > 0 && phoneForm.purchaseCost > 0 && phoneForm.confidentialPrice < phoneForm.purchaseCost) {

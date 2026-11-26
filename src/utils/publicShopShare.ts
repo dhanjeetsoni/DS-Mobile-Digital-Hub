@@ -1,0 +1,9 @@
+import type {Product,Settings} from "../types";
+type Contact=Pick<Settings,"shopName"|"phone"|"address"|"email">;
+function esc(s:unknown){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]||c));}
+function v(s:string){return String(s||"").replace(/\\/g,"\\\\").replace(/\r\n|\r|\n/g,"\\n").replace(/;/g,"\\;").replace(/,/g,"\\,");}
+export function shopVCard(s:Contact){return ["BEGIN:VCARD","VERSION:3.0","FN:"+v(s.shopName),"ORG:"+v(s.shopName),"TEL;TYPE=WORK:"+v(s.phone),"EMAIL;TYPE=WORK:"+v(s.email),"ADR;TYPE=WORK:;;"+v(s.address)+";;;;","END:VCARD"].join("\r\n");}
+export function publicCatalogHtml(s:Contact,products:Product[],prices:boolean){
+const rows=products.filter(p=>p.stock>0&&p.reviewStatus!=="pending_review");
+return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>'+esc(s.shopName)+' catalog</title><style>body{font:16px system-ui,sans-serif;margin:0;color:#18263a;background:#f3f6fb}header{padding:32px;background:#152d50;color:white}main{max-width:1000px;margin:auto;padding:20px}article{background:white;border:1px solid #d7dfe9;padding:18px;border-radius:14px}section{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}</style></head><body><header><h1>'+esc(s.shopName)+'</h1><p>'+esc(s.phone)+' · '+esc(s.address)+'</p></header><main><p>Catalog snapshot. Availability and prices may change; contact the shop.</p><section>'+rows.map(p=>'<article><small>'+esc(p.category)+' · '+esc(p.brand)+'</small><h2>'+esc(p.name)+'</h2>'+(prices&&Number.isFinite(p.sellingPrice)?'<strong>₹'+esc(p.sellingPrice.toFixed(2))+'</strong>':'<p>Contact for price</p>')+'</article>').join("")+'</section></main></body></html>';
+}

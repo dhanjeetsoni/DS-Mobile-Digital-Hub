@@ -17,3 +17,8 @@ Excluded from user selection: 15 shelf location, 48 multi-branch. No destructive
 - Cancelled invoices excluded from shared daily sales totals, AI advisor inputs and loyalty/device purchase aggregation. Return/refund loyalty adjustments and complete GST accounting remain pending.
 - POS compatible accessory recommendations use explicit saved model matches, no inferred physical compatibility. Supplier historical weighted price comparison and recorded due-date calendar added. Read-only balanced POS journal preview explicitly excludes finance and flags inconsistent records; not full double-entry accounting. Local question-based business copilot supports selected metrics only, not open-ended AI or forecasts. CSV formula injection protection added.
 - New automated integrity tests included; latest native and live tests not yet verified. Customer portals, public catalog, official WhatsApp automation, full accounting postings, device registration, release rollout, and hardware tests remain incomplete. No live database mutation.
+
+## Customer sharing and device integrity
+- WhatsApp opt-in defaults off, resets each checkout and on phone changes; manual text sending accurately described, not official automation or PDF delivery.
+- Downloadable vCard and static public catalog, optional retail prices, no automatic hosting. Export privacy and escaping tests.
+- Local IMEI validation covers both slots; server-side uniqueness and lifecycle verification remain outstanding.

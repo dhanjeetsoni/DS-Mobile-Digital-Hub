@@ -83,6 +83,7 @@ import { ProfitLossDashboardView } from "./components/ProfitLossDashboardView";
 import { StatusDashboardView } from "./components/StatusDashboardView";
 import { CustomerDirectoryView } from "./components/CustomerDirectoryView";
 import { StaffAccessView } from "./components/StaffAccessView";
+import {DeviceActivityPanel} from "./components/DeviceActivityPanel";
 import { SetupWizardView } from "./components/SetupWizardView";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
 import { StaffIncentiveTrackerView } from "./components/StaffIncentiveTrackerView";
@@ -4640,7 +4641,7 @@ export default function App() {
 
 
       case "staffAccess":
-        return <StaffAccessView storeId={cloudProfile?.store_id} storeLoading={!cloudReady} toast={showToast} />;
+        return <>{ownerMode&&!isStaffIdentity&&(!cloudProfile||cloudProfile.role==="owner")&&<DeviceActivityPanel storeId={cloudProfile?.store_id} profileId={cloudProfile?.id}/>}<StaffAccessView storeId={cloudProfile?.store_id} storeLoading={!cloudReady} toast={showToast} /></>;
 
       case "loanTracker":
         return (

@@ -35,3 +35,6 @@ Excluded from user selection: 15 shelf location, 48 multi-branch. No destructive
 - Extended draft transaction journal to purchases, customer collections, supplier repayments, expenses/owner drawings, extra income, counter service receipts and loan principal/interest movements. Unknown channels, duplicate sources, returns/exchanges/repair/buyback requiring review are flagged. No immutable journal posting or GST filing.
 - Reconciliation compares saved closing amounts and flags missing payment-channel allocations. Cash-paid purchases included in supplier cash outflow. Zero final repair charges preserved. Actual bank receipts still must be verified.
 - Checkout re-entry guard, disable submit while processing; retain dialog on rejection, close on success. Exactly-once server outcomes across network loss still need validation.
+
+## Owner device activity review
+- Added read-only, owner-session-verified device history panel to Staff Access. Selects metadata only (never sync payloads), groups by installation identifier, tracks sampled failed/pending operations and clears results when account scope changes. No new anonymous endpoint, RLS changes or business data mutations. Device IDs represent observed sync history, not active authenticated sessions. Individual device authorization/revocation remains outstanding; existing account-level force logout is retained.

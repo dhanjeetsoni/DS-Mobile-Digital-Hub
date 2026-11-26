@@ -27,3 +27,5 @@ Excluded from user selection: 15 shelf location, 48 multi-branch. No destructive
 - Customer cart preview excludes private fields; browser secondary-window option, native external display acceptance still required.
 - Owner-only percentage, quantity, combo and buy-N-one-free equivalent pricing uses protected line prices, refuses unknown costs and below-floor offers. No saved scheduled campaigns yet. Legacy parked flat discount no longer restored.
 - Optional voice dictation via platform speech recognition; review transcript before submitting. Native support and speech permissions require testing. Sales forecast is historical gross POS run rate with strict history gate, not AI prediction or cash-flow forecast.
+
+- Tagged builds now require updater signing and Android keystore configuration, validate version labels without interpolating shell code. Manual candidate builds are still distinct from signed production releases. Added browser smoke checks for customer display, empty-cart offer and forecast history gate.

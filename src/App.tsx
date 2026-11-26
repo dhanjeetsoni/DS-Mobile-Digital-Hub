@@ -412,6 +412,8 @@ export default function App() {
   const [productViewMode, setProductViewMode] = useState<"grid" | "table">("grid");
   const [inventoryQuery,setInventoryQuery]=useState("");
   const [focusCustomerId,setFocusCustomerId]=useState<string|null>(null);
+  const [focusImei,setFocusImei]=useState<{query:string;revision:number}|null>(null);
+  const [customerFocusRevision,setCustomerFocusRevision]=useState(0);
   const [inventoryCategory,setInventoryCategory]=useState("");
   const [inventoryStock,setInventoryStock]=useState("all");
   const [inventorySort,setInventorySort]=useState("name");
@@ -3897,7 +3899,7 @@ export default function App() {
       }
 
       case "imeiTracker":
-        return <ImeiAuditView db={db} onUpdate={() => saveState({ ...db })} toast={showToast} ownerMode={ownerMode} onViewInvoiceByNo={(invNo) => {
+        return <ImeiAuditView focusImei={focusImei} db={db} onUpdate={() => saveState({ ...db })} toast={showToast} ownerMode={ownerMode} onViewInvoiceByNo={(invNo) => {
           const s = db.sales.find((x) => x.invoiceNo === invNo);
           if (s) {
             setViewingSale(s);
@@ -4383,7 +4385,7 @@ export default function App() {
         );
 
       case "customerDirectory":
-        return <CustomerDirectoryView db={db} toast={showToast} focusCustomerId={focusCustomerId} />;
+        return <CustomerDirectoryView key={customerFocusRevision} db={db} toast={showToast} focusCustomerId={focusCustomerId} />;
 
       case "jobs":
         return (
@@ -5665,11 +5667,11 @@ export default function App() {
   const workspaceScope=(cloudProfile?.id||"local")+":"+(ownerMode&&!isStaffIdentity?"owner":"staff");
   const allowedRecordRoutes=new Set(allowedRetailTools.map(t=>t.key));
   const privateSearch=ownerMode&&!isStaffIdentity;
-  const searchRecords=(query:string)=>findWorkspaceRecords(query,{products:catalogProducts,customers:privateSearch?db.customers:[],sales:privateSearch?visibleSales:[],imei:privateSearch?db.imeiRegistry:[]},allowedRecordRoutes,privateSearch);
+  const searchRecords=(query:string)=>findWorkspaceRecords(query,{products:catalogProducts,customers:privateSearch?db.customers:[],sales:privateSearch?visibleSales:[],imei:privateSearch?[...(db.imeiRegistry||[]),...db.products.flatMap(p=>p.units||[])]:[]},allowedRecordRoutes,privateSearch);
   const openRecord=(hit:RecordHit)=>{
     if(!allowedRecordRoutes.has(hit.route))return;
     if(hit.kind==="product"){const p=catalogProducts.find(x=>x.id===hit.id);if(!p)return;if(hit.route==="products"){setCurrentPage("products");setViewingProductId(p.id);}else{setSellSearchQuery(p.sku||p.name);setSellCategoryFilter("ALL");setCurrentPage("sell");}}
-    else if(privateSearch){if(hit.kind==="customer"){setFocusCustomerId(hit.id);setCurrentPage("customerDirectory");}else if(hit.kind==="invoice"){const sale=visibleSales.find(s=>s.id===hit.id);if(sale){setViewingSale(sale);setIsInvoiceViewerOpen(true);}}else if(hit.kind==="imei"){setCurrentPage("imeiTracker");}}
+    else if(privateSearch){if(hit.kind==="customer"){setFocusCustomerId(hit.id);setCustomerFocusRevision(v=>v+1);setCurrentPage("customerDirectory");}else if(hit.kind==="invoice"){const sale=visibleSales.find(s=>s.id===hit.id);if(sale){setViewingSale(sale);setIsInvoiceViewerOpen(true);}}else if(hit.kind==="imei"){setFocusImei({query:hit.label,revision:Date.now()});setCurrentPage("imeiTracker");}}
     setIsMobileNavOpen(false);
   };
   const navigateRetail=(key:string)=>{

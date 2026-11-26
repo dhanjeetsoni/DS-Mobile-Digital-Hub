@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Smartphone, Plus, Search, Sparkles, CheckCircle2, Shield, Calendar, Receipt, User, QrCode, Lock } from "lucide-react";
 import { Database, IMEIUnit, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
@@ -13,6 +13,7 @@ interface ImeiAuditViewProps {
   onUpdate: () => void;
   toast: (msg: string, kind?: string) => void;
   ownerMode: boolean;
+  focusImei?: {query:string;revision:number}|null;
   onViewInvoiceByNo?: (invoiceNo: string) => void;
 }
 
@@ -22,10 +23,12 @@ export const ImeiAuditView: React.FC<ImeiAuditViewProps> = ({
   toast,
   ownerMode,
   onViewInvoiceByNo,
+  focusImei,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("All");
   const [filterType, setFilterType] = useState<string>("All");
+  useEffect(()=>{if(focusImei){setSearchQuery(focusImei.query);setFilterStatus("All");setFilterType("All");}},[focusImei]);
   const [isAddUnitModalOpen, setIsAddUnitModalOpen] = useState(false);
   const [isOcrOpen, setIsOcrOpen] = useState(false);
 

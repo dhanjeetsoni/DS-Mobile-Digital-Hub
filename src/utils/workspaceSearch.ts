@@ -8,6 +8,6 @@ export function findWorkspaceRecords(query:string, data:{products:Product[];cust
  if(!privateAccess)return result;
  if(allowed.has("customerDirectory"))for(const c of data.customers){if(match(c.name,c.phone))add({kind:"customer",id:c.id,label:c.name,detail:"Customer profile",route:"customerDirectory"});if(result.filter(x=>x.kind==="customer").length>=6)break;}
  if(allowed.has("invoices"))for(const s of data.sales){if(match(s.invoiceNo,s.customer?.name,s.customer?.phone))add({kind:"invoice",id:s.id,label:s.invoiceNo,detail:"Invoice · "+s.date,route:"invoices"});if(result.filter(x=>x.kind==="invoice").length>=6)break;}
- if(allowed.has("imeiTracker"))for(const u of data.imei){if(match(u.imei1,u.imei2,u.serialNo))add({kind:"imei",id:u.id,label:u.imei1,detail:"Device · "+u.status,route:"imeiTracker"});if(result.filter(x=>x.kind==="imei").length>=6)break;}
+ if(allowed.has("imeiTracker"))for(const u of new Map(data.imei.map(u=>[u.id,u])).values()){if(match(u.imei1,u.imei2,u.serialNo))add({kind:"imei",id:u.id,label:u.imei1,detail:"Device · "+u.status,route:"imeiTracker"});if(result.filter(x=>x.kind==="imei").length>=6)break;}
  return result;
 }

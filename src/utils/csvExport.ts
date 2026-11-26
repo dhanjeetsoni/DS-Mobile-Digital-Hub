@@ -12,7 +12,9 @@
 // that would justify revisiting this with `xlsx`, but plain CSV is the
 // safer, zero-new-dependency choice for what was actually asked for here.
 function csvEscape(value: unknown): string {
-  const s = value === null || value === undefined ? "" : String(value);
+  // Prevent spreadsheet formula injection from customer/supplier names and invoice references.
+  const raw = value === null || value === undefined ? "" : String(value);
+  const s = typeof value === "string" && /^[\s]*[=+@-]/.test(raw) ? "\'"+raw : raw;
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }

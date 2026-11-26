@@ -29,7 +29,7 @@ export const AiAdviceCard: React.FC<AiAdviceCardProps> = ({ db, ownerMode }) => 
     .map((p) => ({ name: p.name, stock: p.stock, minStock: p.minStock }));
 
   const topProductQty: Record<string, number> = {};
-  db.sales.forEach((s) => {
+  db.sales.filter(s=>s.status!=="Cancelled").forEach((s) => {
     s.items.forEach((i) => {
       topProductQty[i.name] = (topProductQty[i.name] || 0) + i.qty;
     });
@@ -44,7 +44,7 @@ export const AiAdviceCard: React.FC<AiAdviceCardProps> = ({ db, ownerMode }) => 
     setError("");
     setAdvice("");
     try {
-      const monthSales = db.sales.filter((s) => s.date.startsWith(monthKey));
+      const monthSales = db.sales.filter((s) => s.status!=="Cancelled"&&s.date.startsWith(monthKey));
       const totalSalesThisMonth = monthSales.reduce((a, s) => a + s.total, 0);
       const shopExpenses = (db.expenses?.shop || []).filter((e) => e.date.startsWith(monthKey)).reduce((a, e) => a + e.amount, 0);
       const cogs = monthSales.reduce((a, s) => a + s.items.reduce((sum, i) => sum + (i.cost || i.purchasePrice * i.qty || 0), 0), 0);
@@ -79,7 +79,7 @@ export const AiAdviceCard: React.FC<AiAdviceCardProps> = ({ db, ownerMode }) => 
     setError("");
     setAdvice("");
     try {
-      const todaySales = db.sales.filter((s) => s.date === todayStr);
+      const todaySales = db.sales.filter((s) => s.status!=="Cancelled"&&s.date === todayStr);
       const result = await getStaffAdvice({
         todaySalesSoFar: round2(todaySales.reduce((a, s) => a + s.total, 0)),
         todayInvoiceCount: todaySales.length,

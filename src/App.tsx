@@ -22,6 +22,8 @@ import {findWorkspaceRecords,type RecordHit} from "./utils/workspaceSearch";
 import BottomTabBar from "./components/BottomTabBar";
 import { RetailHero } from "./components/RetailHero";
 import { PersonalizedMetrics } from "./components/PersonalizedMetrics";
+import {paymentAllocationValid,saleReceipts,suggestCompatibleAccessories} from "./utils/retailIntegrity";
+import {RetailBusinessCopilot} from "./components/RetailBusinessCopilot";
 // Keep scanner code available before the first tap; camera permission is still requested only when opened.
 import { CameraScannerModal } from "./components/CameraScannerModal";
 import { AddProductModal } from "./components/AddProductModal";
@@ -2198,6 +2200,7 @@ export default function App() {
       const u = Number(splitUpi) || 0;
       const cd = Number(splitCard) || 0;
       const cr = Number(splitCredit) || 0;
+      if(!paymentAllocationValid(total,[c,u,cd,cr])){showToast("Split payments must be non-negative and exactly match the bill total.","red");return;}
       splitDetails = {
         cash: c,
         upi: u,
@@ -2214,6 +2217,8 @@ export default function App() {
       dueAmount = 0; // The loan amount is receivable from Bajaj/TVS
     }
 
+    if(dueAmount>0&&!customerData.phone.trim()){showToast("Customer phone is required for credit sales.","red");return;}
+    if(isFinanceMode&&(!Number.isFinite(amountPaid)||amountPaid<0||amountPaid>total)){showToast("Invalid finance down payment.","red");return;}
     if (customerData.phone) {
       let cust = workingDb.customers.find((c) => c.phone === customerData.phone);
       if (!cust) {
@@ -2969,7 +2974,7 @@ export default function App() {
         const totalPayables = db.suppliers.reduce((a, s) => a + (s.totalPayable || 0), 0);
 
         // Daily Galla Cash
-        const todayCashSales = todaySales.filter((s) => !s.isFinance && s.payment === "Cash").reduce((a, s) => a + s.amountPaid, 0);
+        const todayCashSales = round2(todaySales.reduce((a,s)=>a+saleReceipts(s).cash,0));
         const todayCashXerox = visibleXeroxEntries.filter((x) => x.date === todayStr() && x.paymentMethod === "Cash").reduce((a, x) => a + x.totalAmount, 0);
         const currentGallaEst = (db.settings.openingCashDefault ?? 0) + todayCashSales + todayCashXerox;
 
@@ -2984,6 +2989,7 @@ export default function App() {
             ]}/>
 
             <AiAdviceCard db={catalogDb} ownerMode={ownerMode} />
+            {ownerMode&&!isStaffIdentity&&<RetailBusinessCopilot db={catalogDb}/>}
 
             {/* Simple 1-Touch Fast Counter Hub */}
             <div className="section" style={{ marginBottom: "16px" }}>
@@ -3343,6 +3349,7 @@ export default function App() {
           (i) => i.isMobilePhone || i.category === "New Mobile" || i.category === "Second-Hand Mobile"
         );
 
+        const bundleSuggestions=cartHasPhone?suggestCompatibleAccessories(catalogProducts,cart,stockOf):[];
         const CATEGORY_TABS = [
           { id: "ALL", label: "All Items ()" },
           { id: "Smartphones", label: "📱 Mobiles" },
@@ -3570,6 +3577,7 @@ export default function App() {
                 </div>
               </div>
 
+              {bundleSuggestions.length>0&&<div className="retail-bundle"><strong>Compatible accessories</strong><small>Based on saved model compatibility — verify physical fit.</small>{bundleSuggestions.map(p=><button type="button" className="btn sm" key={p.id} onClick={()=>addToCart(p)}>{p.name} · {inr(p.sellingPrice)} +</button>)}</div>}
               {cart.length === 0 ? (
                 <div className="empty">Cart is empty. Click "+ Add" on items to create an invoice.</div>
               ) : (

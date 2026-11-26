@@ -25,6 +25,7 @@ import { PersonalizedMetrics } from "./components/PersonalizedMetrics";
 import {paymentAllocationValid,saleReceipts,suggestCompatibleAccessories} from "./utils/retailIntegrity";
 import {RetailBusinessCopilot} from "./components/RetailBusinessCopilot";
 import {CustomerShareStudio} from "./components/CustomerShareStudio";
+import {CounterExperience} from "./components/CounterExperience";
 // Keep scanner code available before the first tap; camera permission is still requested only when opened.
 import { CameraScannerModal } from "./components/CameraScannerModal";
 import { AddProductModal } from "./components/AddProductModal";
@@ -2512,6 +2513,7 @@ export default function App() {
     workingDb.sales.push(saleRecord);
     saveState({ ...workingDb });
     setCart([]);
+    setPaymentMode("Cash");
     setIsFinanceMode(false);
     setIsSplitPayment(false);
     setSplitCash("");
@@ -3580,6 +3582,7 @@ export default function App() {
                 </div>
               </div>
 
+              <CounterExperience cart={cart} products={catalogProducts} discount={cartDiscount} tax={taxAmount} total={total} owner={ownerMode&&!isStaffIdentity} onApply={lines=>{if(!ownerMode||isStaffIdentity)return;setCart(prev=>prev.map(item=>{const line=lines.find(l=>l.productId===item.productId&&l.oldPrice===item.price);return line&&!item.isGift&&!item.isService?{...item,price:line.newPrice}:item;}));}}/>
               {bundleSuggestions.length>0&&<div className="retail-bundle"><strong>Compatible accessories</strong><small>Based on saved model compatibility — verify physical fit.</small>{bundleSuggestions.map(p=><button type="button" className="btn sm" key={p.id} onClick={()=>addToCart(p)}>{p.name} · {inr(p.sellingPrice)} +</button>)}</div>}
               {cart.length === 0 ? (
                 <div className="empty">Cart is empty. Click "+ Add" on items to create an invoice.</div>
@@ -6860,9 +6863,8 @@ export default function App() {
                 address: "",
               });
             }
-            if (parkedCart.discount) {
-              setCustomBillDiscount(parkedCart.discount);
-            }
+            // Legacy flat discounts cannot bypass line price protection.
+            setCustomBillDiscount(0);
             showToast(`Cart resumed (${parkedCart.items.length} items restored)!`, "green");
             playPaymentChime(parkedCart.items.reduce((s, i) => s + i.price * i.qty, 0));
             refreshParkedCount();

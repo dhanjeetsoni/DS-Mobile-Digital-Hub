@@ -22,3 +22,8 @@ Excluded from user selection: 15 shelf location, 48 multi-branch. No destructive
 - WhatsApp opt-in defaults off, resets each checkout and on phone changes; manual text sending accurately described, not official automation or PDF delivery.
 - Downloadable vCard and static public catalog, optional retail prices, no automatic hosting. Export privacy and escaping tests.
 - Local IMEI validation covers both slots; server-side uniqueness and lifecycle verification remain outstanding.
+
+## Counter experience and AI batch
+- Customer cart preview excludes private fields; browser secondary-window option, native external display acceptance still required.
+- Owner-only percentage, quantity, combo and buy-N-one-free equivalent pricing uses protected line prices, refuses unknown costs and below-floor offers. No saved scheduled campaigns yet. Legacy parked flat discount no longer restored.
+- Optional voice dictation via platform speech recognition; review transcript before submitting. Native support and speech permissions require testing. Sales forecast is historical gross POS run rate with strict history gate, not AI prediction or cash-flow forecast.

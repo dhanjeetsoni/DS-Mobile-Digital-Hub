@@ -5,7 +5,7 @@ type Props={kind:"dashboard"|"sell"|"products";title:string;subtitle:string;deta
 export function RetailHero({kind,title,subtitle,detail,onPrimary,onSecondary,primaryLabel,secondaryLabel}:Props){
  return <section className={"retail-hero retail-hero-"+kind} aria-label={title}>
   <div className="retail-hero-copy">
-   <span className="retail-eyebrow"><Sparkles size={14}/> DS MOBILE · RETAIL STUDIO</span>
+   <span className="retail-eyebrow"><Sparkles size={14}/> DS MOBILE · RETAIL WORKSPACE</span>
    <h2>{title}</h2><p>{subtitle}</p>
    <span className="retail-hero-detail">{detail}</span>
    {(onPrimary||onSecondary)&&<div className="retail-hero-actions">

@@ -91,6 +91,8 @@ try{
  assert(modules.length>=52,"Feature registry unexpectedly shrank");
  assert.equal(new Set(modules.map(m=>m.key)).size,modules.length);
  const search=directory.getByRole("textbox",{name:"Search tools"});
+ // Observe the actual DOM during navigation, including transient loader flashes.
+ await directory.evaluate(()=>{const w=window; w.__dsRouteLoaderFlashes=0; new MutationObserver(()=>{if(document.querySelector("#page")?.textContent?.includes("Loading view..."))w.__dsRouteLoaderFlashes++;}).observe(document.body,{subtree:true,childList:true,characterData:true});});
  for(const module of modules){
    await search.fill(module.key);
    await directory.locator('[data-tool-key="'+module.key+'"]').click();
@@ -99,6 +101,8 @@ try{
    assert((await directory.locator("#page").innerText()).trim().length>0,"Empty module "+module.key);
    console.log("PASS module render:",module.key);
  }
+ assert.equal(await directory.evaluate(()=>window.__dsRouteLoaderFlashes),0,"Navigation displayed a blocking route loader");
+ console.log("PASS no transient route loader across registered owner modules");
  console.log("PASS registered owner modules:",modules.length);
  await search.fill("appearanceStudio");
  await directory.locator('[data-tool-key="appearanceStudio"]').click();

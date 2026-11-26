@@ -20,13 +20,8 @@ import { Sidebar, PRIMARY_NAV_ITEMS, SECONDARY_NAV_ITEMS } from "./components/Si
 import { RetailCommandBar, RetailQuickRail } from "./components/RetailCommandBar";
 import BottomTabBar from "./components/BottomTabBar";
 import { RetailHero } from "./components/RetailHero";
-// Phase 16: was a static import, which pulled the whole @zxing/browser barcode
-// engine into the main entry chunk for every user on every cold start -- even
-// though this modal is already only rendered behind `isCameraScannerOpen`.
-// Lazy so ZXing is fetched the first time someone actually opens the scanner.
-const CameraScannerModal = React.lazy(() =>
-  import("./components/CameraScannerModal").then((m) => ({ default: m.CameraScannerModal }))
-);
+// Keep scanner code available before the first tap; camera permission is still requested only when opened.
+import { CameraScannerModal } from "./components/CameraScannerModal";
 import { AddProductModal } from "./components/AddProductModal";
 import { QuickStockAddModal } from "./components/QuickStockAddModal";
 import { StockReviewQueueView } from "./components/StockReviewQueueView";
@@ -53,45 +48,45 @@ import { PasteButton } from "./components/PasteButton";
 import { ModelAutoSuggestInput } from "./components/ModelAutoSuggestInput";
 import { pickContactFromPhone, isContactPickerSupported } from "./utils/contactPicker";
 
-// Phase 13: Lazy loaded views for instant app startup & reduced initial bundle footprint
-const AppearanceStudioView = React.lazy(() => import("./components/AppearanceStudioView"));
-const LoanTrackerView = React.lazy(() => import("./components/LoanTrackerView").then((m) => ({ default: m.LoanTrackerView })));
-const SupplierKhataView = React.lazy(() => import("./components/SupplierKhataView").then((m) => ({ default: m.SupplierKhataView })));
-const SimTrackerView = React.lazy(() => import("./components/SimTrackerView").then((m) => ({ default: m.SimTrackerView })));
-const FinanceTrackerView = React.lazy(() => import("./components/FinanceTrackerView").then((m) => ({ default: m.FinanceTrackerView })));
-const BarcodeTagStudio = React.lazy(() => import("./components/BarcodeTagStudio").then((m) => ({ default: m.BarcodeTagStudio })));
-const ImeiAuditView = React.lazy(() => import("./components/ImeiAuditView").then((m) => ({ default: m.ImeiAuditView })));
-const PhotoStockFinderView = React.lazy(() => import("./components/PhotoStockFinderView").then((m) => ({ default: m.PhotoStockFinderView })));
-const ReturnsExchangesView = React.lazy(() => import("./components/ReturnsExchangesView").then((m) => ({ default: m.ReturnsExchangesView })));
-const StockAdjustView = React.lazy(() => import("./components/StockAdjustView").then((m) => ({ default: m.StockAdjustView })));
-const PurchasesView = React.lazy(() => import("./components/PurchasesView").then((m) => ({ default: m.PurchasesView })));
-const SalesHistoryView = React.lazy(() => import("./components/SalesHistoryView").then((m) => ({ default: m.SalesHistoryView })));
-const DailyReviewView = React.lazy(() => import("./components/DailyReviewView").then((m) => ({ default: m.DailyReviewView })));
-const MonthlyReviewView = React.lazy(() => import("./components/MonthlyReviewView").then((m) => ({ default: m.MonthlyReviewView })));
-const ShopExpensesView = React.lazy(() => import("./components/ShopExpensesView").then((m) => ({ default: m.ShopExpensesView })));
-const ExtraIncomeView = React.lazy(() => import("./components/ExtraIncomeView").then((m) => ({ default: m.ExtraIncomeView })));
-const PersonalDrawingsView = React.lazy(() => import("./components/PersonalDrawingsView").then((m) => ({ default: m.PersonalDrawingsView })));
-const OwnerReportsView = React.lazy(() => import("./components/OwnerReportsView").then((m) => ({ default: m.OwnerReportsView })));
-const WindowsAppModal = React.lazy(() => import("./components/WindowsAppModal").then((m) => ({ default: m.WindowsAppModal })));
-const LowStockAlertsView = React.lazy(() => import("./components/LowStockAlertsView").then((m) => ({ default: m.LowStockAlertsView })));
-const AuditLogView = React.lazy(() => import("./components/AuditLogView").then((m) => ({ default: m.AuditLogView })));
-const StaffPerformanceView = React.lazy(() => import("./components/StaffPerformanceView").then((m) => ({ default: m.StaffPerformanceView })));
-const LoyaltyRewardsView = React.lazy(() => import("./components/LoyaltyRewardsView").then((m) => ({ default: m.LoyaltyRewardsView })));
-const DownloadAreaView = React.lazy(() => import("./components/DownloadAreaView").then((m) => ({ default: m.DownloadAreaView })));
-const ProfitLossDashboardView = React.lazy(() => import("./components/ProfitLossDashboardView").then((m) => ({ default: m.ProfitLossDashboardView })));
-const StatusDashboardView = React.lazy(() => import("./components/StatusDashboardView").then((m) => ({ default: m.StatusDashboardView })));
-const CustomerDirectoryView = React.lazy(() => import("./components/CustomerDirectoryView").then((m) => ({ default: m.CustomerDirectoryView })));
-const StaffAccessView = React.lazy(() => import("./components/StaffAccessView").then((m) => ({ default: m.StaffAccessView })));
-const SetupWizardView = React.lazy(() => import("./components/SetupWizardView").then((m) => ({ default: m.SetupWizardView })));
-const ExportClearInvoicesView = React.lazy(() => import("./components/ExportClearInvoicesView").then((m) => ({ default: m.ExportClearInvoicesView })));
-const StaffIncentiveTrackerView = React.lazy(() => import("./components/StaffIncentiveTrackerView").then((m) => ({ default: m.StaffIncentiveTrackerView })));
-const SecurityAuditLogView = React.lazy(() => import("./components/SecurityAuditLogView").then((m) => ({ default: m.SecurityAuditLogView })));
-const OfflineSyncCenterView = React.lazy(() => import("./components/OfflineSyncCenterView").then((m) => ({ default: m.OfflineSyncCenterView })));
-const ImeiWarrantyLookupView = React.lazy(() => import("./components/ImeiWarrantyLookupView").then((m) => ({ default: m.ImeiWarrantyLookupView })));
-const SmartRestockPredictorView = React.lazy(() => import("./components/SmartRestockPredictorView").then((m) => ({ default: m.SmartRestockPredictorView })));
-const StaffAttendanceView = React.lazy(() => import("./components/StaffAttendanceView").then((m) => ({ default: m.StaffAttendanceView })));
-const DeadStockHeatmapView = React.lazy(() => import("./components/DeadStockHeatmapView").then((m) => ({ default: m.DeadStockHeatmapView })));
-const StockAuditScannerView = React.lazy(() => import("./components/StockAuditScannerView").then((m) => ({ default: m.StockAuditScannerView })));
+// Native retail navigation: bundle all normal screens with the app so the first tap does not suspend.
+import AppearanceStudioView from "./components/AppearanceStudioView";
+import { LoanTrackerView } from "./components/LoanTrackerView";
+import { SupplierKhataView } from "./components/SupplierKhataView";
+import { SimTrackerView } from "./components/SimTrackerView";
+import { FinanceTrackerView } from "./components/FinanceTrackerView";
+import { BarcodeTagStudio } from "./components/BarcodeTagStudio";
+import { ImeiAuditView } from "./components/ImeiAuditView";
+import { PhotoStockFinderView } from "./components/PhotoStockFinderView";
+import { ReturnsExchangesView } from "./components/ReturnsExchangesView";
+import { StockAdjustView } from "./components/StockAdjustView";
+import { PurchasesView } from "./components/PurchasesView";
+import { SalesHistoryView } from "./components/SalesHistoryView";
+import { DailyReviewView } from "./components/DailyReviewView";
+import { MonthlyReviewView } from "./components/MonthlyReviewView";
+import { ShopExpensesView } from "./components/ShopExpensesView";
+import { ExtraIncomeView } from "./components/ExtraIncomeView";
+import { PersonalDrawingsView } from "./components/PersonalDrawingsView";
+import { OwnerReportsView } from "./components/OwnerReportsView";
+import { WindowsAppModal } from "./components/WindowsAppModal";
+import { LowStockAlertsView } from "./components/LowStockAlertsView";
+import { AuditLogView } from "./components/AuditLogView";
+import { StaffPerformanceView } from "./components/StaffPerformanceView";
+import { LoyaltyRewardsView } from "./components/LoyaltyRewardsView";
+import { DownloadAreaView } from "./components/DownloadAreaView";
+import { ProfitLossDashboardView } from "./components/ProfitLossDashboardView";
+import { StatusDashboardView } from "./components/StatusDashboardView";
+import { CustomerDirectoryView } from "./components/CustomerDirectoryView";
+import { StaffAccessView } from "./components/StaffAccessView";
+import { SetupWizardView } from "./components/SetupWizardView";
+import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
+import { StaffIncentiveTrackerView } from "./components/StaffIncentiveTrackerView";
+import { SecurityAuditLogView } from "./components/SecurityAuditLogView";
+import { OfflineSyncCenterView } from "./components/OfflineSyncCenterView";
+import { ImeiWarrantyLookupView } from "./components/ImeiWarrantyLookupView";
+import { SmartRestockPredictorView } from "./components/SmartRestockPredictorView";
+import { StaffAttendanceView } from "./components/StaffAttendanceView";
+import { DeadStockHeatmapView } from "./components/DeadStockHeatmapView";
+import { StockAuditScannerView } from "./components/StockAuditScannerView";
 import { ParkedCartsModal } from "./components/ParkedCartsModal";
 import { QuickServiceModal } from "./components/QuickServiceModal";
 import { CounterCalculatorModal } from "./components/CounterCalculatorModal";
@@ -5987,16 +5982,7 @@ export default function App() {
         <RetailQuickRail tools={allowedRetailTools} currentPage={currentPage} onNavigate={navigateRetail}/>
 
         <div id="page" data-current-page={currentPage}>
-          <React.Suspense
-            fallback={
-              <div className="section" style={{ padding: "48px 24px", textAlign: "center", color: "var(--ink-soft)" }}>
-                <div style={{ display: "inline-block", width: "24px", height: "24px", border: "2px solid var(--line)", borderTopColor: "var(--brand)", borderRadius: "50%", animation: "spin 0.6s linear infinite", marginBottom: "12px" }}></div>
-                <div style={{ fontSize: "13px", fontWeight: 600 }}>Loading view...</div>
-              </div>
-            }
-          >
-            {renderCurrentPage()}
-          </React.Suspense>
+          {renderCurrentPage()}
         </div>
       </div>
 
@@ -6011,13 +5997,11 @@ export default function App() {
 
       {/* Modals */}
       {isCameraScannerOpen && (
-        <React.Suspense fallback={null}>
           <CameraScannerModal
             isOpen={isCameraScannerOpen}
             onClose={() => setIsCameraScannerOpen(false)}
             onScan={handleCameraScan}
           />
-        </React.Suspense>
       )}
 
       {confidentialPriceProduct && (

@@ -29,3 +29,9 @@ Excluded from user selection: 15 shelf location, 48 multi-branch. No destructive
 - Optional voice dictation via platform speech recognition; review transcript before submitting. Native support and speech permissions require testing. Sales forecast is historical gross POS run rate with strict history gate, not AI prediction or cash-flow forecast.
 
 - Tagged builds now require updater signing and Android keystore configuration, validate version labels without interpolating shell code. Manual candidate builds are still distinct from signed production releases. Added browser smoke checks for customer display, empty-cart offer and forecast history gate.
+
+## Accounting review and checkout integrity
+- Fixed literal Devanagari transcript patterns with Unicode escapes, preserving Hindi matching and static audit.
+- Extended draft transaction journal to purchases, customer collections, supplier repayments, expenses/owner drawings, extra income, counter service receipts and loan principal/interest movements. Unknown channels, duplicate sources, returns/exchanges/repair/buyback requiring review are flagged. No immutable journal posting or GST filing.
+- Reconciliation compares saved closing amounts and flags missing payment-channel allocations. Cash-paid purchases included in supplier cash outflow. Zero final repair charges preserved. Actual bank receipts still must be verified.
+- Checkout re-entry guard, disable submit while processing; retain dialog on rejection, close on success. Exactly-once server outcomes across network loss still need validation.

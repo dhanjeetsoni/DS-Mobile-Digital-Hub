@@ -2176,13 +2176,17 @@ export default function App() {
     setCart(newCart);
   };
 
+  const checkoutInFlight=useRef(false);
+  const [checkoutBusy,setCheckoutBusy]=useState(false);
   // Complete Sale
   const handleFinalizeSale = async (customerData: {
     name: string;
     phone: string;
     address?: string;
   }) => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || checkoutInFlight.current) return;
+    checkoutInFlight.current=true;setCheckoutBusy(true);
+    try {
     const subtotal = cart.reduce((a, i) => a + i.price * i.qty, 0);
     const { taxAmount, total } = computeSaleTotals(subtotal, cartDiscount, db.settings.gstEnabled, db.settings.gstPercent);
     const workingDb: Database = structuredClone(db);
@@ -2555,6 +2559,7 @@ export default function App() {
 
     showToast(`Invoice ${invoiceNo} generated!`, "green");
     setViewingSale(saleRecord);
+    setIsCustomerModalOpen(false);
     setIsInvoiceViewerOpen(true);
 
     // NOTE (2026-09-04): invoice delivery to the owner's Telegram bot is
@@ -2575,6 +2580,8 @@ export default function App() {
     // *second, duplicate* invoice message a couple of minutes later once the
     // outbox trigger also delivered it. It has been removed — the reliable
     // trigger+outbox path already covers every case, without duplicates.
+    } catch(error){console.error("Checkout could not finish",error);showToast("Checkout could not finish. Check invoice history and sync status before retrying.","red");}
+    finally{checkoutInFlight.current=false;setCheckoutBusy(false);}
   };
 
   // Quick POS Customer Checkout Modal State
@@ -6176,13 +6183,12 @@ export default function App() {
           <div className="modal">
             <div className="modal-head">
               <h3>Customer Details for Invoice</h3>
-              <button onClick={() => setIsCustomerModalOpen(false)}>&times;</button>
+              <button disabled={checkoutBusy} onClick={() => setIsCustomerModalOpen(false)}>&times;</button>
             </div>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                handleFinalizeSale(checkoutCustomer);
-                setIsCustomerModalOpen(false);
+                void handleFinalizeSale(checkoutCustomer);
               }}
             >
               <div className="formgrid">
@@ -6439,11 +6445,11 @@ export default function App() {
                 );
               })()}
               <div className="modal-actions" style={{ marginTop: "16px" }}>
-                <button type="button" className="btn" onClick={() => setIsCustomerModalOpen(false)}>
+                <button type="button" className="btn" disabled={checkoutBusy} onClick={() => setIsCustomerModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn primary">
-                  <CheckCircle2 size={14} /> Generate &amp; Print Invoice
+                <button type="submit" className="btn primary" disabled={checkoutBusy}>
+                  <CheckCircle2 size={14} /> {checkoutBusy?"Recording invoice…":"Generate & Print Invoice"}
                 </button>
               </div>
             </form>

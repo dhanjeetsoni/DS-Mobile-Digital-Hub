@@ -105,17 +105,17 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
     let amt = 0;
     if (j.receivedDate === selectedDate) amt += j.advance || 0;
     if (j.deliveredDate === selectedDate && (!j.deliveryPaymentMethod || j.deliveryPaymentMethod === "Cash")) {
-      amt += Math.max(0, (j.finalCharge || j.estCost || 0) - (j.advance || 0));
+      amt += Math.max(0, (j.finalCharge ?? j.estCost ?? 0) - (j.advance || 0));
     }
     return a + amt;
   }, 0);
   const onlineRepairs = db.jobs.filter((j) => j.deliveredDate === selectedDate && isOnlineMethod(j.deliveryPaymentMethod)).reduce((a, j) => {
-    return a + Math.max(0, (j.finalCharge || j.estCost || 0) - (j.advance || 0));
+    return a + Math.max(0, (j.finalCharge ?? j.estCost ?? 0) - (j.advance || 0));
   }, 0);
 
   const cashExpenses = (db.expenses.shop || []).concat(db.expenses.personal || [], db.expenses.other || [])
     .filter((e) => e.date === selectedDate && (!e.method || e.method === "Cash")).reduce((a, e) => a + e.amount, 0);
-  const cashSupplierPaid = (db.supplierPayments || []).filter((p) => p.date === selectedDate && p.method === "Cash").reduce((a, p) => a + p.amount, 0);
+  const cashSupplierPaid = round2((db.supplierPayments || []).filter((p) => p.date === selectedDate && p.method === "Cash").reduce((a, p) => a + p.amount, 0)+(db.purchases||[]).filter(p=>p.date===selectedDate&&p.paymentStatus==="Paid Cash").reduce((a,p)=>a+p.total,0));
   const cashRefunds = db.returns.filter((r) => r.date === selectedDate && r.refundMethod === "Cash").reduce((a, r) => a + (r.settlementAmount || 0), 0);
   const cashExtraIncome = (db.extraIncome || []).filter((e) => e.date === selectedDate && (!e.method || e.method === "Cash")).reduce((a, e) => a + e.amount, 0);
 
@@ -344,7 +344,7 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
                   style={{ marginTop: "8px", fontSize: "11px", padding: "4px 8px" }}
                   onClick={() => setOnlinePayment(String(expectedOnline))}
                 >
-                  Use system-detected amount ({inr(expectedOnline)})
+                  Copy expected online amount (verify against actual receipts)
                 </button>
                 {onlinePayment !== "" && (
                   <div className="kv" style={{ marginTop: "10px", fontSize: "12.5px" }}>

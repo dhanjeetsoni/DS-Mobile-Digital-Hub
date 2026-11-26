@@ -84,6 +84,7 @@ import { StatusDashboardView } from "./components/StatusDashboardView";
 import { CustomerDirectoryView } from "./components/CustomerDirectoryView";
 import { StaffAccessView } from "./components/StaffAccessView";
 import {DeviceActivityPanel} from "./components/DeviceActivityPanel";
+import {CustomerPrivateLink} from "./components/CustomerPrivateLink";
 import { SetupWizardView } from "./components/SetupWizardView";
 import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
 import { StaffIncentiveTrackerView } from "./components/StaffIncentiveTrackerView";
@@ -4451,6 +4452,7 @@ export default function App() {
                         </button>
                       </div>
                     )}
+                    {ownerMode&&!isStaffIdentity&&<CustomerPrivateLink kind="repair" resourceId={j.id}/>}
                     <div style={{ display: "flex", gap: "6px", marginTop: "10px" }}>
                       <select
                         className="job-status-select"

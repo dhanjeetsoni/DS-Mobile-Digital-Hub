@@ -90,6 +90,10 @@ try{
  const modules=[...navSource.matchAll(/\{\s*key:\s*"([^"]+)",\s*label:\s*"([^"]+)"/g)].map(m=>({key:m[1],label:m[2]}));
  assert(modules.length>=52,"Feature registry unexpectedly shrank");
  assert.equal(new Set(modules.map(m=>m.key)).size,modules.length);
+ assert.equal(await directory.locator("[data-workspace-group]").count(),12,"Owner workspace must have 12 groups");
+ await directory.locator("[data-workspace-group=inventory]").click();
+ assert.equal(await directory.locator("[data-workspace-group=inventory]").getAttribute("aria-expanded"),"true");
+ console.log("PASS 12-category owner navigation and group expansion");
  const search=directory.getByRole("textbox",{name:"Search tools"});
  // Observe the actual DOM during navigation, including transient loader flashes.
  await directory.evaluate(()=>{const w=window; w.__dsRouteLoaderFlashes=0; new MutationObserver(()=>{if(document.querySelector("#page")?.textContent?.includes("Loading view..."))w.__dsRouteLoaderFlashes++;}).observe(document.body,{subtree:true,childList:true,characterData:true});});

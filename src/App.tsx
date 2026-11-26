@@ -18,6 +18,7 @@ import { uid, todayStr, nowTimeStr, genSku, backfillMissingSkus, addStockBatch, 
 import { naturalMatch } from "./utils/naturalSearch";
 import { Sidebar, PRIMARY_NAV_ITEMS, SECONDARY_NAV_ITEMS } from "./components/Sidebar";
 import { RetailCommandBar, RetailQuickRail } from "./components/RetailCommandBar";
+import {findWorkspaceRecords,type RecordHit} from "./utils/workspaceSearch";
 import BottomTabBar from "./components/BottomTabBar";
 import { RetailHero } from "./components/RetailHero";
 // Keep scanner code available before the first tap; camera permission is still requested only when opened.
@@ -410,6 +411,7 @@ export default function App() {
   // style photo-forward cards) or "table" (dense spreadsheet view, opt-in).
   const [productViewMode, setProductViewMode] = useState<"grid" | "table">("grid");
   const [inventoryQuery,setInventoryQuery]=useState("");
+  const [focusCustomerId,setFocusCustomerId]=useState<string|null>(null);
   const [inventoryCategory,setInventoryCategory]=useState("");
   const [inventoryStock,setInventoryStock]=useState("all");
   const [inventorySort,setInventorySort]=useState("name");
@@ -4381,7 +4383,7 @@ export default function App() {
         );
 
       case "customerDirectory":
-        return <CustomerDirectoryView db={db} toast={showToast} />;
+        return <CustomerDirectoryView db={db} toast={showToast} focusCustomerId={focusCustomerId} />;
 
       case "jobs":
         return (
@@ -5660,6 +5662,16 @@ export default function App() {
     if(!ownerMode)return ["sell","photoFinder"].includes(item.key);
     return true;
   });
+  const workspaceScope=(cloudProfile?.id||"local")+":"+(ownerMode&&!isStaffIdentity?"owner":"staff");
+  const allowedRecordRoutes=new Set(allowedRetailTools.map(t=>t.key));
+  const privateSearch=ownerMode&&!isStaffIdentity;
+  const searchRecords=(query:string)=>findWorkspaceRecords(query,{products:catalogProducts,customers:privateSearch?db.customers:[],sales:privateSearch?visibleSales:[],imei:privateSearch?db.imeiRegistry:[]},allowedRecordRoutes,privateSearch);
+  const openRecord=(hit:RecordHit)=>{
+    if(!allowedRecordRoutes.has(hit.route))return;
+    if(hit.kind==="product"){const p=catalogProducts.find(x=>x.id===hit.id);if(!p)return;if(hit.route==="products"){setCurrentPage("products");setViewingProductId(p.id);}else{setSellSearchQuery(p.sku||p.name);setSellCategoryFilter("ALL");setCurrentPage("sell");}}
+    else if(privateSearch){if(hit.kind==="customer"){setFocusCustomerId(hit.id);setCurrentPage("customerDirectory");}else if(hit.kind==="invoice"){const sale=visibleSales.find(s=>s.id===hit.id);if(sale){setViewingSale(sale);setIsInvoiceViewerOpen(true);}}else if(hit.kind==="imei"){setCurrentPage("imeiTracker");}}
+    setIsMobileNavOpen(false);
+  };
   const navigateRetail=(key:string)=>{
     if(!allowedRetailTools.some(item=>item.key===key))return;
     setCurrentPage(key);setIsMobileNavOpen(false);
@@ -5978,7 +5990,7 @@ export default function App() {
           </div>
         </div>
 
-        <RetailCommandBar tools={allowedRetailTools} currentPage={currentPage} onNavigate={navigateRetail}/>
+        <RetailCommandBar key={workspaceScope} scope={workspaceScope} tools={allowedRetailTools} currentPage={currentPage} onNavigate={navigateRetail} findRecords={searchRecords} onRecord={openRecord}/>
         <RetailQuickRail tools={allowedRetailTools} currentPage={currentPage} onNavigate={navigateRetail}/>
 
         <div id="page" data-current-page={currentPage}>

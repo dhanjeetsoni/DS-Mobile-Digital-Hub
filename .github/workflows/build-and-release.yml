@@ -29,60 +29,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref_type == 'branch' && github.event_name == 'push' }}
 
 jobs:
-  dependency-lock:
-    # One controlled update on the isolated hardening branch only. Never rewrite
-    # main, never force-push, and only commit a tested, audited lockfile.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/hardening/production-reliability-20261125'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    outputs:
-      sha: ${{ steps.lock.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.ref_name }}
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - name: Resolve security updates and verify lockfile
-        id: lock
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          # Upgrade vulnerable test tooling, preserve a supported Vite major,
-          # and resolve compatible indirect patches without --force.
-          npm pkg set 'dependencies.vite=^7.0.0' 'devDependencies.vitest=5.1.2'
-          npm pkg delete devDependencies.vite
-          npm install --package-lock-only --ignore-scripts --no-fund
-          npm audit fix --package-lock-only --ignore-scripts --no-fund || true
-          npm audit --json > dependency-audit.json || true
-          npm audit --audit-level=moderate
-          npm ci
-          npm run typecheck
-          npm test
-          npm run test:static
-          npm run build
-          if ! git diff --quiet -- package.json package-lock.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add package.json package-lock.json
-            git commit -m "Resolve audited npm dependencies and regenerate lockfile"
-            git push origin HEAD:"${GITHUB_REF_NAME}"
-          fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: dependency-remediation-audit
-          path: dependency-audit.json
-          if-no-files-found: warn
   validate:
-    needs: dependency-lock
-    if: always() && (needs.dependency-lock.result == 'success' || needs.dependency-lock.result == 'skipped')
     outputs:
       sha: ${{ steps.source.outputs.sha }}
     runs-on: ubuntu-24.04
@@ -92,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.dependency-lock.outputs.sha || github.sha }}
+          ref: ${{ github.sha }}
       - name: Record validated source
         id: source
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -108,6 +55,8 @@ jobs:
           name: dependency-security-audit
           path: dependency-audit.json
           if-no-files-found: error
+      - name: Enforce dependency audit
+        run: npm audit --audit-level=moderate
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:static

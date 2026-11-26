@@ -29,6 +29,12 @@ try{
  browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  const errors=[];page.on("pageerror",e=>errors.push(e.message));
+ const setupLocalOwner=async p=>{
+  await p.getByPlaceholder("Create Owner Device PIN").fill("5826");
+  await p.getByPlaceholder("Confirm Owner Device PIN").fill("5826");
+  await p.getByRole("button",{name:"Create PIN & Unlock",exact:true}).click();
+  await p.locator("#app").waitFor({timeout:30000});
+ };
  await page.goto(url,{waitUntil:"domcontentloaded"});
  await page.getByText("Owner Confidential Area",{exact:true}).first().waitFor({timeout:30000});
  await page.getByText("Login (ID / Password)",{exact:true}).click();
@@ -40,9 +46,14 @@ try{
  owner.on("pageerror",e=>errors.push(e.message));
  await owner.goto(url,{waitUntil:"domcontentloaded"});
  await owner.getByText("Owner Confidential Area",{exact:true}).first().click();
- await owner.getByPlaceholder("Enter Owner Device PIN").fill("1234");
+ await setupLocalOwner(owner);
+ await owner.getByText("All Products",{exact:true}).first().waitFor({timeout:30000});
+ await owner.reload({waitUntil:"domcontentloaded"});
+ await owner.getByText("Owner Confidential Area",{exact:true}).first().click();
+ await owner.getByPlaceholder("Enter Owner Device PIN").fill("5826");
  await owner.getByRole("button",{name:"Unlock",exact:true}).click();
  await owner.getByText("All Products",{exact:true}).first().waitFor({timeout:30000});
+ console.log("PASS local owner PIN creation and persistent unlock");
  await owner.getByText("Sales / New Bill",{exact:true}).first().click();
  // Exercise a real checkout in the isolated browser's local-only database.
  // No customer phone, external notification, production account or real sale.
@@ -74,13 +85,29 @@ try{
  directory.on("pageerror",e=>errors.push(e.message));
  await directory.goto(url,{waitUntil:"domcontentloaded"});
  await directory.getByText("Owner Confidential Area",{exact:true}).first().click();
- await directory.getByPlaceholder("Enter Owner Device PIN").fill("1234");
- await directory.getByRole("button",{name:"Unlock",exact:true}).click();
+ await setupLocalOwner(directory);
  const navSource=readFileSync("src/components/Sidebar.tsx","utf8");
  const modules=[...navSource.matchAll(/\{\s*key:\s*"([^"]+)",\s*label:\s*"([^"]+)"/g)].map(m=>({key:m[1],label:m[2]}));
  assert(modules.length>=52,"Feature registry unexpectedly shrank");
  assert.equal(new Set(modules.map(m=>m.key)).size,modules.length);
+ assert.equal(await directory.locator("[data-workspace-group]").count(),12,"Owner workspace must have 12 groups");
+ // Startup route can already belong to Inventory. Navigate explicitly to a
+ // known route, then exercise the toggle in both directions.
+ await directory.getByRole("textbox",{name:"Search tools"}).fill("dashboard");
+ await directory.locator('[data-tool-key="dashboard"]').click();
+ await directory.locator('#page[data-current-page="dashboard"]').waitFor();
+ const inventoryGroup=directory.locator("[data-workspace-group=inventory]");
+ await directory.waitForFunction(()=>document.querySelector("[data-workspace-group=inventory]")?.getAttribute("aria-expanded")==="false");
+ await inventoryGroup.click();
+ await directory.waitForFunction(()=>document.querySelector("[data-workspace-group=inventory]")?.getAttribute("aria-expanded")==="true");
+ await directory.getByRole("button",{name:"Stock Adjustment",exact:true}).waitFor({state:"visible"});
+ await inventoryGroup.click();
+ await directory.waitForFunction(()=>document.querySelector("[data-workspace-group=inventory]")?.getAttribute("aria-expanded")==="false");
+ assert.equal(await directory.getByRole("button",{name:"Stock Adjustment",exact:true}).count(),0);
+ console.log("PASS 12-category owner navigation, group expansion and collapse");
  const search=directory.getByRole("textbox",{name:"Search tools"});
+ // Observe the actual DOM during navigation, including transient loader flashes.
+ await directory.evaluate(()=>{const w=window; w.__dsRouteLoaderFlashes=0; new MutationObserver(()=>{if(document.querySelector("#page")?.textContent?.includes("Loading view..."))w.__dsRouteLoaderFlashes++;}).observe(document.body,{subtree:true,childList:true,characterData:true});});
  for(const module of modules){
    await search.fill(module.key);
    await directory.locator('[data-tool-key="'+module.key+'"]').click();
@@ -89,6 +116,8 @@ try{
    assert((await directory.locator("#page").innerText()).trim().length>0,"Empty module "+module.key);
    console.log("PASS module render:",module.key);
  }
+ assert.equal(await directory.evaluate(()=>window.__dsRouteLoaderFlashes),0,"Navigation displayed a blocking route loader");
+ console.log("PASS no transient route loader across registered owner modules");
  console.log("PASS registered owner modules:",modules.length);
  await search.fill("appearanceStudio");
  await directory.locator('[data-tool-key="appearanceStudio"]').click();
@@ -98,6 +127,28 @@ try{
  assert.equal(await directory.locator("html").getAttribute("data-retail-motion"),"quiet");
  await search.fill("dashboard");await directory.locator('[data-tool-key="dashboard"]').click();
  await directory.locator(".retail-hero-dashboard .retail-phone").waitFor();
+ await directory.getByRole("button",{name:"Customize dashboard",exact:true}).click();
+ await directory.getByRole("button",{name:"Hide Active Repairs",exact:true}).click();
+ await directory.getByRole("button",{name:"Done",exact:true}).click();
+ assert.equal(await directory.locator("[data-metric-id=repairs]").count(),0);
+ await directory.getByRole("button",{name:"Customize dashboard",exact:true}).click();
+ await directory.getByRole("button",{name:"Reset layout",exact:true}).click();
+ await directory.getByRole("button",{name:"Done",exact:true}).click();
+ assert.equal(await directory.locator("[data-metric-id=repairs]").count(),1);
+ console.log("PASS dashboard metric customization and reset");
+ await directory.getByRole("button",{name:"Aaj ki sales",exact:true}).click();
+ await directory.locator(".retail-copilot-answer").waitFor();
+ await directory.getByRole("button",{name:"Sales forecast",exact:true}).click();
+ await directory.getByText("Insufficient recent sales history.",{exact:false}).waitFor();
+ await search.fill("sell");await directory.locator('[data-tool-key="sell"]').click();
+ await directory.getByRole("button",{name:"Customer display",exact:true}).click();
+ await directory.getByRole("dialog",{name:"Customer cart display"}).waitFor();
+ await directory.getByRole("button",{name:"Close customer display"}).click();
+ await directory.getByRole("button",{name:"Offer studio"}).click();
+ await directory.getByRole("button",{name:"Apply reviewed offer"}).waitFor();
+ assert.equal(await directory.getByRole("button",{name:"Apply reviewed offer"}).isDisabled(),true);
+ await search.fill("dashboard");await directory.locator('[data-tool-key="dashboard"]').click();
+ console.log("PASS business copilot, forecast history gate, customer display and empty-cart offer guard");
  console.log("PASS motion preference and 3D dashboard artwork");
  await directory.getByRole("button",{name:"Open global tool search"}).click();
  await directory.getByRole("textbox",{name:"Find a tool"}).fill("appearanceStudio");
@@ -146,8 +197,7 @@ try{
  await mobile.goto(url,{waitUntil:"domcontentloaded"});
  await mobile.getByText("Owner Confidential Area",{exact:true}).first().click();
  await mobile.screenshot({path:"visual-review/android-login.png",animations:"disabled"});
- await mobile.getByPlaceholder("Enter Owner Device PIN").fill("1234");
- await mobile.getByRole("button",{name:"Unlock",exact:true}).click();
+ await setupLocalOwner(mobile);
  await mobile.getByRole("button",{name:"More",exact:true}).click();
  const mobileSearch=mobile.getByRole("textbox",{name:"Search tools"});
  await mobileSearch.fill("backup");

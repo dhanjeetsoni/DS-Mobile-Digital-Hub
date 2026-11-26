@@ -306,3 +306,12 @@ export async function getProductSpecifications(input: {
   throw new Error(json?.error || "AI specifications suggestion failed. Enter manually.");
 }
 
+
+export async function scanPurchaseInvoice(image:string):Promise<unknown>{
+ if(!AI_GATEWAY_URL)throw Error("Cloud AI is not configured.");
+ const headers=await authHeaders();if(!headers.Authorization)throw Error("Sign in before scanning invoices.");
+ const response=await fetchWithRetry(AI_GATEWAY_URL+"/ocr-purchase-invoice",{method:"POST",headers,body:JSON.stringify({image})});
+ const data=await response.json().catch(()=>null);
+ if(!response.ok||!data?.success||!data.data)throw Error(data?.error||"Purchase scanner unavailable. Enter manually.");
+ return data.data;
+}

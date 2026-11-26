@@ -42,7 +42,7 @@ export function getCustomerTier(
 
   const cleanPhone = customer.phone.trim();
   const customerSales = sales.filter(
-    (s) => s.customer?.phone?.trim() === cleanPhone
+    (s) => s.status !== "Cancelled" && s.customer?.phone?.trim() === cleanPhone
   );
 
   const totalSpent = customerSales.reduce((sum, s) => sum + (s.total || 0), 0);
@@ -125,7 +125,7 @@ export function getCustomerPurchasedDevices(
   const devices: CustomerDeviceRecord[] = [];
 
   const customerSales = (db.sales || []).filter(
-    (s) => s.customer?.phone?.trim() === cleanPhone
+    (s) => s.status !== "Cancelled" && s.customer?.phone?.trim() === cleanPhone
   );
 
   customerSales.forEach((sale) => {

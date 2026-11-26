@@ -1,10 +1,12 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Receipt, Plus, Search, CheckCircle2, Download, Package, Truck, Printer } from "lucide-react";
 import { Database, PurchaseRecord, StockBatch, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { todayStr, uid } from "../utils/fifoEngine";
 import { supabase, isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation } from "../services/repository";
+import {PurchaseInvoiceScanner} from "./PurchaseInvoiceScanner";
+import {validPurchaseAmounts} from "../utils/purchaseInvoiceDraft";
 
 interface PurchasesViewProps {
   db: Database;
@@ -50,23 +52,26 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
   const totalPurchasesAmount = (db.purchases || []).reduce((a, p) => a + p.total, 0);
 
   const [isSavingPurchase, setIsSavingPurchase] = useState(false);
+  const purchaseInFlight=useRef(false);
 
   const handleCreatePurchase = async (e: React.FormEvent) => {
     e.preventDefault();
+    if(purchaseInFlight.current)return;
     const product = db.products.find((p) => p.id === selectedProductId);
     if (!product) {
       toast("Sahi product chunein", "red");
       return;
     }
-    if (qty <= 0 || purchasePrice < 0) {
+    if (!validPurchaseAmounts(qty,purchasePrice)) {
       toast("Sahi quantity aur price daalein", "red");
       return;
     }
 
+    purchaseInFlight.current=true;
     setIsSavingPurchase(true);
     try {
       const total = qty * purchasePrice;
-      const resolvedSupplier = supplierName || product.supplier || "General Distributor";
+      const resolvedSupplier = supplierName.trim() || product.supplier || "General Distributor";
       const resolvedInvoiceRef = invoiceRef || `BILL-${Date.now().toString().slice(-4)}`;
       const idempotencyKey = crypto.randomUUID();
 
@@ -79,24 +84,7 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
       // never showed up in Supplier Udhaar. Now it auto-creates the supplier
       // record, same as how walk-in customers get auto-created on sale.
       let supplierId: string | undefined;
-      if (paymentStatus === "Purchased on Credit (Udhaar)" && supplierName.trim()) {
-        let supp = db.suppliers.find(
-          (s) => s.name.toLowerCase() === supplierName.trim().toLowerCase()
-        );
-        if (!supp) {
-          supp = {
-            id: uid("supp"),
-            name: supplierName.trim(),
-            phone: "",
-            category: "General",
-            totalPayable: 0,
-            createdAt: new Date().toISOString(),
-          };
-          db.suppliers.push(supp);
-        }
-        supp.totalPayable = (supp.totalPayable || 0) + total;
-        supplierId = supp.id;
-      }
+      if(paymentStatus==="Purchased on Credit (Udhaar)")supplierId=db.suppliers.find(s=>s.name.toLowerCase()===resolvedSupplier.toLowerCase())?.id;
 
       // Cloud side: commit purchase + line item + FIFO batch + stock update
       // atomically in Postgres (mirrors how sales are recorded — see
@@ -162,6 +150,25 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
         }
       }
 
+      if (paymentStatus === "Purchased on Credit (Udhaar)" && resolvedSupplier.trim()) {
+        let supp = db.suppliers.find(
+          (s) => s.name.toLowerCase() === resolvedSupplier.trim().toLowerCase()
+        );
+        if (!supp) {
+          supp = {
+            id: uid("supp"),
+            name: resolvedSupplier.trim(),
+            phone: "",
+            category: "General",
+            totalPayable: 0,
+            createdAt: new Date().toISOString(),
+          };
+          db.suppliers.push(supp);
+        }
+        supp.totalPayable = (supp.totalPayable || 0) + total;
+        supplierId = supp.id;
+      }
+
       const newPurchase: PurchaseRecord = {
         id: uid("pur"),
         productId: product.id,
@@ -210,7 +217,8 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
       setPurchasePrice(0);
       setInvoiceRef("");
       setNotes("");
-    } finally {
+    } catch(error){console.error("Purchase could not finish",error);toast("Purchase could not finish. Check stock and sync history before retrying.","red");} finally {
+      purchaseInFlight.current=false;
       setIsSavingPurchase(false);
     }
   };
@@ -357,9 +365,10 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
           <div className="modal wide">
             <div className="modal-head">
               <h3>📦 Add Stock Inward / Purchase Bill</h3>
-              <button onClick={() => setIsAddModalOpen(false)}>✕</button>
+              <button disabled={isSavingPurchase} onClick={() => setIsAddModalOpen(false)}>✕</button>
             </div>
 
+            <PurchaseInvoiceScanner onApply={(draft,line)=>{if(draft.supplier)setSupplierName(draft.supplier);if(draft.invoiceRef)setInvoiceRef(draft.invoiceRef);if(line.quantity!==null&&Number.isSafeInteger(line.quantity)&&line.quantity>0)setQty(line.quantity);if(line.unitPrice!==null)setPurchasePrice(line.unitPrice);setNotes("OCR draft: "+line.name+"; GST "+(line.gstPercent===null?"unreadable":line.gstPercent+"%")+"; source date "+(draft.invoiceDate||"unreadable")+". Verify supplier bill before saving.");}}/>
             <form onSubmit={handleCreatePurchase}>
               <div className="formgrid">
                 <div className="field full">
@@ -485,7 +494,7 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                 </div>
 
                 <div className="modal-actions">
-                  <button type="button" className="btn" onClick={() => setIsAddModalOpen(false)}>
+                  <button type="button" className="btn" disabled={isSavingPurchase} onClick={() => setIsAddModalOpen(false)}>
                     Cancel
                   </button>
                   <button type="submit" className="btn primary" disabled={isSavingPurchase}>

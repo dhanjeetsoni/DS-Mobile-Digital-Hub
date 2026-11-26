@@ -40,7 +40,7 @@ export async function sendInvoiceWhatsApp(params: SendWhatsAppInvoiceParams): Pr
     const message = messageLines.join("\n");
     const opened = openWhatsApp(customerPhone, message);
 
-    return { success: opened, message: opened ? "Dispatched" : "Could not open WhatsApp" };
+    return { success: opened, message: opened ? "WhatsApp link requested; delivery not verified" : "Could not open WhatsApp" };
   } catch (err: any) {
     console.error("sendInvoiceWhatsApp failed:", err);
     return { success: false, message: err?.message || "Failed" };

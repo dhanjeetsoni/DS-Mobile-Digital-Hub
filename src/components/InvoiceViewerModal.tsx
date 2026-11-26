@@ -8,6 +8,7 @@ import { buildInvoiceMessage, openWhatsApp } from "../services/whatsapp";
 import { getUpiQrImageUrl } from "../utils/upiQr";
 import { generateReceiptImageCard, downloadReceiptImage } from "../utils/receiptImageGenerator";
 import { WhatsAppPreviewBubble } from "./WhatsAppPreviewBubble";
+import {CustomerPrivateLink} from "./CustomerPrivateLink";
 import {
   buildEscPosReceipt,
   printViaBluetooth,
@@ -722,6 +723,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
           )}
         </div>
 
+        {sale&&sale.status!=="Cancelled"&&<CustomerPrivateLink kind="receipt" resourceId={sale.invoiceNo}/>}
         {/* WhatsApp Message Preview Bubble Section */}
         {sale && showWhatsAppPreview && (
           <div style={{ marginTop: "16px", borderTop: "1px solid var(--line)", paddingTop: "14px" }}>

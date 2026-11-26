@@ -1,0 +1,41 @@
+import React,{useEffect,useRef,useState} from "react";
+import {supabase,isCloudConfigured} from "../services/supabaseClient";
+import {inr,round2} from "../utils/indianCurrency";
+import {todayStr} from "../utils/fifoEngine";
+import {downloadCsv} from "../utils/csvExport";
+type Line={account:string;debit:number;credit:number};
+type Event={source_kind:string;id:number;invoice_no:string;event_kind:"posting"|"reversal";effective_date:string;recorded_at:string;reverses_id:number|null;lines:Line[]};
+type Report={events:Event[];total:number;truncated:boolean};
+type Source={id:string;reference:string;amount:number;method:string|null;previously_posted:boolean};
+const sourceKinds=[["pos","POS invoice"],["purchase","Purchase"],["supplier_payment","Supplier payment"],["customer_payment","Customer collection"],["expense","Expense"],["drawing","Owner drawing"]];
+export function CloudPosJournal(){
+ const [sourceKind,setSourceKind]=useState("pos"),[sourceDay,setSourceDay]=useState(todayStr()),[sources,setSources]=useState<Source[]>([]),[sourceId,setSourceId]=useState(""),[sourceNotice,setSourceNotice]=useState("");
+ const [from,setFrom]=useState(todayStr()),[to,setTo]=useState(todayStr()),[invoice,setInvoice]=useState(""),[report,setReport]=useState<Report|null>(null),[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
+ const current=useRef(0),inFlight=useRef(false);
+ useEffect(()=>()=>{current.current++;},[]);
+ const run=async(post:boolean)=>{
+  if(!isCloudConfigured||inFlight.current)return;
+  if(!from||!to||to<from||(Date.parse(to)-Date.parse(from))/86400000>92){setMessage("Choose a date range of at most 93 days.");return;}
+  if(post&&(!(sourceKind==="pos"?invoice.trim():sourceId)||!window.confirm("Post or reconcile this synchronized transaction? Corrections create new reversal entries; previous entries remain in history.")))return;
+  const seq=++current.current;inFlight.current=true;setBusy(true);setReport(null);setMessage("");
+  try{
+   let notice="";
+   if(post){const {data,error}=sourceKind==="pos"?await supabase.rpc("post_pos_journal_invoice",{p_invoice_no:invoice.trim()}):await supabase.rpc("post_business_journal_source",{p_kind:sourceKind,p_id:sourceId});if(error)throw error;
+    notice=data?.status==="posted"?String(data.events)+" journal events appended.":data?.status==="unchanged"?"No change; duplicate posting prevented.":String(data?.reason||"Record requires manual review.");}
+   const {data,error}=await supabase.rpc("read_business_journal",{p_from:from,p_to:to});if(error)throw error;
+   if(seq===current.current){setReport(data as Report);setMessage(notice||"Server journal loaded.");}
+  }catch{if(seq===current.current)setMessage("Unable to complete cloud journal request. Verify owner access and connection; reloading the journal is safe.");}
+  finally{inFlight.current=false;if(seq===current.current)setBusy(false);}
+ };
+ const loadSources=async()=>{if(!isCloudConfigured||inFlight.current||sourceKind==="pos"||!sourceDay)return;const seq=++current.current;inFlight.current=true;setBusy(true);setSources([]);setSourceId("");setSourceNotice("");try{const {data,error}=await supabase.rpc("list_business_journal_sources",{p_kind:sourceKind,p_day:sourceDay});if(error)throw error;if(seq===current.current){setSources(data.sources||[]);setSourceNotice(String(data.total)+" synchronized records"+(data.truncated?" (latest 200 shown)":""));}}catch{if(seq===current.current)setSourceNotice("Could not load synchronized records.");}finally{inFlight.current=false;if(seq===current.current)setBusy(false);}};
+ const lines=report?.events.flatMap(e=>e.lines.map(l=>({...l,id:e.id,invoice:e.invoice_no,source:e.source_kind,kind:e.event_kind,date:e.effective_date,reverse:e.reverses_id,recorded:e.recorded_at})))||[];
+ const debit=round2(lines.reduce((a,l)=>a+Number(l.debit),0)),credit=round2(lines.reduce((a,l)=>a+Number(l.credit),0));
+ const clear=()=>{setReport(null);setMessage("");};
+ return <section className="section retail-finance-preview"><div className="section-head"><div><h2>Cloud business journal · posted entries</h2><p className="hint">Owner-reviewed double-entry events derived from synchronized sales, purchases, payments, expenses and drawings. Reconcile changed records to append reversals. Not yet a complete general ledger or GST return.</p></div></div>
+ {!isCloudConfigured?<p className="hint">Cloud connection required. Local transaction preview remains available below.</p>:<><div className="formgrid"><label className="field">Transaction type<select disabled={busy} value={sourceKind} onChange={e=>{setSourceKind(e.target.value);setSources([]);setSourceId("");setSourceNotice("");}}>{sourceKinds.map(([k,n])=><option key={k} value={k}>{n}</option>)}</select></label>{sourceKind==="pos"?<label className="field">Invoice number<input value={invoice} maxLength={150} disabled={busy} onChange={e=>setInvoice(e.target.value)} placeholder="Synchronized invoice number"/></label>:<><label className="field">Source date<input type="date" disabled={busy} value={sourceDay} onChange={e=>{setSourceDay(e.target.value);setSources([]);setSourceId("");setSourceNotice("");}}/></label><button type="button" className="btn sm" disabled={busy||!sourceDay} onClick={()=>void loadSources()}>Load synchronized transactions</button><label className="field">Choose record<select value={sourceId} disabled={busy} onChange={e=>setSourceId(e.target.value)}><option value="">Select transaction</option>{sources.map(s=><option value={s.id} key={s.id}>{s.reference} · {inr(Number(s.amount))} · {s.method||"Unknown"}{s.previously_posted?" · Posted before":""}</option>)}</select></label>{sourceNotice&&<p className="hint" role="status">{sourceNotice}</p>}</>}<label className="field">From<input type="date" value={from} disabled={busy} onChange={e=>{setFrom(e.target.value);clear();}}/></label><label className="field">To<input type="date" value={to} disabled={busy} onChange={e=>{setTo(e.target.value);clear();}}/></label></div>
+ <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}><button type="button" className="btn primary" disabled={busy||!(sourceKind==="pos"?invoice.trim():sourceId)} onClick={()=>void run(true)}>Post / reconcile transaction</button><button type="button" className="btn" disabled={busy} onClick={()=>void run(false)}>Load posted journal</button><button type="button" className="btn sm" disabled={busy||!lines.length||!!report?.truncated} onClick={()=>downloadCsv("cloud-business-journal",["Event","Source","Reference","Type","Effective date","Recorded at","Reverses","Account","Debit","Credit"],lines.map(l=>[l.id,l.source,l.invoice,l.kind,l.date,l.recorded,l.reverse??"",l.account,l.debit,l.credit]))}>Export loaded range</button></div>
+ {message&&<p className="hint" role="status">{message}</p>}
+ {report&&<><p className="hint">{report.total} posted events in selected date range. {report.truncated?"Showing 500 latest events; narrow the range before exporting.":"All events in selected range loaded."}</p><div className="grid cols-3"><div className="card"><h3>Loaded debits</h3><div className="big">{inr(debit)}</div></div><div className="card"><h3>Loaded credits</h3><div className="big">{inr(credit)}</div></div><div className="card"><h3>Difference</h3><div className="big">{inr(round2(debit-credit))}</div></div></div><div className="table-wrap"><table><thead><tr><th>Event</th><th>Source / reference</th><th>Effective date</th><th>Account</th><th>Debit</th><th>Credit</th></tr></thead><tbody>{lines.map((l,i)=><tr key={l.id+":"+i}><td>{l.id}{l.reverse?" (reverses "+l.reverse+")":""}</td><td>{l.source} · {l.invoice} · {l.kind}</td><td>{l.date}</td><td>{l.account}</td><td>{inr(Number(l.debit))}</td><td>{inr(Number(l.credit))}</td></tr>)}</tbody></table></div></>}
+ <p className="hint">Only explicitly posted transactions are included. Purchase amounts are gross inventory purchases without GST separation; customer and supplier payments reduce receivables or payables rather than count as income or expense. Split receipts without verified channel details use collected-payments clearing. Finance, returns, exchanges, missing FIFO cost and deleted source records require separate review. Reversal date is reconciliation date; replacement posting uses original invoice date. Review all periods before financial reporting.</p></>}
+ </section>;
+}

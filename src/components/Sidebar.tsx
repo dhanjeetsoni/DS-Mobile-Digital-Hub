@@ -42,6 +42,7 @@ import {
   Bell,
 } from "lucide-react";
 import { Database } from "../types";
+import { WORKSPACE_GROUPS } from "../utils/workspaceGroups";
 import { inr } from "../utils/indianCurrency";
 import { todayStr } from "../utils/fifoEngine";
 
@@ -398,6 +399,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const todayGallaCash = (db.settings.openingCashDefault ?? 0) + todaySalesCash + todayXeroxCash;
 
   const isCurrentSecondary = SECONDARY_NAV_ITEMS.some((s) => s.key === currentPage);
+  const fullWorkspace = ownerMode && !isStaffIdentity && !mobileStaffFixedNav && (!mobileOwnerMode || (mobileOwnerMode === "pro" && allMobileTools)) && !easyMode;
+  const workspaceGroup = WORKSPACE_GROUPS.find(g => (g.keys as readonly string[]).includes(currentPage))?.id;
+  const [manualGroup,setManualGroup]=useState<string|null>(null);
+  useEffect(()=>setManualGroup(null),[currentPage]);
 
   return (
     <>
@@ -560,6 +565,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {mobileOwnerMode==="pro"&&<button className="navitem" onClick={()=>{setAllMobileTools(v=>!v);setShowAllTools(true);}} aria-expanded={allMobileTools}>{allMobileTools?"Show counter essentials":"Show all owner tools"}</button>}
+        {fullWorkspace ? <div className="workspace-directory" aria-label="Twelve workspace categories">
+          <div className="workspace-shortcuts">
+            {["dashboard","sell","products"].map(key=>{const item=visibleTools.find(t=>t.key===key);if(!item)return null;const Icon=item.icon;return <button type="button" key={key} className={"navitem "+(currentPage===key?"active":"")} onClick={()=>onNavigate(key)} aria-current={currentPage===key?"page":undefined}><span className="ic"><Icon size={16}/></span><span>{item.label}</span></button>})}
+          </div>
+          <div className="workspace-caption">WORKSPACE · 12 CATEGORIES</div>
+          {WORKSPACE_GROUPS.map(group=>{const items=group.keys.map(key=>visibleTools.find(t=>t.key===key)).filter((t):t is (typeof visibleTools)[number]=>!!t);if(!items.length)return null;
+            const opened=(manualGroup ?? workspaceGroup)===group.id;const Icon=items[0].icon;
+            return <div className="workspace-group" key={group.id}>
+              <button type="button" className="workspace-group-toggle" data-workspace-group={group.id} aria-expanded={opened} onClick={()=>setManualGroup(opened?"":group.id)}><Icon size={17}/><span>{group.label}</span><small>{items.length}</small>{opened?<ChevronUp size={13}/>:<ChevronDown size={13}/>}</button>
+              {opened&&<div className="workspace-group-items">{items.filter(t=>!["dashboard","sell","products"].includes(t.key)).map(t=><button type="button" className={"navitem "+(currentPage===t.key?"active":"")} key={t.key} onClick={()=>onNavigate(t.key)} aria-current={currentPage===t.key?"page":undefined}><span className="ic"><t.icon size={14}/></span><span>{t.label}</span></button>)}</div>}
+            </div>})}
+        </div> : <>
         {/* Primary Counter Navigation — Staff view is restricted to Sales +
             Photo Stock Finder (Step 6.1/6.2 — this is a staff sales tool by
             design: snap a photo of what's in front of them, find it in
@@ -752,6 +769,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
           </div>
         )}
+        </>}
         </>}
       </nav>
 

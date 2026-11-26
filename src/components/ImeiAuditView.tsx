@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Smartphone, Plus, Search, Sparkles, CheckCircle2, Shield, Calendar, Receipt, User, QrCode, Lock } from "lucide-react";
 import { Database, IMEIUnit, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
@@ -7,12 +7,14 @@ import { BoxOcrModal } from "./BoxOcrModal";
 import { OcrPhoneResult } from "../utils/aiOcr";
 import { ModelAutoSuggestInput } from "./ModelAutoSuggestInput";
 import { PasteButton } from "./PasteButton";
+import {validateDeviceIdentifiers} from "../utils/retailIntegrity";
 
 interface ImeiAuditViewProps {
   db: Database;
   onUpdate: () => void;
   toast: (msg: string, kind?: string) => void;
   ownerMode: boolean;
+  focusImei?: {query:string;revision:number}|null;
   onViewInvoiceByNo?: (invoiceNo: string) => void;
 }
 
@@ -22,10 +24,12 @@ export const ImeiAuditView: React.FC<ImeiAuditViewProps> = ({
   toast,
   ownerMode,
   onViewInvoiceByNo,
+  focusImei,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("All");
   const [filterType, setFilterType] = useState<string>("All");
+  useEffect(()=>{if(focusImei){setSearchQuery(focusImei.query);setFilterStatus("All");setFilterType("All");}},[focusImei]);
   const [isAddUnitModalOpen, setIsAddUnitModalOpen] = useState(false);
   const [isOcrOpen, setIsOcrOpen] = useState(false);
 
@@ -130,10 +134,8 @@ export const ImeiAuditView: React.FC<ImeiAuditViewProps> = ({
       toast("Brand aur Model naam daalna zaroori hai", "red");
       return;
     }
-    if (!phoneForm.imei1.trim() || phoneForm.imei1.trim().length < 14) {
-      toast("Sahi 15-digit IMEI 1 daalna zaroori hai", "red");
-      return;
-    }
+    const validation=validateDeviceIdentifiers(phoneForm.imei1,phoneForm.imei2,[...(db.imeiRegistry||[]),...db.products.flatMap(p=>p.units||[])]);
+    if(validation){toast(validation,"red");return;}
     // Step 3.3 — same 4-Tier Pricing ordering rule as AddProductModal /
     // EditProductModal: Original ≤ Confidential ≤ Selling.
     if (phoneForm.confidentialPrice > 0 && phoneForm.purchaseCost > 0 && phoneForm.confidentialPrice < phoneForm.purchaseCost) {

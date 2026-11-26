@@ -9,7 +9,9 @@ export default defineConfig(() => {
     build: {
       rollupOptions: {
         output: {
-          // Phase 16: Phase 13 claimed startup/lazy-loading work was done, and
+          // Keep stable vendors separate from the eagerly bundled route screens.
+          // Earlier versions used lazy screen chunks; this produced a first-tap loading flash.
+          // 
           // the per-screen React.lazy splits are real (45 chunks) -- but a clean
           // build still produced a single 1,516 kB entry chunk, because every
           // third-party library was bundled into it alongside App.tsx. Splitting
@@ -21,6 +23,7 @@ export default defineConfig(() => {
             "vendor-supabase": ["@supabase/supabase-js"],
             "vendor-sqlite": ["sql.js"],
             "vendor-icons": ["lucide-react"],
+            "vendor-scanner": ["@zxing/browser"],
           },
         },
       },

@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { DollarSign, Printer, CheckCircle2, ChevronDown, ChevronUp, Smartphone, MessageCircle, Send, Check, Coffee } from "lucide-react";
 import { Database, DailyGallaClosing } from "../types";
-import { inr } from "../utils/indianCurrency";
+import { inr, round2 } from "../utils/indianCurrency";
+import {activeSale,saleReceipts} from "../utils/retailIntegrity";
 import { uid, todayStr, nowTimeStr } from "../utils/fifoEngine";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
 import { buildDailyGallaEodMessage, openWhatsApp } from "../services/whatsapp";
@@ -81,19 +82,10 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
   // khata collections, xerox, repairs & expenses. Owner/staff never has
   // to type any of it in — matches "jitna selling ho automatically add ho jaye". ----
 
-  const salesToday = db.sales.filter((s) => s.date === selectedDate);
+  const salesToday = db.sales.filter(s=>s.date===selectedDate&&activeSale(s));
   const isOnlineMethod = (m?: string) => !!m && ONLINE_METHODS.includes(m);
-
-  const cashSales = salesToday.reduce((a, s) => {
-    if (s.isFinance) return a + (s.financeDetails?.downPayment || 0);
-    if (s.payment === "Cash") return a + (s.amountPaid || s.total);
-    return a;
-  }, 0);
-  const onlineSales = salesToday.reduce((a, s) => {
-    if (s.isFinance) return a;
-    if (isOnlineMethod(s.payment)) return a + (s.amountPaid || s.total);
-    return a;
-  }, 0);
+  const cashSales=round2(salesToday.reduce((a,s)=>a+saleReceipts(s).cash,0));
+  const onlineSales=round2(salesToday.reduce((a,s)=>a+saleReceipts(s).online,0));
 
   let cashKhata = 0;
   let onlineKhata = 0;
@@ -113,34 +105,36 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
     let amt = 0;
     if (j.receivedDate === selectedDate) amt += j.advance || 0;
     if (j.deliveredDate === selectedDate && (!j.deliveryPaymentMethod || j.deliveryPaymentMethod === "Cash")) {
-      amt += Math.max(0, (j.finalCharge || j.estCost || 0) - (j.advance || 0));
+      amt += Math.max(0, (j.finalCharge ?? j.estCost ?? 0) - (j.advance || 0));
     }
     return a + amt;
   }, 0);
   const onlineRepairs = db.jobs.filter((j) => j.deliveredDate === selectedDate && isOnlineMethod(j.deliveryPaymentMethod)).reduce((a, j) => {
-    return a + Math.max(0, (j.finalCharge || j.estCost || 0) - (j.advance || 0));
+    return a + Math.max(0, (j.finalCharge ?? j.estCost ?? 0) - (j.advance || 0));
   }, 0);
 
   const cashExpenses = (db.expenses.shop || []).concat(db.expenses.personal || [], db.expenses.other || [])
     .filter((e) => e.date === selectedDate && (!e.method || e.method === "Cash")).reduce((a, e) => a + e.amount, 0);
-  const cashSupplierPaid = (db.supplierPayments || []).filter((p) => p.date === selectedDate && p.method === "Cash").reduce((a, p) => a + p.amount, 0);
+  const cashSupplierPaid = round2((db.supplierPayments || []).filter((p) => p.date === selectedDate && p.method === "Cash").reduce((a, p) => a + p.amount, 0)+(db.purchases||[]).filter(p=>p.date===selectedDate&&p.paymentStatus==="Paid Cash").reduce((a,p)=>a+p.total,0));
   const cashRefunds = db.returns.filter((r) => r.date === selectedDate && r.refundMethod === "Cash").reduce((a, r) => a + (r.settlementAmount || 0), 0);
   const cashExtraIncome = (db.extraIncome || []).filter((e) => e.date === selectedDate && (!e.method || e.method === "Cash")).reduce((a, e) => a + e.amount, 0);
 
   const totalCashIn = cashSales + cashKhata + cashXerox + cashRepairs + cashExtraIncome;
   const totalCashOut = cashExpenses + cashSupplierPaid + cashRefunds;
-  const expectedCashInGalla = openingCash + totalCashIn - totalCashOut;
-  const expectedOnline = onlineSales + onlineKhata + onlineXerox + onlineRepairs;
+  const expectedCashInGalla = round2(openingCash + totalCashIn - totalCashOut);
+  const expectedOnline = round2(onlineSales + onlineKhata + onlineXerox + onlineRepairs);
 
   const actualCashCounted = showNoteCount
     ? DENOMS.reduce((a, d) => a + d * (denomsCount[d] || 0), 0)
     : Number(cashInGalla) || 0;
   const onlineReceived = Number(onlinePayment) || 0;
 
-  const cashDiff = actualCashCounted - expectedCashInGalla;
-  const onlineDiff = onlineReceived - expectedOnline;
+  const cashDiff = round2(actualCashCounted - expectedCashInGalla);
+  const onlineDiff = round2(onlineReceived - expectedOnline);
+  const validCounts=(showNoteCount||cashInGalla.trim()!==""&&Number.isFinite(Number(cashInGalla))&&Number(cashInGalla)>=0)&&onlinePayment.trim()!==""&&Number.isFinite(Number(onlinePayment))&&Number(onlinePayment)>=0&&Number.isFinite(openingCash)&&openingCash>=0;
 
   const handleSaveClosing = () => {
+    if(!validCounts)return;
     const existing = (db.gallaClosings || []).find((g) => g.date === selectedDate);
     if (existing) {
       const confirmReplace = window.confirm(
@@ -350,7 +344,7 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
                   style={{ marginTop: "8px", fontSize: "11px", padding: "4px 8px" }}
                   onClick={() => setOnlinePayment(String(expectedOnline))}
                 >
-                  Use system-detected amount ({inr(expectedOnline)})
+                  Copy expected online amount (verify against actual receipts)
                 </button>
                 {onlinePayment !== "" && (
                   <div className="kv" style={{ marginTop: "10px", fontSize: "12.5px" }}>
@@ -385,7 +379,7 @@ export const DailyGallaModal: React.FC<DailyGallaModalProps> = ({
           ) : (
             <button
               className="btn primary"
-              disabled={cashInGalla === "" || onlinePayment === ""}
+              disabled={!validCounts}
               onClick={handleSaveClosing}
             >
               <CheckCircle2 size={14} /> Lock &amp; Save Today's Galla Closing

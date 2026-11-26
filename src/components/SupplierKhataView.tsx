@@ -4,6 +4,7 @@ import { Database, Supplier, SupplierPayment } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { uid, todayStr } from "../utils/fifoEngine";
 import { queueOfflineOperation } from "../services/repository";
+import {SupplierComparisonPanel} from "./SupplierComparisonPanel";
 
 interface SupplierKhataViewProps {
   db: Database;
@@ -110,6 +111,7 @@ export const SupplierKhataView: React.FC<SupplierKhataViewProps> = ({ db, onUpda
 
   return (
     <div>
+      <SupplierComparisonPanel db={db}/>
       <div className="grid cols-3" style={{ marginBottom: "16px" }}>
         <div className="card">
           <h3>Total Supplier Payables (Dena Baaki)</h3>

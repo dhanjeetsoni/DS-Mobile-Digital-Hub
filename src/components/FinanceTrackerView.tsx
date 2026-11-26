@@ -3,6 +3,7 @@ import { Landmark, CheckCircle2, AlertCircle, DollarSign, Search, Calendar, Buil
 import { Database, Sale, MobileFinanceDetails } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { todayStr } from "../utils/fifoEngine";
+import {settlementEvidence,recordedSettlementHasReference} from "../utils/settlementEvidence";
 
 interface FinanceTrackerViewProps {
   db: Database;
@@ -23,9 +24,10 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
 
   const [settlementModalSale, setSettlementModalSale] = useState<Sale | null>(null);
   const [utrInput, setUtrInput] = useState<string>("");
+  const [actualCredit,setActualCredit]=useState("");const [confirmedCredit,setConfirmedCredit]=useState(false);
   const [settleDateInput, setSettleDateInput] = useState<string>(todayStr());
 
-  const financeSales = db.sales.filter((s) => s.isFinance && s.financeDetails);
+  const financeSales = db.sales.filter((s) => s.status!=="Cancelled" && s.isFinance && s.financeDetails);
 
   const totalFinancedVolume = financeSales.reduce(
     (a, s) => a + (s.financeDetails?.loanAmount || 0),
@@ -58,14 +60,16 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
     e.preventDefault();
     if (!settlementModalSale || !settlementModalSale.financeDetails) return;
 
+    if(settlementModalSale.status==="Cancelled"||settlementModalSale.financeDetails.payoutStatus!=="Pending Bank Settlement"){toast("Only pending, active finance sales can be settled.","red");return;}
+    const issue=settlementEvidence({reference:utrInput,date:settleDateInput,saleDate:settlementModalSale.date,today:todayStr(),amount:actualCredit,expected:settlementModalSale.financeDetails.netBankReceivable,confirmed:confirmedCredit});if(issue){toast(issue,"red");return;}
     settlementModalSale.financeDetails.payoutStatus = "Settled in Bank";
     settlementModalSale.financeDetails.settlementDate = settleDateInput;
-    settlementModalSale.financeDetails.utrRef = utrInput.trim() || `BANK-UTR-${Date.now().toString().slice(-6)}`;
+    settlementModalSale.financeDetails.utrRef = utrInput.trim();
 
     onUpdate();
     setSettlementModalSale(null);
     setUtrInput("");
-    toast(`Payout of ${inr(settlementModalSale.financeDetails.netBankReceivable)} marked as Settled in Bank!`, "green");
+    toast(`Payout of ${inr(settlementModalSale.financeDetails.netBankReceivable)} recorded as owner-confirmed settlement; bank API not connected.`, "green");
   };
 
   return (
@@ -74,7 +78,7 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
         <div className="card">
           <h3>Total Financed Phone Sales</h3>
           <div className="big blue">{inr(totalFinancedVolume)}</div>
-          <div className="foot">{financeSales.length} phones sold on 0% EMI</div>
+          <div className="foot">{financeSales.length} financed sales</div>
         </div>
         <div className="card accent">
           <h3>Pending Bank Settlement (Fasa Hua Paisa)</h3>
@@ -86,7 +90,7 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
         <div className="card">
           <h3>Settled in Bank Account</h3>
           <div className="big green">{inr(settledBankTotal)}</div>
-          <div className="foot">Successfully cleared into store bank</div>
+          <div className="foot">Recorded settlements; not bank API verified</div>
         </div>
       </div>
 
@@ -209,14 +213,14 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
                             onClick={() => {
                               setSettlementModalSale(sale);
                               setSettleDateInput(todayStr());
-                              setUtrInput("");
+                              setUtrInput("");setActualCredit("");setConfirmedCredit(false);
                             }}
                           >
                             <CheckCircle2 size={12} /> Mark Settled
                           </button>
                         ) : (
                           <span className="hint" style={{ fontSize: "11px" }}>
-                            UTR: {fin.utrRef || "Verified"}
+                            UTR: {recordedSettlementHasReference(fin.utrRef)?fin.utrRef:"Reference needs review"}
                           </span>
                         )}
                       </td>
@@ -251,7 +255,7 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
                 <b>{settlementModalSale.financeDetails.loanAccountNo}</b>
               </div>
               <div className="kv" style={{ marginBottom: "14px" }}>
-                <span>Net Amount Deposited into Bank:</span>
+                <span>Expected net bank payout:</span>
                 <b style={{ color: "var(--green)", fontSize: "16px" }}>
                   {inr(settlementModalSale.financeDetails.netBankReceivable)}
                 </b>
@@ -268,15 +272,19 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
                   />
                 </div>
                 <div className="field">
-                  <label>Bank UTR / Transaction Ref</label>
+                  <label>Actual Bank UTR / Transaction Ref <span className="req">*</span></label>
                   <input
-                    placeholder="e.g. UTR #984920492"
+                    required maxLength={120}
+                    placeholder="Enter bank statement reference"
                     value={utrInput}
                     onChange={(e) => setUtrInput(e.target.value)}
                   />
                 </div>
               </div>
 
+              <div className="field"><label>Actual amount credited</label><input type="number" min="0.01" step="0.01" required value={actualCredit} onChange={e=>setActualCredit(e.target.value)}/></div>
+              <label><input type="checkbox" checked={confirmedCredit} onChange={e=>setConfirmedCredit(e.target.checked)}/> I checked the actual bank statement and verified the full payout.</label>
+              <p className="hint">Mismatch or partial payout requires manual review. This records your confirmation, not an automated bank verification or journal posting.</p>
               <div className="modal-actions" style={{ marginTop: "16px" }}>
                 <button type="button" className="btn" onClick={() => setSettlementModalSale(null)}>
                   Cancel

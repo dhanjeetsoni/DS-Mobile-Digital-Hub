@@ -62,7 +62,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
   // Return Form States
   const [selectedReturnItems, setSelectedReturnItems] = useState<{ [productId: string]: number }>({});
   const [returnReason, setReturnReason] = useState("Defective / Not Working");
-  const [refundMethod, setRefundMethod] = useState("Cash");
+  const [refundMethod, setRefundMethod] = useState("Cash (From Counter Galla)");
   const [returnNotes, setReturnNotes] = useState("");
   const [viewingReturn, setViewingReturn] = useState<ReturnRecord | null>(null);
 
@@ -240,9 +240,10 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
   };
 
   const handleProcessReturn = async () => {
-    if (!foundSale) return;
+    if (!foundSale || isSavingReturn) return;
+    if(foundSale.status==="Cancelled"){toast("Cancelled invoices cannot be returned.","red");return;}
     const totalRefund = calculateReturnRefund();
-    if (totalRefund <= 0) {
+    if (!Number.isFinite(totalRefund)||totalRefund <= 0) {
       toast("Return karne ke liye kam se kam 1 item chunein", "red");
       return;
     }
@@ -439,7 +440,8 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
   const [isSavingExchange, setIsSavingExchange] = useState(false);
 
   const handleProcessExchange = async () => {
-    if (!foundSale) return;
+    if (!foundSale || isSavingExchange) return;
+    if(foundSale.status==="Cancelled"||!Number.isSafeInteger(exchangeReplacementQty)||exchangeReplacementQty<=0){toast("Select an active invoice and valid replacement quantity.","red");return;}
     const replacementProd = db.products.find((p) => p.id === exchangeReplacementId);
     if (!replacementProd) {
       toast("Catalog se replacement product chunein", "red");
@@ -476,6 +478,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
 
     const replacementVal = replacementProd.sellingPrice * exchangeReplacementQty;
     const diff = replacementVal - returnedVal;
+    if(!Number.isFinite(returnedVal)||returnedVal<0||!Number.isFinite(replacementVal)||replacementVal<0||!Number.isFinite(diff)){toast("Invalid exchange amounts.","red");return;}
     const exchangeNo = `EXC-${String((db.exchangeSeq || 1)).padStart(4, "0")}`;
     const replacementItemsList = [
       {

@@ -113,7 +113,7 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
     db.settings.shopName?.trim() && db.settings.phone?.trim() && db.settings.address?.trim()
   );
   const productsDone = db.products.length > 0;
-  const salesDone = db.sales.length > 0;
+  const salesDone = db.sales.some(s=>s.status!=="Cancelled");
   const pricingDone = Boolean(db.settings.pricingTutorialSeen);
 
   const stepStatus = (real: boolean): StepStatus => (loading && real === false ? "checking" : real ? "done" : "pending");
@@ -160,7 +160,7 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
     {
       n: 6,
       title: "Pehla product add karein",
-      desc: "Test ke taur pe ek product add karke dekhein — AI auto-fill kaise brand/model/price bharta hai.",
+      desc: "Apna actual opening stock add karein. Test entries ko live inventory mein na rakhein.",
       status: productsDone ? "done" : "pending",
       cta: { label: "Product Add karein", onClick: onOpenAddProduct },
     },
@@ -172,8 +172,8 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
     },
     {
       n: 8,
-      title: "Ek test sale karke dekhein",
-      desc: "Invoice kaisa banta hai, discount/gift/warranty box kaisa dikhta hai — ek chhoti test sale karke check karein.",
+      title: "First actual sale",
+      desc: "Actual customer ka bill hi banayein. Printer aur billing ka rehearsal isolated test device par karein.",
       status: salesDone ? "done" : "pending",
       cta: { label: "New Bill kholein", onClick: () => onNavigate("sell") },
     },
@@ -188,8 +188,7 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
         <div>
           <h2>🚀 Shuruaati Setup Checklist</h2>
           <p className="hint" style={{ marginTop: 4 }}>
-            Pehli baar shop set kar rahe hain? Yeh 8 steps follow karein — 30-45 minute mein poora system launch ke
-            liye ready ho jaayega. Kabhi bhi skip/band kar sakte hain, sidebar ke "⚙️ System" mein yeh checklist
+            Pehli baar shop set kar rahe hain? Yeh checklist configuration aur first-sale progress track karti hai; hardware, accounting aur sync acceptance alag verify karein. Kabhi bhi skip/band kar sakte hain, sidebar ke "⚙️ System" mein yeh checklist
             hamesha mil jaayegi.
           </p>
         </div>
@@ -232,7 +231,7 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
             fontWeight: 700,
           }}
         >
-          ✅ Sab steps complete! Aapka shop launch ke liye ready hai.
+          ✅ Checklist complete. Launch se pehle hardware, accounting aur backup verification bhi karein.
         </div>
       )}
 

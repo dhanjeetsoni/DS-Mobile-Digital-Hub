@@ -92,7 +92,7 @@ export function combineDailyTotals(
   const dateSet = new Set(dates);
 
   (db.sales || []).forEach((s) => {
-    if (!dateSet.has(s.date)) return;
+    if (s.status === "Cancelled" || !dateSet.has(s.date)) return;
     const row = ensure(s.date);
     const cost = saleCost(s);
     row.productRevenue += s.total;

@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient";
-import type { Database, Product } from "../types";
+import type { Product } from "../types";
 
 export interface CatalogDownloadMeta {
   lastDownloadedAt: string | null;
@@ -9,76 +9,57 @@ export interface CatalogDownloadMeta {
   status: "cached" | "empty" | "downloading";
 }
 
-const OFFLINE_CATALOG_STORAGE_KEY = "dsmdh_offline_catalog_snapshot_v1";
-const OFFLINE_CATALOG_META_KEY = "dsmdh_offline_catalog_meta_v1";
-
-export function getOfflineCatalogMeta(): CatalogDownloadMeta {
+// A single atomic cache record prevents metadata from describing a different snapshot.
+const CACHE_PREFIX = "dsmdh_offline_catalog_v2:";
+export interface CatalogScope { storeId: string; profileId: string }
+interface CatalogSnapshot { products: Partial<Product>[]; meta: CatalogDownloadMeta }
+const emptyMeta = (): CatalogDownloadMeta => ({
+  lastDownloadedAt: null, itemCount: 0, categoriesCount: 0, sizeBytes: 0, status: "empty",
+});
+const cacheKey = (scope: CatalogScope) => CACHE_PREFIX + encodeURIComponent(scope.storeId) + ":" + encodeURIComponent(scope.profileId);
+function readSnapshot(scope?: CatalogScope | null): CatalogSnapshot | null {
+  if (!scope?.storeId || !scope.profileId) return null;
   try {
-    const raw = localStorage.getItem(OFFLINE_CATALOG_META_KEY);
-    if (!raw) {
-      return {
-        lastDownloadedAt: null,
-        itemCount: 0,
-        categoriesCount: 0,
-        sizeBytes: 0,
-        status: "empty",
-      };
-    }
-    return JSON.parse(raw);
-  } catch {
-    return {
-      lastDownloadedAt: null,
-      itemCount: 0,
-      categoriesCount: 0,
-      sizeBytes: 0,
-      status: "empty",
-    };
-  }
+    const value = JSON.parse(localStorage.getItem(cacheKey(scope)) || "null");
+    return value && Array.isArray(value.products) && value.meta?.itemCount === value.products.length ? value : null;
+  } catch { return null; }
 }
-
-export function saveOfflineCatalogMeta(meta: CatalogDownloadMeta) {
-  try {
-    localStorage.setItem(OFFLINE_CATALOG_META_KEY, JSON.stringify(meta));
-  } catch (e) {
-    console.warn("Failed to persist catalog meta:", e);
-  }
+export function getOfflineCatalogMeta(scope?: CatalogScope | null): CatalogDownloadMeta {
+  return readSnapshot(scope)?.meta ?? emptyMeta();
+}
+async function assertCurrentProfile(scope: CatalogScope) {
+  const { data, error } = await supabase.auth.getSession();
+  if (error || data.session?.user.id !== scope.profileId) throw new Error("Account changed. Sign in again before downloading.");
 }
 
 export async function downloadFullCatalogForOffline(
-  storeId: string,
+  scope: CatalogScope,
   onProgress?: (step: string, percent: number) => void
 ): Promise<{ success: boolean; itemCount: number; message: string }> {
   try {
     onProgress?.("Connecting to cloud server...", 10);
 
-    // 1. Fetch live products from database
-    onProgress?.("Downloading full product catalog & specifications...", 30);
-    const { data: rows, error: prodErr } = await supabase
-      .from("products_staff_view")
-      .select("*")
-      .eq("store_id", storeId);
-
-    if (prodErr) {
-      console.warn("products_staff_view failed, attempting fallback to products:", prodErr);
+    if (!scope.storeId || !scope.profileId) throw new Error("Sign in to download the catalog.");
+    await assertCurrentProfile(scope);
+    // Only the staff-safe projection. Never fall back to the private products table.
+    onProgress?.("Downloading product catalog...", 30);
+    const catalogRows: any[] = [];
+    const pageSize = 500;
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabase.from("products_staff_view")
+        .select("*").eq("store_id", scope.storeId).order("id", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error || !data) throw new Error(error?.message || "Catalog download returned no response.");
+      catalogRows.push(...data);
+      if (data.length < pageSize) break;
     }
-
-    let catalogRows = rows || [];
-    if (catalogRows.length === 0) {
-      // Try direct products table
-      const { data: directRows } = await supabase
-        .from("products")
-        .select("*")
-        .eq("store_id", storeId);
-      if (directRows && directRows.length > 0) {
-        catalogRows = directRows;
-      }
-    }
+    await assertCurrentProfile(scope);
 
     onProgress?.(`Processing ${catalogRows.length} catalog items...`, 60);
 
     // Group categories
     const categoriesSet = new Set<string>();
-    const normalizedProducts: Partial<Product>[] = catalogRows.map((r: any) => {
+    const normalizedProducts: Partial<Product>[] = catalogRows.map((r: any): Partial<Product> => {
       const cat = r.category || "General";
       categoriesSet.add(cat);
       return {
@@ -86,13 +67,16 @@ export async function downloadFullCatalogForOffline(
         name: r.model || r.brand || "Product",
         category: cat,
         brand: r.brand || "",
-        model: r.model || "",
         sku: r.sku || "",
         barcode: r.barcode || "",
         sellingPrice: Number(r.selling_price || 0),
         mrp: Number(r.mrp || 0),
-        costPrice: 0, // safe
+        purchasePrice: null, // confidential cost must never be cached here
+        confidentialPrice: null,
+        pendingCost: true,
         stock: Number(r.stock_qty || 0),
+        minStock: Number(r.min_stock || 0),
+        requireCustomerDetails: !!r.require_customer_details,
         photo: r.photo || "",
         warrantyEnabled: !!r.warranty_enabled,
         warrantyMonths: Number(r.warranty_months || 0),
@@ -103,39 +87,34 @@ export async function downloadFullCatalogForOffline(
         isSparePart: !!r.is_spare_part,
         supplier: r.supplier || "",
         notes: r.notes || "",
-        customTerms: r.custom_terms || undefined,
-        customQuote: r.custom_quote || undefined,
+        photos: Array.isArray(r.photos) ? r.photos : [],
+        specifications: Array.isArray(r.specifications) ? r.specifications : [],
+        featureHighlights: Array.isArray(r.feature_highlights) ? r.feature_highlights : [],
       };
     });
 
-    onProgress?.("Pre-caching product images & offline index...", 85);
-
-    // Save offline catalog snapshot
-    const payloadStr = JSON.stringify(normalizedProducts);
-    try {
-      localStorage.setItem(OFFLINE_CATALOG_STORAGE_KEY, payloadStr);
-    } catch (quotaErr) {
-      console.warn("Storage quota limit reached, saving partial catalog snapshot without high-res photos:", quotaErr);
-      const lightweight = normalizedProducts.map((p) => ({ ...p, photo: "" }));
-      localStorage.setItem(OFFLINE_CATALOG_STORAGE_KEY, JSON.stringify(lightweight));
-    }
-
-    const approxBytes = payloadStr.length * 2;
-    const meta: CatalogDownloadMeta = {
-      lastDownloadedAt: new Date().toISOString(),
-      itemCount: normalizedProducts.length,
-      categoriesCount: categoriesSet.size,
-      sizeBytes: approxBytes,
-      status: "cached",
+    onProgress?.("Saving the catalog to this device...", 85);
+    const save = (products: Partial<Product>[]) => {
+      const meta: CatalogDownloadMeta = {
+        lastDownloadedAt: new Date().toISOString(),
+        itemCount: products.length,
+        categoriesCount: categoriesSet.size,
+        sizeBytes: JSON.stringify(products).length * 2,
+        status: products.length ? "cached" : "empty",
+      };
+      localStorage.setItem(cacheKey(scope), JSON.stringify({ products, meta }));
     };
-    saveOfflineCatalogMeta(meta);
-
-    onProgress?.("Completed! Catalog is now ready for 100% offline use.", 100);
-
+    let photosOmitted = false;
+    try { save(normalizedProducts); }
+    catch {
+      save(normalizedProducts.map(p => ({ ...p, photo: "", photos: [] })));
+      photosOmitted = true;
+    }
+    onProgress?.("Catalog records saved.", 100);
     return {
       success: true,
       itemCount: normalizedProducts.length,
-      message: `Successfully downloaded ${normalizedProducts.length} items (${categoriesSet.size} categories) for offline access.`,
+      message: `Saved ${normalizedProducts.length} catalog items (${categoriesSet.size} categories).${photosOmitted ? " Photo references omitted due to storage limits." : ""} Download photos separately for offline viewing.`,
     };
   } catch (err: any) {
     console.error("Failed to download catalog:", err);
@@ -147,21 +126,9 @@ export async function downloadFullCatalogForOffline(
   }
 }
 
-export function getCachedOfflineCatalog(): Partial<Product>[] | null {
-  try {
-    const raw = localStorage.getItem(OFFLINE_CATALOG_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+export function getCachedOfflineCatalog(scope?: CatalogScope | null): Partial<Product>[] | null {
+  return readSnapshot(scope)?.products ?? null;
 }
-
-export function clearOfflineCatalogCache() {
-  try {
-    localStorage.removeItem(OFFLINE_CATALOG_STORAGE_KEY);
-    localStorage.removeItem(OFFLINE_CATALOG_META_KEY);
-  } catch (e) {
-    console.warn("Failed to clear offline catalog cache:", e);
-  }
+export function clearOfflineCatalogCache(scope?: CatalogScope | null) {
+  if (scope?.storeId && scope.profileId) localStorage.removeItem(cacheKey(scope));
 }

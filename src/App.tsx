@@ -18,15 +18,16 @@ import { uid, todayStr, nowTimeStr, genSku, backfillMissingSkus, addStockBatch, 
 import { naturalMatch } from "./utils/naturalSearch";
 import { Sidebar, PRIMARY_NAV_ITEMS, SECONDARY_NAV_ITEMS } from "./components/Sidebar";
 import { RetailCommandBar, RetailQuickRail } from "./components/RetailCommandBar";
+import {findWorkspaceRecords,type RecordHit} from "./utils/workspaceSearch";
 import BottomTabBar from "./components/BottomTabBar";
 import { RetailHero } from "./components/RetailHero";
-// Phase 16: was a static import, which pulled the whole @zxing/browser barcode
-// engine into the main entry chunk for every user on every cold start -- even
-// though this modal is already only rendered behind `isCameraScannerOpen`.
-// Lazy so ZXing is fetched the first time someone actually opens the scanner.
-const CameraScannerModal = React.lazy(() =>
-  import("./components/CameraScannerModal").then((m) => ({ default: m.CameraScannerModal }))
-);
+import { PersonalizedMetrics } from "./components/PersonalizedMetrics";
+import {paymentAllocationValid,saleReceipts,suggestCompatibleAccessories} from "./utils/retailIntegrity";
+import {RetailBusinessCopilot} from "./components/RetailBusinessCopilot";
+import {CustomerShareStudio} from "./components/CustomerShareStudio";
+import {CounterExperience} from "./components/CounterExperience";
+// Keep scanner code available before the first tap; camera permission is still requested only when opened.
+import { CameraScannerModal } from "./components/CameraScannerModal";
 import { AddProductModal } from "./components/AddProductModal";
 import { QuickStockAddModal } from "./components/QuickStockAddModal";
 import { StockReviewQueueView } from "./components/StockReviewQueueView";
@@ -53,45 +54,47 @@ import { PasteButton } from "./components/PasteButton";
 import { ModelAutoSuggestInput } from "./components/ModelAutoSuggestInput";
 import { pickContactFromPhone, isContactPickerSupported } from "./utils/contactPicker";
 
-// Phase 13: Lazy loaded views for instant app startup & reduced initial bundle footprint
-const AppearanceStudioView = React.lazy(() => import("./components/AppearanceStudioView"));
-const LoanTrackerView = React.lazy(() => import("./components/LoanTrackerView").then((m) => ({ default: m.LoanTrackerView })));
-const SupplierKhataView = React.lazy(() => import("./components/SupplierKhataView").then((m) => ({ default: m.SupplierKhataView })));
-const SimTrackerView = React.lazy(() => import("./components/SimTrackerView").then((m) => ({ default: m.SimTrackerView })));
-const FinanceTrackerView = React.lazy(() => import("./components/FinanceTrackerView").then((m) => ({ default: m.FinanceTrackerView })));
-const BarcodeTagStudio = React.lazy(() => import("./components/BarcodeTagStudio").then((m) => ({ default: m.BarcodeTagStudio })));
-const ImeiAuditView = React.lazy(() => import("./components/ImeiAuditView").then((m) => ({ default: m.ImeiAuditView })));
-const PhotoStockFinderView = React.lazy(() => import("./components/PhotoStockFinderView").then((m) => ({ default: m.PhotoStockFinderView })));
-const ReturnsExchangesView = React.lazy(() => import("./components/ReturnsExchangesView").then((m) => ({ default: m.ReturnsExchangesView })));
-const StockAdjustView = React.lazy(() => import("./components/StockAdjustView").then((m) => ({ default: m.StockAdjustView })));
-const PurchasesView = React.lazy(() => import("./components/PurchasesView").then((m) => ({ default: m.PurchasesView })));
-const SalesHistoryView = React.lazy(() => import("./components/SalesHistoryView").then((m) => ({ default: m.SalesHistoryView })));
-const DailyReviewView = React.lazy(() => import("./components/DailyReviewView").then((m) => ({ default: m.DailyReviewView })));
-const MonthlyReviewView = React.lazy(() => import("./components/MonthlyReviewView").then((m) => ({ default: m.MonthlyReviewView })));
-const ShopExpensesView = React.lazy(() => import("./components/ShopExpensesView").then((m) => ({ default: m.ShopExpensesView })));
-const ExtraIncomeView = React.lazy(() => import("./components/ExtraIncomeView").then((m) => ({ default: m.ExtraIncomeView })));
-const PersonalDrawingsView = React.lazy(() => import("./components/PersonalDrawingsView").then((m) => ({ default: m.PersonalDrawingsView })));
-const OwnerReportsView = React.lazy(() => import("./components/OwnerReportsView").then((m) => ({ default: m.OwnerReportsView })));
-const WindowsAppModal = React.lazy(() => import("./components/WindowsAppModal").then((m) => ({ default: m.WindowsAppModal })));
-const LowStockAlertsView = React.lazy(() => import("./components/LowStockAlertsView").then((m) => ({ default: m.LowStockAlertsView })));
-const AuditLogView = React.lazy(() => import("./components/AuditLogView").then((m) => ({ default: m.AuditLogView })));
-const StaffPerformanceView = React.lazy(() => import("./components/StaffPerformanceView").then((m) => ({ default: m.StaffPerformanceView })));
-const LoyaltyRewardsView = React.lazy(() => import("./components/LoyaltyRewardsView").then((m) => ({ default: m.LoyaltyRewardsView })));
-const DownloadAreaView = React.lazy(() => import("./components/DownloadAreaView").then((m) => ({ default: m.DownloadAreaView })));
-const ProfitLossDashboardView = React.lazy(() => import("./components/ProfitLossDashboardView").then((m) => ({ default: m.ProfitLossDashboardView })));
-const StatusDashboardView = React.lazy(() => import("./components/StatusDashboardView").then((m) => ({ default: m.StatusDashboardView })));
-const CustomerDirectoryView = React.lazy(() => import("./components/CustomerDirectoryView").then((m) => ({ default: m.CustomerDirectoryView })));
-const StaffAccessView = React.lazy(() => import("./components/StaffAccessView").then((m) => ({ default: m.StaffAccessView })));
-const SetupWizardView = React.lazy(() => import("./components/SetupWizardView").then((m) => ({ default: m.SetupWizardView })));
-const ExportClearInvoicesView = React.lazy(() => import("./components/ExportClearInvoicesView").then((m) => ({ default: m.ExportClearInvoicesView })));
-const StaffIncentiveTrackerView = React.lazy(() => import("./components/StaffIncentiveTrackerView").then((m) => ({ default: m.StaffIncentiveTrackerView })));
-const SecurityAuditLogView = React.lazy(() => import("./components/SecurityAuditLogView").then((m) => ({ default: m.SecurityAuditLogView })));
-const OfflineSyncCenterView = React.lazy(() => import("./components/OfflineSyncCenterView").then((m) => ({ default: m.OfflineSyncCenterView })));
-const ImeiWarrantyLookupView = React.lazy(() => import("./components/ImeiWarrantyLookupView").then((m) => ({ default: m.ImeiWarrantyLookupView })));
-const SmartRestockPredictorView = React.lazy(() => import("./components/SmartRestockPredictorView").then((m) => ({ default: m.SmartRestockPredictorView })));
-const StaffAttendanceView = React.lazy(() => import("./components/StaffAttendanceView").then((m) => ({ default: m.StaffAttendanceView })));
-const DeadStockHeatmapView = React.lazy(() => import("./components/DeadStockHeatmapView").then((m) => ({ default: m.DeadStockHeatmapView })));
-const StockAuditScannerView = React.lazy(() => import("./components/StockAuditScannerView").then((m) => ({ default: m.StockAuditScannerView })));
+// Native retail navigation: bundle all normal screens with the app so the first tap does not suspend.
+import AppearanceStudioView from "./components/AppearanceStudioView";
+import { LoanTrackerView } from "./components/LoanTrackerView";
+import { SupplierKhataView } from "./components/SupplierKhataView";
+import { SimTrackerView } from "./components/SimTrackerView";
+import { FinanceTrackerView } from "./components/FinanceTrackerView";
+import { BarcodeTagStudio } from "./components/BarcodeTagStudio";
+import { ImeiAuditView } from "./components/ImeiAuditView";
+import { PhotoStockFinderView } from "./components/PhotoStockFinderView";
+import { ReturnsExchangesView } from "./components/ReturnsExchangesView";
+import { StockAdjustView } from "./components/StockAdjustView";
+import { PurchasesView } from "./components/PurchasesView";
+import { SalesHistoryView } from "./components/SalesHistoryView";
+import { DailyReviewView } from "./components/DailyReviewView";
+import { MonthlyReviewView } from "./components/MonthlyReviewView";
+import { ShopExpensesView } from "./components/ShopExpensesView";
+import { ExtraIncomeView } from "./components/ExtraIncomeView";
+import { PersonalDrawingsView } from "./components/PersonalDrawingsView";
+import { OwnerReportsView } from "./components/OwnerReportsView";
+import { WindowsAppModal } from "./components/WindowsAppModal";
+import { LowStockAlertsView } from "./components/LowStockAlertsView";
+import { AuditLogView } from "./components/AuditLogView";
+import { StaffPerformanceView } from "./components/StaffPerformanceView";
+import { LoyaltyRewardsView } from "./components/LoyaltyRewardsView";
+import { DownloadAreaView } from "./components/DownloadAreaView";
+import { ProfitLossDashboardView } from "./components/ProfitLossDashboardView";
+import { StatusDashboardView } from "./components/StatusDashboardView";
+import { CustomerDirectoryView } from "./components/CustomerDirectoryView";
+import { StaffAccessView } from "./components/StaffAccessView";
+import {DeviceActivityPanel} from "./components/DeviceActivityPanel";
+import {CustomerPrivateLink} from "./components/CustomerPrivateLink";
+import { SetupWizardView } from "./components/SetupWizardView";
+import { ExportClearInvoicesView } from "./components/ExportClearInvoicesView";
+import { StaffIncentiveTrackerView } from "./components/StaffIncentiveTrackerView";
+import { SecurityAuditLogView } from "./components/SecurityAuditLogView";
+import { OfflineSyncCenterView } from "./components/OfflineSyncCenterView";
+import { ImeiWarrantyLookupView } from "./components/ImeiWarrantyLookupView";
+import { SmartRestockPredictorView } from "./components/SmartRestockPredictorView";
+import { StaffAttendanceView } from "./components/StaffAttendanceView";
+import { DeadStockHeatmapView } from "./components/DeadStockHeatmapView";
+import { StockAuditScannerView } from "./components/StockAuditScannerView";
 import { ParkedCartsModal } from "./components/ParkedCartsModal";
 import { QuickServiceModal } from "./components/QuickServiceModal";
 import { CounterCalculatorModal } from "./components/CounterCalculatorModal";
@@ -104,7 +107,7 @@ import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured, isBiometricEn
 import { biometricCheck, authenticateBiometric, getMyStaffAccessPolicy } from "./services/phase6";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
-import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
+import { deviceId, loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { sqliteList } from "./services/localSqlite";
@@ -415,6 +418,9 @@ export default function App() {
   // style photo-forward cards) or "table" (dense spreadsheet view, opt-in).
   const [productViewMode, setProductViewMode] = useState<"grid" | "table">("grid");
   const [inventoryQuery,setInventoryQuery]=useState("");
+  const [focusCustomerId,setFocusCustomerId]=useState<string|null>(null);
+  const [focusImei,setFocusImei]=useState<{query:string;revision:number}|null>(null);
+  const [customerFocusRevision,setCustomerFocusRevision]=useState(0);
   const [inventoryCategory,setInventoryCategory]=useState("");
   const [inventoryStock,setInventoryStock]=useState("all");
   const [inventorySort,setInventorySort]=useState("name");
@@ -501,6 +507,8 @@ export default function App() {
     } catch {}
   };
   const [gatePassInput, setGatePassInput] = useState("");
+  const [gatePinConfirm, setGatePinConfirm] = useState("");
+  const [gatePinError, setGatePinError] = useState("");
   // Staff Access Manager (Part 1): staff sign in with an owner-issued Login ID
   // + password instead of walking straight into Staff Area. If cloud sync
   // isn't configured on this device, no staff accounts can exist yet, so we
@@ -636,40 +644,9 @@ export default function App() {
     e.preventDefault();
     if (gateAttempts.lockUntil > Date.now()) return;
 
-    // Phase 2 (2026-09-06): two different things share this same screen —
-    // 1) A real signed-in person (owner/manager) re-entering their own
-    //    PIN after an app relaunch — checked against their personal
-    //    profiles.pin_hash via pinAuth.ts.
-    // 2) The old fully-offline "Owner Confidential Area" device passcode,
-    //    reachable with NO cloud account signed in at all (db.settings.
-    //    ownerPasscode, "1234" default) — kept exactly as before so a
-    //    mostly-offline shop doesn't lose local owner-mode access.
-    //
-    // Bug fix (2026-09-12): this same handler is ALSO used by gateStage
-    // "personalPin" — a signed-in STAFF (or owner/manager) member just
-    // resuming their own already-unlocked session with their own PIN
-    // after a relaunch, which correctly must check verifyPin(their own
-    // id, ...) regardless of role. That is genuinely different from a
-    // signed-in STAFF member specifically asking for OWNER access
-    // (gateStage "ownerAuth", or the "Owner Re-Auth Modal" mid-session —
-    // isOwnerLoginOpen) — those two cases were being lumped together as
-    // "any signed-in profile -> check their own PIN", which for a staff
-    // person asking for OWNER access always checked their own PIN against
-    // whatever they'd typed as "the owner's password" — that can never
-    // match; this device has no cached PIN for the owner's profile at
-    // all, it's only ever synced after a real login as that person. Exact
-    // match for the report: "works when the app first opens [nobody
-    // signed in yet], not when switching from staff mode".
-    //
-    // Fix: only use the signed-in person's own PIN when they're either
-    // just resuming their own session (personalPin) or they themselves
-    // already ARE owner/manager asking for owner access (their own PIN
-    // legitimately IS the owner credential in that case). Every other
-    // case asking specifically for OWNER access (staff on gateStage
-    // "ownerAuth", or the mid-session modal) falls through to the same
-    // device-level ownerPasscode as (2) above — the intentionally-
-    // preserved "escape hatch" this comment already described, just
-    // never actually reachable from a staff session before this fix.
+    setGatePinError("");
+    // Cloud profiles verify their own server PIN; standalone devices must
+    // explicitly configure a local PIN instead of accepting a known default.
     const wantsOwnerAccessSpecifically = gateStage === "ownerAuth" || isOwnerLoginOpen;
     const isOwnerOrManager = cloudProfile?.role === "owner" || cloudProfile?.role === "manager";
     if (wantsOwnerAccessSpecifically && cloudProfile?.role === "staff") {
@@ -681,14 +658,35 @@ export default function App() {
     if (cloudProfile?.id && (!wantsOwnerAccessSpecifically || isOwnerOrManager)) {
       correct = await verifyPin(cloudProfile.id, gatePassInput);
     } else {
+      if (!cloudReady) { setGatePinError("Finishing device setup. Please try again."); return; }
+      if (localStorage.getItem("dsmdh_cloud_identity_seen")) {
+        setGatePinError("Sign in to your cloud owner account to access this device.");
+        return;
+      }
       const configuredPass = db.settings.ownerPasscode || "";
-      // IMPORTANT: this PIN must ALWAYS be checked on its own merits — see
-      // the long-standing comment history on this check. It must never be
-      // silently bypassed just because some other session state looks
-      // authenticated.
-      correct =
-        (!!configuredPass && gatePassInput === configuredPass) ||
-        (!configuredPass && gatePassInput === "1234");
+      if (!configuredPass) {
+        if (!/^\d{4}$/.test(gatePassInput) || /^(1234|0000|1111|2222|3333|4444|5555|6666|7777|8888|9999)$/.test(gatePassInput)) {
+          setGatePinError("Choose a different 4-digit device PIN.");
+          return;
+        }
+        if (gatePassInput !== gatePinConfirm) {
+          setGatePinError("PINs do not match.");
+          return;
+        }
+        const updated = {...db,settings:{...db.settings,ownerPasscode:gatePassInput}};
+        try {
+          persistLocalState(updated);
+          dbRef.current = updated;
+          setDb(updated);
+        } catch {
+          setGatePinError("Could not save PIN on this device. Please free storage and retry.");
+          return;
+        }
+        setGatePinConfirm("");
+        correct = true;
+      } else {
+        correct = gatePassInput === configuredPass;
+      }
     }
 
     if (correct) {
@@ -703,6 +701,8 @@ export default function App() {
       if (wantsOwnerAccessSpecifically || isOwnerOrManager) setOwnerMode(true);
       setGateUnlocked(true);
       setGatePassInput("");
+      setGatePinConfirm("");
+      setGatePinError("");
       setIsOwnerLoginOpen(false);
       if (ownerLoginPurpose === "proMode") {
         // DS Mobile Owner Lite/Pro (§4.3): this modal was opened by
@@ -1068,7 +1068,7 @@ export default function App() {
   const [splitCredit, setSplitCredit] = useState<number | "">("");
 
   // Customer Checkout WhatsApp & VIP Discount
-  const [autoSendWhatsApp, setAutoSendWhatsApp] = useState<boolean>(true);
+  const [autoSendWhatsApp, setAutoSendWhatsApp] = useState<boolean>(false);
 
   // Repair ticket states
   const [isJobModalOpen, setIsJobModalOpen] = useState(false);
@@ -1198,7 +1198,7 @@ export default function App() {
           if(error)throw error;
           if(allowed!==true){
             clearCachedStaffSession();
-            await supabase.auth.signOut().catch(()=>{});
+            await supabase.auth.signOut({scope:"local"}).catch(()=>{});
             setCloudUser(null);setCloudProfile(null);setOwnerMode(false);setGateUnlocked(false);
             setStaffDeniedReason("kicked");setGateStage("staffDenied");setCloudStatus("offline");setCloudReady(true);return;
           }
@@ -1521,13 +1521,13 @@ export default function App() {
     let cancelled=false;
     const forceStaffLogout = async (reason: "disabled" | "expired" | "outsideWindow") => {
       clearCachedStaffSession();
-      await supabase.auth.signOut().catch(() => {});
+      setGateUnlocked(false);
+      setGateStage("staffDenied");
+      setStaffDeniedReason(reason);
       setCloudUser(null);
       setCloudProfile(null);
       setOwnerMode(false);
-      setStaffDeniedReason(reason);
-      setGateStage("staffDenied");
-      setGateUnlocked(false);
+      void supabase.auth.signOut({scope:"local"}).catch(() => {});
       showToast(
         reason === "expired" ? "Aapka access time khatam ho gaya." :
         reason === "outsideWindow" ? "Aapka aaj ka allowed time khatam ho gaya." :
@@ -1557,12 +1557,13 @@ export default function App() {
     const refresh=async()=>{
       if(!navigator.onLine||cancelled)return;
       try{
-        const profile=await getCurrentProfile();
-        if(cancelled)return;
-        if(!profile||profile.id!==cloudProfile.id)return;
         const {data:allowed,error:guardError}=await supabase.rpc("current_account_allowed");
         if(cancelled)return;
         if(!guardError&&allowed!==true){void forceStaffLogout("disabled");return;}
+        const profile=await getCurrentProfile();
+        if(cancelled)return;
+        if(!profile||profile.id!==cloudProfile.id)return;
+        if(!guardError&&allowed===true){const {data:registered,error:registerError}=await supabase.rpc("register_staff_session",{p_installation_id:deviceId});if(cancelled)return;if(!registerError&&registered!==true){void forceStaffLogout("disabled");return;}}
         if(!profile.access_enabled){void forceStaffLogout("disabled");return;}
         if(isAccessWindowExpired(profile)){void forceStaffLogout("expired");return;}
         if(profile.role==="staff"){
@@ -2178,13 +2179,17 @@ export default function App() {
     setCart(newCart);
   };
 
+  const checkoutInFlight=useRef(false);
+  const [checkoutBusy,setCheckoutBusy]=useState(false);
   // Complete Sale
   const handleFinalizeSale = async (customerData: {
     name: string;
     phone: string;
     address?: string;
   }) => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || checkoutInFlight.current) return;
+    checkoutInFlight.current=true;setCheckoutBusy(true);
+    try {
     const subtotal = cart.reduce((a, i) => a + i.price * i.qty, 0);
     const { taxAmount, total } = computeSaleTotals(subtotal, cartDiscount, db.settings.gstEnabled, db.settings.gstPercent);
     const workingDb: Database = structuredClone(db);
@@ -2200,10 +2205,11 @@ export default function App() {
     let splitDetails: Sale["splitPayments"] | undefined = undefined;
 
     if (paymentMode === "Split Payment (Multi-Mode)" || isSplitPayment) {
-      const c = Number(splitCash) || 0;
-      const u = Number(splitUpi) || 0;
-      const cd = Number(splitCard) || 0;
-      const cr = Number(splitCredit) || 0;
+      const c = Number(splitCash);
+      const u = Number(splitUpi);
+      const cd = Number(splitCard);
+      const cr = Number(splitCredit);
+      if(!paymentAllocationValid(total,[c,u,cd,cr])){showToast("Split payments must be non-negative and exactly match the bill total.","red");return;}
       splitDetails = {
         cash: c,
         upi: u,
@@ -2220,6 +2226,8 @@ export default function App() {
       dueAmount = 0; // The loan amount is receivable from Bajaj/TVS
     }
 
+    if(dueAmount>0&&!customerData.phone.trim()){showToast("Customer phone is required for credit sales.","red");return;}
+    if(isFinanceMode&&(!Number.isFinite(amountPaid)||amountPaid<0||amountPaid>total)){showToast("Invalid finance down payment.","red");return;}
     if (customerData.phone) {
       let cust = workingDb.customers.find((c) => c.phone === customerData.phone);
       if (!cust) {
@@ -2232,12 +2240,6 @@ export default function App() {
           createdAt: new Date().toISOString(),
         };
         workingDb.customers.push(cust);
-        // Cloud mirror (find-or-create by phone) — fire-and-forget, never
-        // blocks checkout. See supplier_customer_normalization_v18.sql.
-        queueOfflineOperation("customer", "customers", {
-          kind: "upsert",
-          customer: { id: cust.id, name: cust.name, phone: cust.phone, address: cust.address, openingDue: dueAmount },
-        }).catch(() => {});
       } else {
         if (dueAmount > 0) cust.totalDue = round2((cust.totalDue || 0) + dueAmount);
         if (customerData.name) cust.name = customerData.name;
@@ -2509,9 +2511,15 @@ export default function App() {
       createdAt: new Date().toISOString(),
     };
 
+    // Only enqueue customer metadata after sale commit or safe offline queueing.
+    if(customerId&&!db.customers.some(c=>c.id===customerId)){
+      const cust=workingDb.customers.find(c=>c.id===customerId);
+      if(cust)void queueOfflineOperation("customer","customers",{kind:"upsert",customer:{id:cust.id,name:cust.name,phone:cust.phone,address:cust.address,openingDue:dueAmount}}).catch(()=>{});
+    }
     workingDb.sales.push(saleRecord);
     saveState({ ...workingDb });
     setCart([]);
+    setPaymentMode("Cash");
     setIsFinanceMode(false);
     setIsSplitPayment(false);
     setSplitCash("");
@@ -2545,7 +2553,7 @@ export default function App() {
       })
         .then((res) => {
           if (res.success) {
-            showToast(`⚡ WhatsApp Invoice sent to ${customerData.phone}!`, "green");
+            showToast("WhatsApp invoice text prepared. Confirm Send in WhatsApp.", "green");
           }
         })
         .catch((e) => console.error("WhatsApp delivery error:", e));
@@ -2553,6 +2561,7 @@ export default function App() {
 
     showToast(`Invoice ${invoiceNo} generated!`, "green");
     setViewingSale(saleRecord);
+    setIsCustomerModalOpen(false);
     setIsInvoiceViewerOpen(true);
 
     // NOTE (2026-09-04): invoice delivery to the owner's Telegram bot is
@@ -2573,6 +2582,8 @@ export default function App() {
     // *second, duplicate* invoice message a couple of minutes later once the
     // outbox trigger also delivered it. It has been removed — the reliable
     // trigger+outbox path already covers every case, without duplicates.
+    } catch(error){console.error("Checkout could not finish",error);showToast("Checkout could not finish. Check invoice history and sync status before retrying.","red");}
+    finally{checkoutInFlight.current=false;setCheckoutBusy(false);}
   };
 
   // Quick POS Customer Checkout Modal State
@@ -2590,6 +2601,7 @@ export default function App() {
   // typed, so "9876" alone can find "9876543210". Closed the moment a
   // suggestion is tapped or the field is cleared.
   const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
+  useEffect(()=>setAutoSendWhatsApp(false),[checkoutCustomer.phone]);
 
   const handleStartCheckout = () => {
     if (cart.length === 0) {
@@ -2610,6 +2622,7 @@ export default function App() {
       }));
     }
 
+    setAutoSendWhatsApp(false);
     setIsCustomerModalOpen(true);
   };
 
@@ -2975,38 +2988,22 @@ export default function App() {
         const totalPayables = db.suppliers.reduce((a, s) => a + (s.totalPayable || 0), 0);
 
         // Daily Galla Cash
-        const todayCashSales = todaySales.filter((s) => !s.isFinance && s.payment === "Cash").reduce((a, s) => a + s.amountPaid, 0);
+        const todayCashSales = round2(todaySales.reduce((a,s)=>a+saleReceipts(s).cash,0));
         const todayCashXerox = visibleXeroxEntries.filter((x) => x.date === todayStr() && x.paymentMethod === "Cash").reduce((a, x) => a + x.totalAmount, 0);
         const currentGallaEst = (db.settings.openingCashDefault ?? 0) + todayCashSales + todayCashXerox;
 
         return (
           <div>
             <RetailHero kind="dashboard" title="Your shop, at a glance" subtitle="Billing, inventory and everyday counter operations in one workspace." detail={`${todaySales.length} bills today · ${lowStock.length} low-stock items`} onPrimary={()=>setCurrentPage("sell")} primaryLabel="Start a bill" onSecondary={()=>setCurrentPage("products")} secondaryLabel="Browse stock"/>
-            {/* 4 Core Essential Metrics */}
-            <div className="grid cols-4 retail-metrics" style={{ marginBottom: "16px" }}>
-              <div className="card accent fx-tilt">
-                <h3>Today's Total Sales</h3>
-                <div className="big blue">{inr(todayNetSales)}</div>
-                <div className="foot">{todaySales.length} Bill(s) Generated Today</div>
-              </div>
-              <div className="card fx-tilt">
-                <h3>Estimated Cash in Galla</h3>
-                <div className="big green">{inr(currentGallaEst)}</div>
-                <div className="foot">Opening + Cash Sales + Xerox</div>
-              </div>
-              <div className="card fx-tilt">
-                <h3>Customer Udhaar</h3>
-                <div className="big red">{inr(totalDue)}</div>
-                <div className="foot">{db.customers.filter((c) => (c.totalDue || 0) > 0).length} Customers Pending</div>
-              </div>
-              <div className="card fx-tilt">
-                <h3>Active Repairs</h3>
-                <div className="big purple">{openJobs}</div>
-                <div className="foot">Pending Delivery</div>
-              </div>
-            </div>
+            <PersonalizedMetrics key={(cloudProfile?.id||"local")+":"+String(ownerMode)} scope={(cloudProfile?.id||"local")+":"+String(ownerMode)} metrics={[
+              {id:"sales",label:"Today's Total Sales",value:inr(todayNetSales),caption:todaySales.length+" bills today",className:"blue"},
+              {id:"cash",label:"Estimated Cash in Galla",value:inr(currentGallaEst),caption:"Opening + Cash Sales + Xerox",className:"green"},
+              {id:"due",label:"Customer Udhaar",value:inr(totalDue),caption:db.customers.filter(c=>(c.totalDue||0)>0).length+" customers pending",className:"red"},
+              {id:"repairs",label:"Active Repairs",value:String(openJobs),caption:"Pending delivery",className:"purple"}
+            ]}/>
 
             <AiAdviceCard db={catalogDb} ownerMode={ownerMode} />
+            {ownerMode&&!isStaffIdentity&&<RetailBusinessCopilot db={catalogDb}/>}
 
             {/* Simple 1-Touch Fast Counter Hub */}
             <div className="section" style={{ marginBottom: "16px" }}>
@@ -3366,6 +3363,7 @@ export default function App() {
           (i) => i.isMobilePhone || i.category === "New Mobile" || i.category === "Second-Hand Mobile"
         );
 
+        const bundleSuggestions=cartHasPhone?suggestCompatibleAccessories(catalogProducts,cart,stockOf):[];
         const CATEGORY_TABS = [
           { id: "ALL", label: "All Items ()" },
           { id: "Smartphones", label: "📱 Mobiles" },
@@ -3593,6 +3591,8 @@ export default function App() {
                 </div>
               </div>
 
+              <CounterExperience cart={cart} products={catalogProducts} discount={cartDiscount} tax={taxAmount} total={total} owner={ownerMode&&!isStaffIdentity} onApply={lines=>{if(!ownerMode||isStaffIdentity)return;setCart(prev=>prev.map(item=>{const line=lines.find(l=>l.productId===item.productId&&l.oldPrice===item.price);return line&&!item.isGift&&!item.isService?{...item,price:line.newPrice}:item;}));}}/>
+              {bundleSuggestions.length>0&&<div className="retail-bundle"><strong>Compatible accessories</strong><small>Based on saved model compatibility — verify physical fit.</small>{bundleSuggestions.map(p=><button type="button" className="btn sm" key={p.id} onClick={()=>addToCart(p)}>{p.name} · {inr(p.sellingPrice)} +</button>)}</div>}
               {cart.length === 0 ? (
                 <div className="empty">Cart is empty. Click "+ Add" on items to create an invoice.</div>
               ) : (
@@ -3906,7 +3906,7 @@ export default function App() {
       }
 
       case "imeiTracker":
-        return <ImeiAuditView db={db} onUpdate={() => saveState({ ...db })} toast={showToast} ownerMode={ownerMode} onViewInvoiceByNo={(invNo) => {
+        return <ImeiAuditView focusImei={focusImei} db={db} onUpdate={() => saveState({ ...db })} toast={showToast} ownerMode={ownerMode} onViewInvoiceByNo={(invNo) => {
           const s = db.sales.find((x) => x.invoiceNo === invNo);
           if (s) {
             setViewingSale(s);
@@ -4392,7 +4392,7 @@ export default function App() {
         );
 
       case "customerDirectory":
-        return <CustomerDirectoryView db={db} toast={showToast} />;
+        return <><CustomerShareStudio settings={db.settings} products={catalogProducts}/><CustomerDirectoryView key={customerFocusRevision} db={db} toast={showToast} focusCustomerId={focusCustomerId} /></>;
 
       case "jobs":
         return (
@@ -4453,6 +4453,7 @@ export default function App() {
                         </button>
                       </div>
                     )}
+                    {ownerMode&&!isStaffIdentity&&<CustomerPrivateLink kind="repair" resourceId={j.id}/>}
                     <div style={{ display: "flex", gap: "6px", marginTop: "10px" }}>
                       <select
                         className="job-status-select"
@@ -4642,7 +4643,7 @@ export default function App() {
 
 
       case "staffAccess":
-        return <StaffAccessView storeId={cloudProfile?.store_id} storeLoading={!cloudReady} toast={showToast} />;
+        return <>{ownerMode&&!isStaffIdentity&&(!cloudProfile||cloudProfile.role==="owner")&&<DeviceActivityPanel storeId={cloudProfile?.store_id} profileId={cloudProfile?.id}/>}<StaffAccessView storeId={cloudProfile?.store_id} storeLoading={!cloudReady} toast={showToast} /></>;
 
       case "loanTracker":
         return (
@@ -5255,7 +5256,7 @@ export default function App() {
               </div>
             </div>
 
-            <OfflineCatalogDownload storeId={cloudProfile?.store_id || null} />
+            <OfflineCatalogDownload key={`${cloudProfile?.store_id || ""}:${cloudProfile?.id || ""}`} storeId={cloudProfile?.store_id || null} profileId={cloudProfile?.id || null} />
 
             <AiKeyPoolPanel />
 
@@ -5357,6 +5358,7 @@ export default function App() {
   if (!gateUnlocked) {
     const shopInitials = (db.settings.shopName || "DS").trim().slice(0, 2).toUpperCase();
     const locked = gateAttempts.lockUntil > Date.now();
+    const settingLocalPin = !cloudProfile && !db.settings.ownerPasscode && !localStorage.getItem("dsmdh_cloud_identity_seen");
     return (
       <div className="gate-screen">
         <div className="gate-orb" style={{ width: 340, height: 340, top: "-8%", left: "-6%", background: "#2563eb" }} />
@@ -5369,20 +5371,20 @@ export default function App() {
               <p>Select how you're signing in</p>
             </div>
             <div className="gate-options">
-              <div className="gate-option staff" onClick={handleGateStaffAreaTap}>
+              <button type="button" className="gate-option staff" onClick={handleGateStaffAreaTap}>
                 <div className="icon-wrap"><Users size={24} /></div>
                 <h3>Login (ID / Password)</h3>
                 <p>Android Access Area se mila Login ID + Password daalo — Staff ya Owner-level, dono is se sign in hote hain.</p>
                 <ArrowRightIcon size={18} className="go-arrow" color="#60a5fa" />
-              </div>
-              <div className="gate-option owner" onClick={() => setGateStage("ownerAuth")}>
+              </button>
+              <button type="button" className="gate-option owner" onClick={() => { setGatePinError(""); setGatePinConfirm(""); setGatePassInput(""); setGateStage("ownerAuth"); }}>
                 <div className="icon-wrap"><ShieldAlert size={24} /></div>
                 <h3>Owner Confidential Area</h3>
                 <p>Full access — purchase cost, reports, settings &amp; backups. Passcode protected.</p>
                 <p className="hint" style={{ marginTop: 4 }}>Yeh ek chhota device PIN hai (Settings mein set hota hai) — aapke Cloud account password se alag.</p>
                 <div className="gate-warning-strip"><Lock size={12} /> Restricted &amp; Monitored</div>
                 <ArrowRightIcon size={18} className="go-arrow" color="#f87171" />
-              </div>
+              </button>
             </div>
           </div>
         )}
@@ -5393,7 +5395,7 @@ export default function App() {
               <div className="warn-badge"><ShieldAlert size={22} /></div>
               <div>
                 <h3>{cloudProfile ? `Welcome back${cloudProfile.staff_name ? `, ${cloudProfile.staff_name}` : ""}` : "Owner Confidential Area"}</h3>
-                <p>{cloudProfile ? "Enter your PIN to continue" : "Authorized personnel only"}</p>
+                <p>{cloudProfile ? "Enter your PIN to continue" : settingLocalPin ? "Create a private device PIN" : "Authorized personnel only"}</p>
               </div>
             </div>
 
@@ -5411,10 +5413,13 @@ export default function App() {
                   inputMode="numeric"
                   maxLength={4}
                   autoFocus
-                  placeholder={cloudProfile ? "Enter your 4-digit PIN" : "Enter Owner Device PIN"}
+                  aria-label={settingLocalPin ? "Create Owner Device PIN" : "Enter Owner Device PIN"}
+                  placeholder={cloudProfile ? "Enter your 4-digit PIN" : settingLocalPin ? "Create Owner Device PIN" : "Enter Owner Device PIN"}
                   value={gatePassInput}
                   onChange={(e) => setGatePassInput(e.target.value)}
                 />
+                {settingLocalPin && <input className="gate-pass-input gate-pin-confirm" type="password" inputMode="numeric" maxLength={4} aria-label="Confirm Owner Device PIN" placeholder="Confirm Owner Device PIN" value={gatePinConfirm} onChange={e=>setGatePinConfirm(e.target.value)} />}
+                {gatePinError && <div className="gate-pin-error" role="alert">{gatePinError}</div>}
                 <div className="hint" style={{ marginTop: 6 }}>
                   {cloudProfile
                     ? "Ye aapka apna personal PIN hai (Settings mein badal sakte ho) — aapke Cloud login password se alag."
@@ -5427,7 +5432,7 @@ export default function App() {
                 </div>
                 <div className="modal-actions" style={{ marginTop: 18 }}>
                   <button type="submit" className="btn primary" style={{ width: "100%", justifyContent: "center", background: "#dc2626" }} disabled={gateBusy}>
-                    {gateBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {gateBusy ? "Sending alert…" : "Unlock"}
+                    {gateBusy ? <Loader2 size={15} className="spin" /> : <Lock size={15} />} {gateBusy ? "Sending alert…" : settingLocalPin ? "Create PIN & Unlock" : "Unlock"}
                   </button>
                 </div>
                 {gateStage === "personalPin" && biometricAvailable && (
@@ -5443,6 +5448,7 @@ export default function App() {
               </form>
             )}
 
+            {!cloudProfile && isCloudConfigured && <button type="button" className="gate-back-link" onClick={()=>setShowCloudAuth(true)}>Sign in with cloud owner email</button>}
             {cloudProfile ? (
               <button
                 className="gate-back-link"
@@ -5463,6 +5469,8 @@ export default function App() {
                 onClick={() => {
                   setGateStage(gateBackStage);
                   setGatePassInput("");
+                  setGatePinConfirm("");
+                  setGatePinError("");
                 }}
               >
                 ← Back to selection
@@ -5570,6 +5578,7 @@ export default function App() {
             </button>
           </div>
         )}
+        {showCloudAuth && <CloudAuthPanel userEmail={cloudUser?.email} onClose={()=>setShowCloudAuth(false)} onChanged={async()=>window.location.reload()} />}
       </div>
     );
   }
@@ -5663,6 +5672,16 @@ export default function App() {
     if(!ownerMode)return ["sell","photoFinder"].includes(item.key);
     return true;
   });
+  const workspaceScope=(cloudProfile?.id||"local")+":"+(ownerMode&&!isStaffIdentity?"owner":"staff");
+  const allowedRecordRoutes=new Set(allowedRetailTools.map(t=>t.key));
+  const privateSearch=ownerMode&&!isStaffIdentity;
+  const searchRecords=(query:string)=>findWorkspaceRecords(query,{products:catalogProducts,customers:privateSearch?db.customers:[],sales:privateSearch?visibleSales:[],imei:privateSearch?[...(db.imeiRegistry||[]),...db.products.flatMap(p=>p.units||[])]:[]},allowedRecordRoutes,privateSearch);
+  const openRecord=(hit:RecordHit)=>{
+    if(!allowedRecordRoutes.has(hit.route))return;
+    if(hit.kind==="product"){const p=catalogProducts.find(x=>x.id===hit.id);if(!p)return;if(hit.route==="products"){setCurrentPage("products");setViewingProductId(p.id);}else{setSellSearchQuery(p.sku||p.name);setSellCategoryFilter("ALL");setCurrentPage("sell");}}
+    else if(privateSearch){if(hit.kind==="customer"){setFocusCustomerId(hit.id);setCustomerFocusRevision(v=>v+1);setCurrentPage("customerDirectory");}else if(hit.kind==="invoice"){const sale=visibleSales.find(s=>s.id===hit.id);if(sale){setViewingSale(sale);setIsInvoiceViewerOpen(true);}}else if(hit.kind==="imei"){setFocusImei({query:hit.label,revision:Date.now()});setCurrentPage("imeiTracker");}}
+    setIsMobileNavOpen(false);
+  };
   const navigateRetail=(key:string)=>{
     if(!allowedRetailTools.some(item=>item.key===key))return;
     setCurrentPage(key);setIsMobileNavOpen(false);
@@ -5981,20 +6000,11 @@ export default function App() {
           </div>
         </div>
 
-        <RetailCommandBar tools={allowedRetailTools} currentPage={currentPage} onNavigate={navigateRetail}/>
+        <RetailCommandBar key={workspaceScope} scope={workspaceScope} tools={allowedRetailTools} currentPage={currentPage} onNavigate={navigateRetail} findRecords={searchRecords} onRecord={openRecord}/>
         <RetailQuickRail tools={allowedRetailTools} currentPage={currentPage} onNavigate={navigateRetail}/>
 
         <div id="page" data-current-page={currentPage}>
-          <React.Suspense
-            fallback={
-              <div className="section" style={{ padding: "48px 24px", textAlign: "center", color: "var(--ink-soft)" }}>
-                <div style={{ display: "inline-block", width: "24px", height: "24px", border: "2px solid var(--line)", borderTopColor: "var(--brand)", borderRadius: "50%", animation: "spin 0.6s linear infinite", marginBottom: "12px" }}></div>
-                <div style={{ fontSize: "13px", fontWeight: 600 }}>Loading view...</div>
-              </div>
-            }
-          >
-            {renderCurrentPage()}
-          </React.Suspense>
+          {renderCurrentPage()}
         </div>
       </div>
 
@@ -6009,13 +6019,11 @@ export default function App() {
 
       {/* Modals */}
       {isCameraScannerOpen && (
-        <React.Suspense fallback={null}>
           <CameraScannerModal
             isOpen={isCameraScannerOpen}
             onClose={() => setIsCameraScannerOpen(false)}
             onScan={handleCameraScan}
           />
-        </React.Suspense>
       )}
 
       {confidentialPriceProduct && (
@@ -6178,13 +6186,12 @@ export default function App() {
           <div className="modal">
             <div className="modal-head">
               <h3>Customer Details for Invoice</h3>
-              <button onClick={() => setIsCustomerModalOpen(false)}>&times;</button>
+              <button disabled={checkoutBusy} onClick={() => setIsCustomerModalOpen(false)}>&times;</button>
             </div>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                handleFinalizeSale(checkoutCustomer);
-                setIsCustomerModalOpen(false);
+                void handleFinalizeSale(checkoutCustomer);
               }}
             >
               <div className="formgrid">
@@ -6430,21 +6437,22 @@ export default function App() {
                       <input
                         type="checkbox"
                         checked={autoSendWhatsApp}
+                        disabled={!checkoutCustomer.phone.trim()}
                         onChange={(e) => setAutoSendWhatsApp(e.target.checked)}
                       />
                       <span style={{ fontWeight: 700, color: "var(--ink)" }}>
-                        ⚡ Instant WhatsApp Invoice Bot (Sends PDF invoice in 1 second without saving contact)
+                        Customer agrees to WhatsApp invoice text — open WhatsApp after billing (manual Send)
                       </span>
                     </label>
                   </div>
                 );
               })()}
               <div className="modal-actions" style={{ marginTop: "16px" }}>
-                <button type="button" className="btn" onClick={() => setIsCustomerModalOpen(false)}>
+                <button type="button" className="btn" disabled={checkoutBusy} onClick={() => setIsCustomerModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn primary">
-                  <CheckCircle2 size={14} /> Generate &amp; Print Invoice
+                <button type="submit" className="btn primary" disabled={checkoutBusy}>
+                  <CheckCircle2 size={14} /> {checkoutBusy?"Recording invoice…":"Generate & Print Invoice"}
                 </button>
               </div>
             </form>
@@ -6864,9 +6872,8 @@ export default function App() {
                 address: "",
               });
             }
-            if (parkedCart.discount) {
-              setCustomBillDiscount(parkedCart.discount);
-            }
+            // Legacy flat discounts cannot bypass line price protection.
+            setCustomBillDiscount(0);
             showToast(`Cart resumed (${parkedCart.items.length} items restored)!`, "green");
             playPaymentChime(parkedCart.items.reduce((s, i) => s + i.price * i.qty, 0));
             refreshParkedCount();

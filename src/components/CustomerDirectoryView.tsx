@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Search,
   Download,
@@ -39,6 +39,7 @@ interface CustomerDirectoryViewProps {
   db: Database;
   toast: (msg: string, type?: "green" | "red" | "amber") => void;
   onViewInvoiceByNo?: (invoiceNo: string) => void;
+  focusCustomerId?: string | null;
 }
 
 type RangeMode = "all" | "today" | "month" | "due" | "custom";
@@ -51,6 +52,7 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({
   db,
   toast,
   onViewInvoiceByNo,
+  focusCustomerId,
 }) => {
   const [search, setSearch] = useState("");
   const [rangeMode, setRangeMode] = useState<RangeMode>("all");
@@ -61,6 +63,7 @@ export const CustomerDirectoryView: React.FC<CustomerDirectoryViewProps> = ({
   const [selectedUpiCustomer, setSelectedUpiCustomer] = useState<Customer | null>(null);
   const [repayCustomer, setRepayCustomer] = useState<Customer | null>(null);
   const [profileCustomerId, setProfileCustomerId] = useState<string | null>(null);
+  useEffect(()=>{if(focusCustomerId)setProfileCustomerId(focusCustomerId);},[focusCustomerId]);
   const [profileTab, setProfileTab] = useState<"purchases" | "devices" | "repairs">("purchases");
 
   // AI-drafted WhatsApp due-payment reminder

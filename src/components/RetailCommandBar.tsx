@@ -3,7 +3,7 @@ import {Search,Command,Star,History,Sun,Moon,X,ArrowRight} from "lucide-react";
 import {useAppearance} from "../../theme/useAppearance";
 import type {RecordHit} from "../utils/workspaceSearch";
 type Tool={key:string;label:string;icon:React.ComponentType<{size?:number|string}>};
-type Props={tools:Tool[];currentPage:string;onNavigate:(key:string)=>void;scope?:string;findRecords?:(query:string)=>RecordHit[];onRecord?:(hit:RecordHit)=>void};
+type Props={key?:string;tools:Tool[];currentPage:string;onNavigate:(key:string)=>void;scope?:string;findRecords?:(query:string)=>RecordHit[];onRecord?:(hit:RecordHit)=>void};
 const PIN_KEY="dsmdh_retail_favorites_v1";
 function readPins(scope:string):string[]{try{const v=JSON.parse(localStorage.getItem(PIN_KEY+":"+scope)||"[]");return Array.isArray(v)?v.filter((k:unknown)=>typeof k==="string").slice(0,20):[];}catch{return [];}}
 export function RetailCommandBar({tools,currentPage,onNavigate,scope="local",findRecords,onRecord}:Props){

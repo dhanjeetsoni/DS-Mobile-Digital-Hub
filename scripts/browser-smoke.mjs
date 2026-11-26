@@ -116,6 +116,15 @@ try{
  assert.equal(await directory.locator("html").getAttribute("data-retail-motion"),"quiet");
  await search.fill("dashboard");await directory.locator('[data-tool-key="dashboard"]').click();
  await directory.locator(".retail-hero-dashboard .retail-phone").waitFor();
+ await directory.getByRole("button",{name:"Customize dashboard",exact:true}).click();
+ await directory.getByRole("button",{name:"Hide Active Repairs",exact:true}).click();
+ await directory.getByRole("button",{name:"Done",exact:true}).click();
+ assert.equal(await directory.locator("[data-metric-id=repairs]").count(),0);
+ await directory.getByRole("button",{name:"Customize dashboard",exact:true}).click();
+ await directory.getByRole("button",{name:"Reset layout",exact:true}).click();
+ await directory.getByRole("button",{name:"Done",exact:true}).click();
+ assert.equal(await directory.locator("[data-metric-id=repairs]").count(),1);
+ console.log("PASS dashboard metric customization and reset");
  console.log("PASS motion preference and 3D dashboard artwork");
  await directory.getByRole("button",{name:"Open global tool search"}).click();
  await directory.getByRole("textbox",{name:"Find a tool"}).fill("appearanceStudio");

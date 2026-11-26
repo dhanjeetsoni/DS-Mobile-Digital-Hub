@@ -21,6 +21,7 @@ import { RetailCommandBar, RetailQuickRail } from "./components/RetailCommandBar
 import {findWorkspaceRecords,type RecordHit} from "./utils/workspaceSearch";
 import BottomTabBar from "./components/BottomTabBar";
 import { RetailHero } from "./components/RetailHero";
+import { PersonalizedMetrics } from "./components/PersonalizedMetrics";
 // Keep scanner code available before the first tap; camera permission is still requested only when opened.
 import { CameraScannerModal } from "./components/CameraScannerModal";
 import { AddProductModal } from "./components/AddProductModal";
@@ -2975,29 +2976,12 @@ export default function App() {
         return (
           <div>
             <RetailHero kind="dashboard" title="Your shop, at a glance" subtitle="Billing, inventory and everyday counter operations in one workspace." detail={`${todaySales.length} bills today · ${lowStock.length} low-stock items`} onPrimary={()=>setCurrentPage("sell")} primaryLabel="Start a bill" onSecondary={()=>setCurrentPage("products")} secondaryLabel="Browse stock"/>
-            {/* 4 Core Essential Metrics */}
-            <div className="grid cols-4 retail-metrics" style={{ marginBottom: "16px" }}>
-              <div className="card accent fx-tilt">
-                <h3>Today's Total Sales</h3>
-                <div className="big blue">{inr(todayNetSales)}</div>
-                <div className="foot">{todaySales.length} Bill(s) Generated Today</div>
-              </div>
-              <div className="card fx-tilt">
-                <h3>Estimated Cash in Galla</h3>
-                <div className="big green">{inr(currentGallaEst)}</div>
-                <div className="foot">Opening + Cash Sales + Xerox</div>
-              </div>
-              <div className="card fx-tilt">
-                <h3>Customer Udhaar</h3>
-                <div className="big red">{inr(totalDue)}</div>
-                <div className="foot">{db.customers.filter((c) => (c.totalDue || 0) > 0).length} Customers Pending</div>
-              </div>
-              <div className="card fx-tilt">
-                <h3>Active Repairs</h3>
-                <div className="big purple">{openJobs}</div>
-                <div className="foot">Pending Delivery</div>
-              </div>
-            </div>
+            <PersonalizedMetrics key={(cloudProfile?.id||"local")+":"+String(ownerMode)} scope={(cloudProfile?.id||"local")+":"+String(ownerMode)} metrics={[
+              {id:"sales",label:"Today's Total Sales",value:inr(todayNetSales),caption:todaySales.length+" bills today",className:"blue"},
+              {id:"cash",label:"Estimated Cash in Galla",value:inr(currentGallaEst),caption:"Opening + Cash Sales + Xerox",className:"green"},
+              {id:"due",label:"Customer Udhaar",value:inr(totalDue),caption:db.customers.filter(c=>(c.totalDue||0)>0).length+" customers pending",className:"red"},
+              {id:"repairs",label:"Active Repairs",value:String(openJobs),caption:"Pending delivery",className:"purple"}
+            ]}/>
 
             <AiAdviceCard db={catalogDb} ownerMode={ownerMode} />
 

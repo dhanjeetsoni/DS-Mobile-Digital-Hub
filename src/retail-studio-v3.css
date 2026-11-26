@@ -165,3 +165,17 @@
 .retail-record-description{display:block;font-size:11px;font-weight:400;color:var(--ink-muted);margin-top:3px}
 @media(max-width:900px){#app .workspace-group-toggle,#app .workspace-group-items .navitem{min-height:44px}}
 }
+
+@media screen {
+#app .personalized-metrics {margin-bottom:16px}
+#app .metric-toolbar {display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:8px 0 10px}
+#app .metric-toolbar strong {font-size:13px;font-weight:750;flex:1;color:var(--ink)}
+#app .metric-custom-grid {grid-template-columns:repeat(4,minmax(0,1fr))}
+#app .metric-custom-grid .metric-wide{grid-column:span 2}
+#app .metric-custom-grid .metric-muted{opacity:.65;border-style:dashed}
+#app .metric-edit-controls{display:flex;flex-wrap:wrap;align-items:center;gap:4px;border-top:1px solid var(--line);padding-top:8px;margin-top:10px;color:var(--ink-muted)}
+#app .metric-edit-controls button{display:grid;place-items:center;border:1px solid var(--line);border-radius:8px;min-width:32px;min-height:32px;background:var(--surface-2);color:var(--ink);cursor:pointer}
+#app .metric-edit-controls button[aria-pressed=true]{color:var(--brand);border-color:var(--brand)}
+#app .metric-edit-controls button:disabled{opacity:.4;cursor:default}
+@media(max-width:900px){#app .metric-custom-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#app .metric-edit-controls button{min-height:44px;min-width:44px}}
+}

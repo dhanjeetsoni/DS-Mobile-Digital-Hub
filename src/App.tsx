@@ -1521,13 +1521,13 @@ export default function App() {
     let cancelled=false;
     const forceStaffLogout = async (reason: "disabled" | "expired" | "outsideWindow") => {
       clearCachedStaffSession();
-      await supabase.auth.signOut({scope:"local"}).catch(() => {});
+      setGateUnlocked(false);
+      setGateStage("staffDenied");
+      setStaffDeniedReason(reason);
       setCloudUser(null);
       setCloudProfile(null);
       setOwnerMode(false);
-      setStaffDeniedReason(reason);
-      setGateStage("staffDenied");
-      setGateUnlocked(false);
+      void supabase.auth.signOut({scope:"local"}).catch(() => {});
       showToast(
         reason === "expired" ? "Aapka access time khatam ho gaya." :
         reason === "outsideWindow" ? "Aapka aaj ka allowed time khatam ho gaya." :
@@ -1557,12 +1557,12 @@ export default function App() {
     const refresh=async()=>{
       if(!navigator.onLine||cancelled)return;
       try{
-        const profile=await getCurrentProfile();
-        if(cancelled)return;
-        if(!profile||profile.id!==cloudProfile.id)return;
         const {data:allowed,error:guardError}=await supabase.rpc("current_account_allowed");
         if(cancelled)return;
         if(!guardError&&allowed!==true){void forceStaffLogout("disabled");return;}
+        const profile=await getCurrentProfile();
+        if(cancelled)return;
+        if(!profile||profile.id!==cloudProfile.id)return;
         if(!guardError&&allowed===true){const {data:registered,error:registerError}=await supabase.rpc("register_staff_session",{p_installation_id:deviceId});if(cancelled)return;if(!registerError&&registered!==true){void forceStaffLogout("disabled");return;}}
         if(!profile.access_enabled){void forceStaffLogout("disabled");return;}
         if(isAccessWindowExpired(profile)){void forceStaffLogout("expired");return;}

@@ -91,9 +91,20 @@ try{
  assert(modules.length>=52,"Feature registry unexpectedly shrank");
  assert.equal(new Set(modules.map(m=>m.key)).size,modules.length);
  assert.equal(await directory.locator("[data-workspace-group]").count(),12,"Owner workspace must have 12 groups");
- await directory.locator("[data-workspace-group=inventory]").click();
- assert.equal(await directory.locator("[data-workspace-group=inventory]").getAttribute("aria-expanded"),"true");
- console.log("PASS 12-category owner navigation and group expansion");
+ // Startup route can already belong to Inventory. Navigate explicitly to a
+ // known route, then exercise the toggle in both directions.
+ await directory.getByRole("textbox",{name:"Search tools"}).fill("dashboard");
+ await directory.locator('[data-tool-key="dashboard"]').click();
+ await directory.locator('#page[data-current-page="dashboard"]').waitFor();
+ const inventoryGroup=directory.locator("[data-workspace-group=inventory]");
+ await directory.waitForFunction(()=>document.querySelector("[data-workspace-group=inventory]")?.getAttribute("aria-expanded")==="false");
+ await inventoryGroup.click();
+ await directory.waitForFunction(()=>document.querySelector("[data-workspace-group=inventory]")?.getAttribute("aria-expanded")==="true");
+ await directory.getByRole("button",{name:"Stock Adjustment",exact:true}).waitFor({state:"visible"});
+ await inventoryGroup.click();
+ await directory.waitForFunction(()=>document.querySelector("[data-workspace-group=inventory]")?.getAttribute("aria-expanded")==="false");
+ assert.equal(await directory.getByRole("button",{name:"Stock Adjustment",exact:true}).count(),0);
+ console.log("PASS 12-category owner navigation, group expansion and collapse");
  const search=directory.getByRole("textbox",{name:"Search tools"});
  // Observe the actual DOM during navigation, including transient loader flashes.
  await directory.evaluate(()=>{const w=window; w.__dsRouteLoaderFlashes=0; new MutationObserver(()=>{if(document.querySelector("#page")?.textContent?.includes("Loading view..."))w.__dsRouteLoaderFlashes++;}).observe(document.body,{subtree:true,childList:true,characterData:true});});

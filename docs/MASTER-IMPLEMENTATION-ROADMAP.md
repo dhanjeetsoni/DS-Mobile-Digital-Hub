@@ -38,3 +38,7 @@ Excluded from user selection: 15 shelf location, 48 multi-branch. No destructive
 
 ## Owner device activity review
 - Added read-only, owner-session-verified device history panel to Staff Access. Selects metadata only (never sync payloads), groups by installation identifier, tracks sampled failed/pending operations and clears results when account scope changes. No new anonymous endpoint, RLS changes or business data mutations. Device IDs represent observed sync history, not active authenticated sessions. Individual device authorization/revocation remains outstanding; existing account-level force logout is retained.
+
+## Purchase invoice scanner and transaction consistency
+- Purchase quantity/price validation, re-entry guard and delayed supplier-payable mutation until successful cloud commit or durable offline enqueue. Rejected purchases must not increase local supplier liability. New customer metadata enqueue also deferred until accepted checkout. Split inputs preserve invalid numeric values for rejection rather than silently coercing them to zero.
+- Added owner-authenticated purchase invoice OCR route to repository AI gateway plus review-only scanner, explicit image consent, file size/type checks, sanitized draft lines and manual mapping to stock. OCR is never posted automatically; GST is informational and needs manual verification. Gateway deployment and actual image/provider testing remain pending. Existing live database unchanged.

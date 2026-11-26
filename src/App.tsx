@@ -2203,10 +2203,10 @@ export default function App() {
     let splitDetails: Sale["splitPayments"] | undefined = undefined;
 
     if (paymentMode === "Split Payment (Multi-Mode)" || isSplitPayment) {
-      const c = Number(splitCash) || 0;
-      const u = Number(splitUpi) || 0;
-      const cd = Number(splitCard) || 0;
-      const cr = Number(splitCredit) || 0;
+      const c = Number(splitCash);
+      const u = Number(splitUpi);
+      const cd = Number(splitCard);
+      const cr = Number(splitCredit);
       if(!paymentAllocationValid(total,[c,u,cd,cr])){showToast("Split payments must be non-negative and exactly match the bill total.","red");return;}
       splitDetails = {
         cash: c,
@@ -2238,12 +2238,6 @@ export default function App() {
           createdAt: new Date().toISOString(),
         };
         workingDb.customers.push(cust);
-        // Cloud mirror (find-or-create by phone) — fire-and-forget, never
-        // blocks checkout. See supplier_customer_normalization_v18.sql.
-        queueOfflineOperation("customer", "customers", {
-          kind: "upsert",
-          customer: { id: cust.id, name: cust.name, phone: cust.phone, address: cust.address, openingDue: dueAmount },
-        }).catch(() => {});
       } else {
         if (dueAmount > 0) cust.totalDue = round2((cust.totalDue || 0) + dueAmount);
         if (customerData.name) cust.name = customerData.name;
@@ -2515,6 +2509,11 @@ export default function App() {
       createdAt: new Date().toISOString(),
     };
 
+    // Only enqueue customer metadata after sale commit or safe offline queueing.
+    if(customerId&&!db.customers.some(c=>c.id===customerId)){
+      const cust=workingDb.customers.find(c=>c.id===customerId);
+      if(cust)void queueOfflineOperation("customer","customers",{kind:"upsert",customer:{id:cust.id,name:cust.name,phone:cust.phone,address:cust.address,openingDue:dueAmount}}).catch(()=>{});
+    }
     workingDb.sales.push(saleRecord);
     saveState({ ...workingDb });
     setCart([]);

@@ -107,7 +107,7 @@ import { syncPinFromServer, verifyPin, setMyPin, hasPinConfigured, isBiometricEn
 import { biometricCheck, authenticateBiometric, getMyStaffAccessPolicy } from "./services/phase6";
 import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
-import { loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
+import { deviceId, loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { sqliteList } from "./services/localSqlite";
@@ -1198,7 +1198,7 @@ export default function App() {
           if(error)throw error;
           if(allowed!==true){
             clearCachedStaffSession();
-            await supabase.auth.signOut().catch(()=>{});
+            await supabase.auth.signOut({scope:"local"}).catch(()=>{});
             setCloudUser(null);setCloudProfile(null);setOwnerMode(false);setGateUnlocked(false);
             setStaffDeniedReason("kicked");setGateStage("staffDenied");setCloudStatus("offline");setCloudReady(true);return;
           }
@@ -1521,7 +1521,7 @@ export default function App() {
     let cancelled=false;
     const forceStaffLogout = async (reason: "disabled" | "expired" | "outsideWindow") => {
       clearCachedStaffSession();
-      await supabase.auth.signOut().catch(() => {});
+      await supabase.auth.signOut({scope:"local"}).catch(() => {});
       setCloudUser(null);
       setCloudProfile(null);
       setOwnerMode(false);
@@ -1563,6 +1563,7 @@ export default function App() {
         const {data:allowed,error:guardError}=await supabase.rpc("current_account_allowed");
         if(cancelled)return;
         if(!guardError&&allowed!==true){void forceStaffLogout("disabled");return;}
+        if(!guardError&&allowed===true){const {data:registered,error:registerError}=await supabase.rpc("register_staff_session",{p_installation_id:deviceId});if(cancelled)return;if(!registerError&&registered!==true){void forceStaffLogout("disabled");return;}}
         if(!profile.access_enabled){void forceStaffLogout("disabled");return;}
         if(isAccessWindowExpired(profile)){void forceStaffLogout("expired");return;}
         if(profile.role==="staff"){

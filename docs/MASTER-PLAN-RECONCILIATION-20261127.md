@@ -107,3 +107,6 @@ Explicitly defer GST, additional finance and serialized exchange development (1,
 
 ## Selected point 10 — online catalog
 Owner-created revocable 6-day bearer link to synchronized in-stock catalog, explicit opt-in prices, allowlisted product name/category/brand only, max 500, no quantities, cost, notes, device IDs or customer data. Existing receipt and repair links unchanged. Public response plain text. DB kind constraint deployed; edge implementation and UI source committed, live provider acceptance pending.
+
+## Selected points 7, 12, 15 — catalog and printer reliability
+Bounded offline catalog download, rejects duplicate IDs across changing pages rather than overwrite last valid cache, revalidates identity each page and excludes supplier/notes from staff-safe cache. Adds regression coverage. ESC/POS receipt retains exact paise and fractional due, strips injected printer control bytes from user text, handles long unbroken item names; tests both widths. Physical transport still requires hardware. Online catalog edge v2 deployed successfully after explicit import-map path correction. No real public link created during testing.

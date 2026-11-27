@@ -49,7 +49,7 @@ class ReceiptBuilder {
       .replace(/✔/g, "")
       .replace(/◐/g, "")
       // eslint-disable-next-line no-control-regex
-      .replace(/[^\x00-\x7E]/g, "");
+      .replace(/[^\x20-\x7E]/g, " ");
     this.chunks.push(Array.from(new TextEncoder().encode(ascii)));
   }
 
@@ -81,6 +81,7 @@ class ReceiptBuilder {
 
   /** Left-aligned label, right-aligned value, on one line, padded/truncated to the paper width. */
   twoCol(left: string, right: string) {
+    if(right.length>=this.width){this.line(left.slice(0,this.width));this.line(right);return this;}
     const room = Math.max(1, this.width - right.length);
     const l = left.length > room ? left.slice(0, Math.max(0, room - 1)) + "." : left.padEnd(room, " ");
     this.line(l + right);
@@ -142,7 +143,7 @@ export interface ReceiptSale {
 }
 
 function money(n: number): string {
-  return "Rs." + Math.round(n).toLocaleString("en-IN");
+  return "Rs." + n.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 
 /** Builds the full ESC/POS byte stream for one sale's receipt — mirrors the fields the existing "thermal" print CSS layout already shows. */
@@ -177,7 +178,7 @@ export function buildEscPosReceipt(shop: ReceiptShop, sale: ReceiptSale, width: 
   if (sale.taxAmount) r.twoCol("GST", money(sale.taxAmount));
   r.bold(true).twoCol("GRAND TOTAL", money(sale.total)).bold(false);
   r.twoCol("Received", money(sale.amountPaid));
-  if (sale.dueAmount > 0.5) r.bold(true).twoCol("BALANCE DUE", money(sale.dueAmount)).bold(false);
+  if (sale.dueAmount > 0.005) r.bold(true).twoCol("BALANCE DUE", money(sale.dueAmount)).bold(false);
   r.rule();
 
   if (sale.quote) {
@@ -206,7 +207,9 @@ function wrapText(s: string, width: number): string[] {
   const words = s.split(" ");
   const lines: string[] = [];
   let cur = "";
-  for (const w of words) {
+  for (const word of words) {
+    let w=word;
+    if(w.length>width){if(cur){lines.push(cur.trim());cur="";}while(w.length>width){lines.push(w.slice(0,width));w=w.slice(width);}if(!w)continue;}
     if ((cur + " " + w).trim().length > width) {
       if (cur) lines.push(cur.trim());
       cur = w;

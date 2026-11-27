@@ -48,6 +48,7 @@ describe("account-scoped offline catalog", () => {
     expect((await downloadFullCatalogForOffline(owner)).success).toBe(false);
     expect(getCachedOfflineCatalog(owner)).toBeNull();
   });
+  it("rejects duplicate IDs across changing pages and preserves the existing cache",async()=>{mocks.range.mockResolvedValueOnce({data:[product(9)],error:null});expect((await downloadFullCatalogForOffline(owner)).success).toBe(true);mocks.range.mockResolvedValueOnce({data:Array.from({length:500},(_,i)=>product(i)),error:null}).mockResolvedValueOnce({data:[product(499)],error:null});expect((await downloadFullCatalogForOffline(owner)).success).toBe(false);expect(getCachedOfflineCatalog(owner)?.length).toBe(1);});
   it("allows a truly empty catalog and clears only the selected scope", async () => {
     mocks.range.mockResolvedValueOnce({data:[],error:null});
     expect(await downloadFullCatalogForOffline(owner)).toMatchObject({success:true,itemCount:0});

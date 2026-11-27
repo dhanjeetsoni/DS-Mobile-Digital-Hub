@@ -45,11 +45,16 @@ export async function downloadFullCatalogForOffline(
     onProgress?.("Downloading product catalog...", 30);
     const catalogRows: any[] = [];
     const pageSize = 500;
+    const maximumItems=10000;
+    const seen=new Set<string>();
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await supabase.from("products_staff_view")
         .select("*").eq("store_id", scope.storeId).order("id", { ascending: true })
         .range(from, from + pageSize - 1);
       if (error || !data) throw new Error(error?.message || "Catalog download returned no response.");
+      await assertCurrentProfile(scope);
+      for(const row of data){if(typeof row.id!=="string"||seen.has(row.id))throw Error("Catalog changed during download; refresh again. Existing cache retained.");seen.add(row.id);}
+      if(catalogRows.length+data.length>maximumItems)throw Error("Catalog exceeds 10,000 items; existing cache retained. Use filtered downloads.");
       catalogRows.push(...data);
       if (data.length < pageSize) break;
     }
@@ -85,8 +90,8 @@ export async function downloadFullCatalogForOffline(
         screenSizeMaxInches: r.screen_size_max_inches ? Number(r.screen_size_max_inches) : undefined,
         isMobilePhone: !!r.is_mobile_phone,
         isSparePart: !!r.is_spare_part,
-        supplier: r.supplier || "",
-        notes: r.notes || "",
+        supplier: "", // never cache confidential supplier identities in staff projection
+        notes: "",
         photos: Array.isArray(r.photos) ? r.photos : [],
         specifications: Array.isArray(r.specifications) ? r.specifications : [],
         featureHighlights: Array.isArray(r.feature_highlights) ? r.feature_highlights : [],

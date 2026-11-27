@@ -3,7 +3,7 @@ import { Landmark, CheckCircle2, AlertCircle, DollarSign, Search, Calendar, Buil
 import { Database, Sale, MobileFinanceDetails } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { todayStr } from "../utils/fifoEngine";
-import {settlementEvidence,recordedSettlementHasReference} from "../utils/settlementEvidence";
+import {settlementEvidence,recordedSettlementHasReference,duplicateSettlementReference} from "../utils/settlementEvidence";
 
 interface FinanceTrackerViewProps {
   db: Database;
@@ -62,6 +62,7 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
 
     if(settlementModalSale.status==="Cancelled"||settlementModalSale.financeDetails.payoutStatus!=="Pending Bank Settlement"){toast("Only pending, active finance sales can be settled.","red");return;}
     const issue=settlementEvidence({reference:utrInput,date:settleDateInput,saleDate:settlementModalSale.date,today:todayStr(),amount:actualCredit,expected:settlementModalSale.financeDetails.netBankReceivable,confirmed:confirmedCredit});if(issue){toast(issue,"red");return;}
+    if(duplicateSettlementReference(utrInput,settlementModalSale.id,db.sales)){toast("This bank reference is already allocated to another invoice. Batch payouts require separate reconciliation.","red");return;}
     settlementModalSale.financeDetails.payoutStatus = "Settled in Bank";
     settlementModalSale.financeDetails.settlementDate = settleDateInput;
     settlementModalSale.financeDetails.utrRef = utrInput.trim();

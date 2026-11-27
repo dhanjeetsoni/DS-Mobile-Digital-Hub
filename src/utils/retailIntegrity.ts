@@ -20,10 +20,12 @@ export function previewSalesJournal(sales:Sale[]){
   if(!s.id||seen.has(s.id)){issues.push(s.invoiceNo+": missing or duplicate sale ID");continue;}seen.add(s.id);
   if(![s.total,s.amountPaid,s.dueAmount,s.taxAmount??0].every(Number.isFinite)||!Array.isArray(s.items)||!s.items.length){issues.push(s.invoiceNo+": invalid or incomplete monetary data");continue;}
   const receipt=saleReceipts(s);const total=round2(s.total);const paid=round2(s.amountPaid);const tax=round2(s.taxAmount||0);const due=round2(s.dueAmount);
-  if(s.isFinance){issues.push(s.invoiceNo+": finance settlement needs separate posting");continue;}
-  if(!paymentAllocationValid(total,[paid,due])||!paymentAllocationValid(paid,[receipt.cash,receipt.online])||tax<0||tax>total||s.items.some(i=>!Number.isFinite(i.cost)||i.cost<0)){issues.push(s.invoiceNo+": review payment/tax/cost fields");continue;}
+  const f=s.financeDetails;
+  const validFinance=!!f&&[f.downPayment,f.loanAmount,f.netBankReceivable,f.dbdAmount].every(n=>Number.isFinite(n)&&n>=0)&&paymentAllocationValid(total,[paid,f.loanAmount])&&paymentAllocationValid(f.loanAmount,[f.netBankReceivable,f.dbdAmount])&&due===0&&round2(f.downPayment)===paid;
+  if(s.isFinance&&!validFinance){issues.push(s.invoiceNo+": incomplete finance allocation");continue;}
+  if((!s.isFinance&&(!paymentAllocationValid(total,[paid,due])||!paymentAllocationValid(paid,[receipt.cash,receipt.online])))||tax<0||tax>total||s.items.some(i=>!Number.isFinite(i.cost)||i.cost<0)){issues.push(s.invoiceNo+": review payment/tax/cost fields");continue;}
   const post=(account:string,debit:number,credit:number)=>{if(debit||credit)rows.push({source:s.invoiceNo,date:s.date,account,debit:round2(debit),credit:round2(credit)});};
-  post("Cash",receipt.cash,0);post("Online payment clearing",receipt.online,0);post("Customer receivables",due,0);post("Sales revenue",0,total-tax);post("Tax payable",0,tax);
+  if(s.isFinance&&f){post("Collected payments clearing",paid,0);post("Finance receivable",f.netBankReceivable,0);post("Finance dealer subvention",f.dbdAmount,0);if(f.payoutStatus==="Settled in Bank")issues.push(s.invoiceNo+": bank settlement requires separately verified posting");}else{post("Cash",receipt.cash,0);post("Online payment clearing",receipt.online,0);post("Customer receivables",due,0);}post("Sales revenue",0,total-tax);post("Tax payable",0,tax);
   const cost=round2(s.items.reduce((a,i)=>a+i.cost,0));post("Cost of goods sold",cost,0);post("Inventory",0,cost);
  }
  return {rows,issues};

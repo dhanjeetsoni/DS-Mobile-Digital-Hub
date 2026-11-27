@@ -8,3 +8,5 @@ export function settlementEvidence(input:{reference:string;date:string;saleDate:
  return null;
 }
 export function recordedSettlementHasReference(ref?:string){return !!ref?.trim()&&!/^BANK-UTR-\d+$/i.test(ref.trim());}
+
+export function duplicateSettlementReference(reference:string,invoiceId:string,sales:{id:string;financeDetails?:{utrRef?:string;payoutStatus?:string}}[]):boolean{const key=reference.trim().toUpperCase();return !!key&&sales.some(s=>s.id!==invoiceId&&s.financeDetails?.payoutStatus==="Settled in Bank"&&s.financeDetails?.utrRef?.trim().toUpperCase()===key);}

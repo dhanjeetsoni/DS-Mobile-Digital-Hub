@@ -257,6 +257,47 @@ try{
  await directory.getByRole("button",{name:"Reset filters"}).click();
  assert.equal(await directory.getByRole("textbox",{name:"Search inventory"}).inputValue(),"");
  console.log("PASS inventory search and filter reset");
+ // Exercise real rendered pagination with synthetic local inventory, not production data.
+ const large=await browser.newPage({viewport:{width:1440,height:900}});
+ large.on("pageerror",e=>errors.push(e.message));
+ await large.goto(url,{waitUntil:"domcontentloaded"});
+ await large.getByText("Owner Confidential Area",{exact:true}).first().click();
+ await setupLocalOwner(large);
+ await large.evaluate(()=>{
+  const key=localStorage.getItem("dsmdh_cache_v4")?"dsmdh_cache_v4":"dsmdh_db_v2";
+  const db=JSON.parse(localStorage.getItem(key)||"{}");
+  db.products=Array.from({length:125},(_,i)=>({id:"ci-large-"+i,name:"CI Product "+String(i).padStart(3,"0"),category:"Chargers & Cables",brand:"Synthetic",sku:"CI-LARGE-"+i,photo:"",purchasePrice:10,pendingCost:false,sellingPrice:20,stock:5,minStock:1,warrantyEnabled:false,warrantyMonths:0,requireCustomerDetails:false,supplier:"",notes:"",compatibleModels:[],createdAt:"2026-01-01",updatedAt:"2026-01-01",units:[]}));
+  localStorage.setItem("dsmdh_db_v2",JSON.stringify(db));
+  if(key==="dsmdh_cache_v4")localStorage.setItem(key,JSON.stringify(db));
+ });
+ await large.reload({waitUntil:"domcontentloaded"});
+ await large.getByText("Owner Confidential Area",{exact:true}).first().click();
+ await large.getByPlaceholder("Enter Owner Device PIN").fill("5826");
+ await large.getByRole("button",{name:"Unlock",exact:true}).click();
+ await large.getByRole("textbox",{name:"Search tools"}).fill("products");
+ await large.locator('[data-tool-key="products"]').click();
+ await large.locator('#page[data-current-page="products"]').waitFor();
+ const nav=large.getByRole("navigation",{name:"Inventory pages"});
+ await nav.waitFor();
+ assert.equal(await large.locator(".product-card-grid .product-card").count(),48);
+ await nav.getByRole("button",{name:"Last",exact:true}).click();
+ assert.equal(await large.locator(".product-card-grid .product-card").count(),29);
+ await large.getByRole("textbox",{name:"Search inventory"}).fill("CI Product 124");
+ await large.locator(".product-card-grid .product-card").first().waitFor();
+ assert.equal(await large.locator(".product-card-grid .product-card").count(),1);
+ assert.match(await large.locator(".product-card-grid .product-card").innerText(),/CI Product 124/);
+ await large.getByRole("button",{name:"Reset filters"}).click();
+ await nav.waitFor();
+ assert.equal(await large.locator(".product-card-grid .product-card").count(),48);
+ await large.getByRole("textbox",{name:"Search tools"}).fill("sell");
+ await large.locator('[data-tool-key="sell"]').click();
+ await large.getByRole("navigation",{name:"POS catalog pages"}).waitFor();
+ assert.equal(await large.getByRole("button",{name:"+ Add to Bill",exact:true}).count(),60);
+ await large.getByRole("navigation",{name:"POS catalog pages"}).getByRole("button",{name:"Last",exact:true}).click();
+ assert.equal(await large.getByRole("button",{name:"+ Add to Bill",exact:true}).count(),5);
+ await large.close();
+ console.log("PASS real rendered inventory/POS pagination, full-catalog search and page reset (125 synthetic products)");
+
  const mobile=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  mobile.on("pageerror",e=>errors.push(e.message));
  await mobile.goto(url,{waitUntil:"domcontentloaded"});

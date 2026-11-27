@@ -137,3 +137,6 @@ Migration 20261127094850 captures original finalized POS bill in the deferred sa
 
 ## Selected point 2 — posted general ledger account drilldown
 Migration 20261127094947 supports account-filtered opening, running, closing balances and 100-event cursor pages with snapshot max-ID anchoring. Rollback test inserts 101 synthetic events, confirms first and next pages and same closing balance, and anon denial. No synthetic entries retained. Account detail UI includes navigation and page CSV. Full statutory financial statements still require independently reconciled opening balances and unposted sources.
+
+## Selected points 12/14/15/16 — executable acceptance gates
+CI browser smoke now loads 125 synthetic local products and exercises the real inventory and POS pagination, full-list search and page reset. Native builds verify APK packaged frontend assets, package identifier and native versionCode, camera/biometric/Bluetooth/network permissions, APK cryptographic signature and signer fingerprint; tagged release rejects debug signer. Windows build emits SHA-256 and verifies updater signature presence when configured (not cryptographic signature verification). Both artifacts carry machine-readable verification reports. CI pending; this is package verification, not physical device installation or hardware acceptance.

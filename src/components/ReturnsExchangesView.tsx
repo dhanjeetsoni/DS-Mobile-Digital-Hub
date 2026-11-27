@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { RotateCcw, Search, CheckCircle2, ArrowRight, Printer, AlertTriangle, RefreshCw, ShieldCheck, Clock } from "lucide-react";
 import { Database, Sale, ReturnRecord, ExchangeRecord, ReturnItem, WarrantyClaim, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
-import {returnSelectionIssue} from "../utils/returnIntegrity";
+import {returnSelectionIssue,markVerifiedReturnedDevice} from "../utils/returnIntegrity";
 import { todayStr, nowTimeStr, uid, addStockBatch, consumeFIFO } from "../utils/fifoEngine";
 import { supabase, isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, resolveTransactionRefs } from "../services/repository";
@@ -243,7 +243,20 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
   const handleProcessReturn = async () => {
     if (!foundSale || isSavingReturn) return;
     if(foundSale.status==="Cancelled"){toast("Cancelled invoices cannot be returned.","red");return;}
-    const issue=returnSelectionIssue(db,foundSale,selectedReturnItems);if(issue){toast(issue,"red");return;}
+    const verifiedImeis:Record<string,string>={};
+    for(const [productId,qty] of Object.entries(selectedReturnItems)){
+      if(!qty)continue;
+      const item=foundSale.items.find(x=>x.productId===productId);
+      const product=db.products.find(x=>x.id===productId);
+      if(product?.isMobilePhone||item?.selectedImeis?.length){
+        if(isStaff||!storeId||!isCloudConfigured||!navigator.onLine){toast("Serialized device return requires connected owner and physical IMEI verification.","red");return;}
+        if(qty!==1){toast("Return one serialized device per product at a time.","red");return;}
+        const imei=window.prompt("Enter the 15-digit primary IMEI from the physically inspected returned phone. Confirm it is fit for resale.");
+        if(imei===null)return;
+        verifiedImeis[productId]=imei.trim();
+      }
+    }
+    const issue=returnSelectionIssue(db,foundSale,selectedReturnItems,undefined,verifiedImeis);if(issue){toast(issue,"red");return;}
     const totalRefund = calculateReturnRefund();
     if (!Number.isFinite(totalRefund)||totalRefund <= 0) {
       toast("Return karne ke liye kam se kam 1 item chunein", "red");
@@ -266,6 +279,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
           price: item.price,
           purchasePrice: item.purchasePrice,
           refund: item.price * q,
+          ...(verifiedImeis[item.productId]?{imei:verifiedImeis[item.productId]}:{}),
         });
       }
     });
@@ -301,7 +315,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
             saleId: refs.saleId,
             returnNo,
             customerId: refs.customerId,
-            returnType: returnItems.length === foundSale.items.length ? "full" : "partial",
+            returnType: foundSale.items.every(line=>returnItems.some(it=>it.productId===line.productId&&it.qty===line.qty)) ? "full" : "partial",
             reason: returnReason,
             refundMethod,
             notes: returnNotes,
@@ -312,6 +326,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
               unit_price: it.price,
               purchase_price: it.purchasePrice,
               refund_amount: it.refund,
+              ...(it.imei?{returned_imei:it.imei}:{}),
             })),
           });
           toast(`${returnNo} owner ko approval ke liye bhej diya gaya — approve hote hi stock update hoga.`, "green");
@@ -335,7 +350,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
             p_sale_id: refs.saleId,
             p_return_no: returnNo,
             p_customer_id: refs.customerId,
-            p_return_type: returnItems.length === foundSale.items.length ? "full" : "partial",
+            p_return_type: foundSale.items.every(line=>returnItems.some(it=>it.productId===line.productId&&it.qty===line.qty)) ? "full" : "partial",
             p_reason: returnReason,
             p_refund_method: refundMethod,
             p_notes: returnNotes,
@@ -346,6 +361,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
               unit_price: it.price,
               purchase_price: it.purchasePrice,
               refund_amount: it.refund,
+              ...(it.imei?{returned_imei:it.imei}:{}),
             })),
           });
           if (error) throw error;
@@ -363,6 +379,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
             toast(msg || "Transaction rejected by server.", "red");
             return;
           } else {
+            if(Object.keys(verifiedImeis).length){toast("Serialized return not confirmed by server. Check return history before retrying; no local stock mutation.","red");return;}
             try {
               await queueOfflineOperation(
                 "return",
@@ -395,6 +412,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
         }
         // Track how much of this sale item has now been returned so it can't
         // be returned again beyond what was actually sold.
+        if(it.imei)markVerifiedReturnedDevice(db,it.productId,it.imei,foundSale.invoiceNo);
         const saleItem = foundSale.items.find((si) => si.productId === it.productId);
         if (saleItem) saleItem.returnedQty = (saleItem.returnedQty || 0) + it.qty;
       });
@@ -425,7 +443,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
       invoiceNo: foundSale!.invoiceNo,
       date: todayStr(),
       time: nowTimeStr(),
-      type: returnItems.length === foundSale!.items.length ? "full" : "partial",
+      type: foundSale!.items.every(line=>returnItems.some(it=>it.productId===line.productId&&it.qty===line.qty)) ? "full" : "partial",
       items: returnItems,
       reason: returnReason,
       refundMethod,

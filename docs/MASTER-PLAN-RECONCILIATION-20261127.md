@@ -74,3 +74,6 @@ Added local read-only finance settlement reconciliation against manually pasted 
 
 ## Posted account summary and recovery v3
 Migration 20261127053911 adds an owner-only server aggregate across all posted events through the end date (opening net, period debits/credits, closing net; not limited to 500 rows). New checkpoint format v3 includes serialized-sale reservation history and blocks legacy restore when that history would be lost. Capture/verification and report shape passed live rollback. Actual isolated restore and independent storage-object recovery remain pending. App account summary CSV and backup copy updated.
+
+## Verified serialized device returns (live server)
+Migration 20261127054102 validates the original active reservation, one physical primary IMEI and fully paid untaxed undiscounted invoice line; return records persist returned_imei, release the exact reservation and restore stock atomically. Live rollback wrong identifier, valid return, stock and idempotent replay passed. Connected owner form checks physical IMEI and restores matching local unit metadata; serialized returns cannot be queued offline. Legacy untracked phones and serialized exchanges or complex refund allocation still need dedicated reconciliation. First deployment attempt had an incorrect function signature; corrected migration succeeded.

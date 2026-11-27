@@ -71,3 +71,6 @@ Preflight selected return lines and replacement FIFO; reject unsupported seriali
 
 ## Bank credit comparison
 Added local read-only finance settlement reconciliation against manually pasted normalized CSV, with exact UTR/date/amount matching, duplicate reference and batch payout review, invalid lines and unmatched credits. No bank API, automatic journal posting or persistent statement storage. Four regression scenarios. Requires real bank export for acceptance.
+
+## Posted account summary and recovery v3
+Migration 20261127053911 adds an owner-only server aggregate across all posted events through the end date (opening net, period debits/credits, closing net; not limited to 500 rows). New checkpoint format v3 includes serialized-sale reservation history and blocks legacy restore when that history would be lost. Capture/verification and report shape passed live rollback. Actual isolated restore and independent storage-object recovery remain pending. App account summary CSV and backup copy updated.

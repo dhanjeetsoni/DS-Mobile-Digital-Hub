@@ -23,6 +23,7 @@ import BottomTabBar from "./components/BottomTabBar";
 import { RetailHero } from "./components/RetailHero";
 import { PersonalizedMetrics } from "./components/PersonalizedMetrics";
 import {paymentAllocationValid,saleReceipts,suggestCompatibleAccessories} from "./utils/retailIntegrity";
+import {allocateCartImeis,cartStockQuantity,cartIdentifiersValid} from "./utils/cartIntegrity";
 import {RetailBusinessCopilot} from "./components/RetailBusinessCopilot";
 import {CustomerShareStudio} from "./components/CustomerShareStudio";
 import {CounterExperience} from "./components/CounterExperience";
@@ -2012,7 +2013,8 @@ export default function App() {
   // Cart operations
   const addToCart = (product: Product, specificImei?: string) => {
     const availableStock = stockOf(product);
-    if (availableStock <= 0) {
+    const explicitImei=specificImei&&(product.units||[]).some(u=>u.imei1===specificImei||u.imei2===specificImei)?specificImei:undefined;
+    if (availableStock <= cartStockQuantity(cart,product.id)) {
       showToast("Product is out of stock!", "red");
       return;
     }
@@ -2024,10 +2026,8 @@ export default function App() {
         showToast("Not enough stock available!", "red");
         return;
       }
-      const updatedImeis = existing.selectedImeis ? [...existing.selectedImeis] : [];
-      if (specificImei && !updatedImeis.includes(specificImei)) {
-        updatedImeis.push(specificImei);
-      }
+      const updatedImeis=allocateCartImeis(product,cart,existing.qty+1,existing.selectedImeis||[],explicitImei,existingIdx);
+      if(!updatedImeis){showToast("No distinct available IMEI for this quantity or repeated scan.","red");return;}
       const newCart = [...cart];
       newCart[existingIdx] = {
         ...existing,
@@ -2037,9 +2037,8 @@ export default function App() {
       setCart(newCart);
     } else {
       // Find an available IMEI if mobile phone
-      const availableImei =
-        specificImei ||
-        (product.units || []).find((u) => u.status === "In Stock")?.imei1;
+      const availableImeis=allocateCartImeis(product,cart,1,[],explicitImei);
+      if(!availableImeis){showToast("No available unreserved device IMEI.","red");return;}
 
       setCart([
         ...cart,
@@ -2054,7 +2053,7 @@ export default function App() {
           warrantyMonths: product.warrantyMonths,
           requireCustomerDetails: product.requireCustomerDetails,
           isMobilePhone: product.isMobilePhone,
-          selectedImeis: availableImei ? [availableImei] : [],
+          selectedImeis: availableImeis,
           mrp: product.mrp ?? null,
           customTerms: product.customTerms,
           customQuote: product.customQuote,
@@ -2076,7 +2075,7 @@ export default function App() {
   // total (which the profit engine already derives for free from the
   // line's FIFO `cost`).
   const addGiftToCart = (product: Product) => {
-    if (stockOf(product) <= 0) {
+    if (stockOf(product) <= cartStockQuantity(cart,product.id)) {
       showToast("Yeh gift product abhi out of stock hai!", "red");
       return;
     }
@@ -2084,7 +2083,8 @@ export default function App() {
       showToast("Yeh product pehle se hi gift ke roop mein add hai.", "amber");
       return;
     }
-    const availableImei = (product.units || []).find((u) => u.status === "In Stock")?.imei1;
+    const availableImeis=allocateCartImeis(product,cart,1);
+    if(!availableImeis){showToast("No available unreserved gift IMEI.","red");return;}
     setCart([
       ...cart,
       {
@@ -2098,7 +2098,7 @@ export default function App() {
         warrantyMonths: 0,
         requireCustomerDetails: false,
         isMobilePhone: product.isMobilePhone,
-        selectedImeis: availableImei ? [availableImei] : [],
+        selectedImeis: availableImeis,
         isGift: true,
         mrp: product.mrp ?? null,
         giftSellingPrice: product.sellingPrice,
@@ -2124,7 +2124,9 @@ export default function App() {
         showToast("Product is out of stock!", "red");
         return;
       }
-      const availableImei = (product.units || []).find((u) => u.status === "In Stock")?.imei1;
+      if(stockOf(product)<=cartStockQuantity(cart,product.id)){showToast("Not enough combined stock.","red");return;}
+      const availableImeis=allocateCartImeis(product,cart,1);
+      if(!availableImeis){showToast("No available unreserved device IMEI.","red");return;}
       setCart([
         ...cart,
         {
@@ -2138,7 +2140,7 @@ export default function App() {
           warrantyMonths: product.warrantyMonths,
           requireCustomerDetails: product.requireCustomerDetails,
           isMobilePhone: product.isMobilePhone,
-          selectedImeis: availableImei ? [availableImei] : [],
+          selectedImeis: availableImeis,
           mrp: product.mrp ?? null,
         },
       ]);
@@ -2154,12 +2156,14 @@ export default function App() {
       setCart(cart.filter((_, i) => i !== idx));
       return;
     }
-    if (prod && newQty > prod.stock) {
+    if (prod && newQty+cartStockQuantity(cart,prod.id,idx)>stockOf(prod)) {
       showToast("Cannot exceed available stock!", "red");
       return;
     }
     const newCart = [...cart];
-    newCart[idx] = { ...item, qty: newQty };
+    const imeis=prod?allocateCartImeis(prod,cart,newQty,item.selectedImeis||[],undefined,idx):[];
+    if(!imeis){showToast("No distinct available device IMEI.","red");return;}
+    newCart[idx] = { ...item, qty: newQty,selectedImeis:imeis };
     setCart(newCart);
   };
 
@@ -2192,7 +2196,9 @@ export default function App() {
     if (cart.length === 0 || checkoutInFlight.current) return;
     checkoutInFlight.current=true;setCheckoutBusy(true);
     try {
+    if(!cartIdentifiersValid(cart)||cart.some(i=>!Number.isFinite(i.price)||i.price<0||!Number.isFinite(i.qty)||i.qty<=0)){showToast("Invalid quantity, price or duplicate device identifier.","red");return;}
     const subtotal = cart.reduce((a, i) => a + i.price * i.qty, 0);
+    if(!Number.isFinite(subtotal)||!Number.isFinite(cartDiscount)||cartDiscount<0||cartDiscount>subtotal){showToast("Invalid bill amount or discount.","red");return;}
     const { taxAmount, total } = computeSaleTotals(subtotal, cartDiscount, db.settings.gstEnabled, db.settings.gstPercent);
     const workingDb: Database = structuredClone(db);
     const idempotencyKey = crypto.randomUUID();
@@ -2229,7 +2235,7 @@ export default function App() {
     }
 
     if(dueAmount>0&&!customerData.phone.trim()){showToast("Customer phone is required for credit sales.","red");return;}
-    if(isFinanceMode&&(!Number.isFinite(amountPaid)||amountPaid<0||amountPaid>total)){showToast("Invalid finance down payment.","red");return;}
+    if(isFinanceMode&&(!Number.isFinite(amountPaid)||amountPaid<0||amountPaid>total||!Number.isFinite(financeForm.dbdAmount)||financeForm.dbdAmount<0||financeForm.dbdAmount>total-amountPaid||!Number.isFinite(financeForm.processingFee)||financeForm.processingFee<0||!financeForm.loanAccountNo.trim())){showToast("Invalid finance down payment.","red");return;}
     if (customerData.phone) {
       let cust = workingDb.customers.find((c) => c.phone === customerData.phone);
       if (!cust) {
@@ -2279,7 +2285,7 @@ export default function App() {
       // from stockBatches means the check and the actual FIFO consumption a
       // few lines below always agree.
       const availableStock = getAvailableStock(workingDb, item.productId);
-      if (item.qty <= 0 || availableStock < item.qty) {
+      if (item.qty <= 0 || availableStock < cartStockQuantity(cart,item.productId)) {
         showToast("Insufficient stock / inventory mismatch.", "red");
         return;
       }
@@ -2407,7 +2413,7 @@ export default function App() {
       const netBank = Math.max(0, loanAmt - financeForm.dbdAmount);
       financeDetails = {
         company: financeForm.company,
-        loanAccountNo: financeForm.loanAccountNo || `LAN-${Date.now().toString().slice(-6)}`,
+        loanAccountNo: financeForm.loanAccountNo.trim(),
         downPayment: financeForm.downPayment,
         loanAmount: loanAmt,
         processingFee: financeForm.processingFee,
@@ -2653,14 +2659,14 @@ export default function App() {
       const spare = db.products.find((p) => p.id === jobForm.selectedSparePartId);
       if (spare && spare.stock > 0) {
         try {
-          consumeFIFO(db, spare.id, 1);
+          const used=consumeFIFO(db, spare.id, 1);
           spare.stock -= 1;
-          partsCost = spare.purchasePrice || 0;
+          partsCost = fifoCostTotal(used);
           partsDeducted.push({
             productId: spare.id,
             name: spare.name,
             qty: 1,
-            costPrice: spare.purchasePrice || 0,
+            costPrice: partsCost,
             sellingRate: spare.sellingPrice,
           });
         } catch (error) {

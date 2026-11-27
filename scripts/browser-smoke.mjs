@@ -80,6 +80,8 @@ try{
  assert.equal(record.status,"Paid");
  assert.equal(record.amountPaid,record.total);
  console.log("PASS actual local-only counter-service checkout, invoice and persisted payment");
+ await owner.getByRole("button",{name:"Close invoice",exact:true}).click();
+ await owner.locator("#print-area").waitFor({state:"detached"});
  // Exercise the one-tap cybercafe entry as a distinct sale source, not a POS duplicate.
  await owner.getByRole("textbox",{name:"Search tools"}).fill("xeroxGrid");
  await owner.locator('[data-tool-key="xeroxGrid"]').click();

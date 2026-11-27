@@ -164,7 +164,8 @@ export const XeroxGrid: React.FC<XeroxGridProps> = ({ db, onUpdate, toast, owner
     .slice(0, 8);
 
   const handleClearHistory = () => {
-    // Keep today only or remove last
+    if(!ownerMode){toast("Only the owner may review a cybercafe correction.","red");return;}
+    if(!window.confirm("Remove the last recorded service? The original Telegram bill is retained. Record a correction reason separately."))return;
     if (db.xeroxEntries && db.xeroxEntries.length > 0) {
       const removed = db.xeroxEntries.pop();
       onUpdate();
@@ -336,7 +337,7 @@ export const XeroxGrid: React.FC<XeroxGridProps> = ({ db, onUpdate, toast, owner
       <div className="section">
         <div className="section-head">
           <h2>Today's Xerox &amp; Digital Log ({todayEntries.length})</h2>
-          {todayEntries.length > 0 && (
+          {ownerMode && todayEntries.length > 0 && (
             <button className="btn sm danger" onClick={handleClearHistory}>
               <RotateCcw size={12} /> Undo Last Entry
             </button>

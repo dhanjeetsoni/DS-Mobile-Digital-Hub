@@ -7,11 +7,11 @@ export function uid(prefix: string): string {
 }
 
 export function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now()+330*60_000).toISOString().slice(0, 10);
 }
 
 export function nowTimeStr(): string {
-  return new Date().toTimeString().slice(0, 5);
+  return new Date(Date.now()+330*60_000).toISOString().slice(11, 16);
 }
 
 export function genSku(prefix = "DSM"): string {
@@ -100,18 +100,21 @@ export function consumeFIFO(
   productId: string,
   qty: number
 ): { batchId: string | null; qty: number; purchasePrice: number }[] {
-  let remaining = round2(qty);
-  const consumed: { batchId: string | null; qty: number; purchasePrice: number }[] = [];
-  for (const b of getBatchesForProduct(db, productId)) {
-    if (remaining <= 0.0001) break;
-    const take = Math.min(b.remainingQty, remaining);
-    b.remainingQty = round2(b.remainingQty - take);
-    consumed.push({ batchId: b.id, qty: take, purchasePrice: b.purchasePrice });
-    remaining = round2(remaining - take);
+  if(!Number.isFinite(qty)||qty<=0||Math.abs(qty-round2(qty))>1e-8)throw new Error("Invalid stock quantity.");
+  let remaining=round2(qty);
+  const planned:{batch:StockBatch;take:number}[]=[];
+  const consumed:{batchId:string|null;qty:number;purchasePrice:number}[]=[];
+  for(const b of getBatchesForProduct(db,productId)){
+    if(remaining<=0.0001)break;
+    if(!Number.isFinite(b.remainingQty)||b.remainingQty<0||Math.abs(b.remainingQty-round2(b.remainingQty))>1e-8)throw new Error("Invalid stock batch quantity.");
+    const take=round2(Math.min(b.remainingQty,remaining));
+    planned.push({batch:b,take});
+    consumed.push({batchId:b.id,qty:take,purchasePrice:b.purchasePrice});
+    remaining=round2(remaining-take);
   }
-  if (remaining > 0.0001) {
-    throw new Error("Insufficient stock / inventory mismatch.");
-  }
+  if(remaining>0.0001)throw new Error("Insufficient stock / inventory mismatch.");
+  // Commit only after the entire allocation has been planned successfully.
+  for(const {batch,take} of planned)batch.remainingQty=round2(batch.remainingQty-take);
   return consumed;
 }
 

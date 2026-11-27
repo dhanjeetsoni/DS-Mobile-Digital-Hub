@@ -223,7 +223,7 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
               ? `Credit Note ${creditNote.returnNo}`
               : `Exchange Slip ${exchange?.exchangeNo}`}
           </h3>
-          <button onClick={requestClose}>&times;</button>
+          <button aria-label="Close invoice" onClick={requestClose}>&times;</button>
         </div>
 
         {sale && (

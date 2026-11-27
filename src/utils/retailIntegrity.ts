@@ -15,7 +15,10 @@ export function paymentAllocationValid(total:number,amounts:number[]){
 export type JournalRow={source:string;date:string;account:string;debit:number;credit:number};
 export function previewSalesJournal(sales:Sale[]){
  const rows:JournalRow[]=[];const issues:string[]=[];
+ const seen=new Set<string>();
  for(const s of sales.filter(activeSale)){
+  if(!s.id||seen.has(s.id)){issues.push(s.invoiceNo+": missing or duplicate sale ID");continue;}seen.add(s.id);
+  if(![s.total,s.amountPaid,s.dueAmount,s.taxAmount??0].every(Number.isFinite)||!Array.isArray(s.items)||!s.items.length){issues.push(s.invoiceNo+": invalid or incomplete monetary data");continue;}
   const receipt=saleReceipts(s);const total=round2(s.total);const paid=round2(s.amountPaid);const tax=round2(s.taxAmount||0);const due=round2(s.dueAmount);
   if(s.isFinance){issues.push(s.invoiceNo+": finance settlement needs separate posting");continue;}
   if(!paymentAllocationValid(total,[paid,due])||!paymentAllocationValid(paid,[receipt.cash,receipt.online])||tax<0||tax>total||s.items.some(i=>!Number.isFinite(i.cost)||i.cost<0)){issues.push(s.invoiceNo+": review payment/tax/cost fields");continue;}

@@ -3,6 +3,7 @@ import { Landmark, CheckCircle2, AlertCircle, DollarSign, Search, Calendar, Buil
 import { Database, Sale, MobileFinanceDetails } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { todayStr } from "../utils/fifoEngine";
+import {supabase,isCloudConfigured} from "../services/supabaseClient";
 import {BankStatementReview} from "./BankStatementReview";
 import {settlementEvidence,recordedSettlementHasReference,duplicateSettlementReference} from "../utils/settlementEvidence";
 
@@ -27,6 +28,15 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
   const [utrInput, setUtrInput] = useState<string>("");
   const [actualCredit,setActualCredit]=useState("");const [confirmedCredit,setConfirmedCredit]=useState(false);
   const [settleDateInput, setSettleDateInput] = useState<string>(todayStr());
+
+  const [postingInvoice,setPostingInvoice]=useState<string|null>(null);
+  const [postedInvoices,setPostedInvoices]=useState<Record<string,boolean>>({});
+  const postSettlement=async(s:Sale)=>{
+    const f=s.financeDetails;if(!f||!f.utrRef||!f.settlementDate||postingInvoice)return;
+    if(!isCloudConfigured||!navigator.onLine){toast("Connect and sync the owner-confirmed settlement first.","red");return;}
+    if(!window.confirm("Post this owner-confirmed bank credit against the original finance receivable? It will not be counted as new sales revenue."))return;
+    setPostingInvoice(s.invoiceNo);try{const {data,error}=await supabase.rpc("post_finance_settlement",{p_invoice_no:s.invoiceNo,p_reference:f.utrRef,p_date:f.settlementDate,p_amount:f.netBankReceivable});if(error)throw error;if(data?.status==="posted"||data?.status==="unchanged"){setPostedInvoices(old=>({...old,[s.invoiceNo]:true}));toast(data.status==="posted"?"Settlement posted in cloud journal.":"Already posted; duplicate prevented.","green");}else toast(String(data?.reason||"Settlement requires review."),"red");}catch(e:any){toast(String(e?.message||"Unable to post settlement. Check owner access and sync."),"red");}finally{setPostingInvoice(null);}
+  };
 
   const financeSales = db.sales.filter((s) => s.status!=="Cancelled" && s.isFinance && s.financeDetails);
 
@@ -222,7 +232,7 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
                           </button>
                         ) : (
                           <span className="hint" style={{ fontSize: "11px" }}>
-                            UTR: {recordedSettlementHasReference(fin.utrRef)?fin.utrRef:"Reference needs review"}
+                            UTR: {recordedSettlementHasReference(fin.utrRef)?fin.utrRef:"Reference needs review"}{fin.payoutStatus==="Settled in Bank"&&recordedSettlementHasReference(fin.utrRef)&&fin.settlementDate&&<div style={{marginTop:6}}><button type="button" className="btn sm" disabled={postingInvoice!==null||!!postedInvoices[s.invoiceNo]} onClick={()=>void postSettlement(s)}>{postedInvoices[s.invoiceNo]?"Journal posted":postingInvoice===s.invoiceNo?"Posting…":"Post settlement journal"}</button></div>}
                           </span>
                         )}
                       </td>

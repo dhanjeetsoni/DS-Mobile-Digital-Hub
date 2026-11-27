@@ -95,3 +95,6 @@ Added actual browser disconnection during local-only synthetic service checkout,
 
 ## Mandatory serialized checkout and isolated restore acceptance
 Migration 20261127090000 closes the older client bypass: mobile product lines without selected IMEI fail atomically, with no invoice or stock mutation; legacy nonserialized lines remain compatible. Current main sends selected_imeis; old queued phone transactions require operator reconciliation rather than silently bypassing protection. Rollback tested both missing and valid identifiers. Isolated synthetic-shop format-v3 checkpoint, reset, restore, active reservation and duplicate constraint all passed in a rolled-back transaction. No live-shop reset or external object recovery performed.
+
+## Owner-confirmed finance payout ledger
+Migration 20261127091456 records synchronized owner-confirmed UTR/date/amount on the relational invoice, posts origination if needed and debits Bank (owner-confirmed), credits Finance receivable exactly once. Case-insensitive unique UTR, mismatch review and settled invoice mutation guard tested via rollback. The finance tracker can post after the evidence is saved and synced; no bank API, fee/clawback or batch payout allocation is inferred. Actual bank authenticity remains owner verification. CI pending.

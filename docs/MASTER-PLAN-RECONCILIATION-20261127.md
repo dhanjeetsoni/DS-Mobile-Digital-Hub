@@ -148,3 +148,6 @@ Added executable offline replay tests for competing-device claim loss, attempt-s
 
 ## Exact identity search correction
 The first large-catalog browser test exposed overly broad fuzzy results for an exact product name. Inventory and POS now prefer exact SKU/barcode/primary or secondary IMEI, then exact product name, and preserve prior fuzzy/AI fallback when no exact match exists. Regression covers duplicate names, exact IDs and fallback. Corrected browser test waits for the actual filtered count.
+
+## Large-catalog rendered card fix
+The subsequent browser failure returned an empty innerText despite the correct one-card count. Removed content-visibility:auto from already paginated cards to avoid offscreen skipped contents. The smoke test explicitly scrolls the matching card into view, requires visibility, asserts its exact rendered name and repeats the search using exact SKU. No assertion weakened; all pagination limits retained.

@@ -285,7 +285,13 @@ try{
  await large.getByRole("textbox",{name:"Search inventory"}).fill("CI Product 124");
  await large.waitForFunction(()=>document.querySelectorAll(".product-card-grid .product-card").length===1);
  assert.equal(await large.locator(".product-card-grid .product-card").count(),1);
- assert.match(await large.locator(".product-card-grid .product-card").innerText(),/CI Product 124/);
+ const foundName=large.locator(".product-card-grid .product-card .product-card-name");
+ await foundName.scrollIntoViewIfNeeded();
+ await foundName.waitFor({state:"visible"});
+ assert.equal(await foundName.innerText(),"CI Product 124");
+ await large.getByRole("textbox",{name:"Search inventory"}).fill("CI-LARGE-124");
+ await large.waitForFunction(()=>document.querySelectorAll(".product-card-grid .product-card").length===1&&document.querySelector(".product-card-grid .product-card-name")?.textContent==="CI Product 124");
+ assert.equal(await foundName.innerText(),"CI Product 124");
  await large.getByRole("button",{name:"Reset filters"}).click();
  await nav.waitFor();
  assert.equal(await large.locator(".product-card-grid .product-card").count(),48);

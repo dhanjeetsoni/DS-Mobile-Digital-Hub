@@ -23,6 +23,7 @@ import BottomTabBar from "./components/BottomTabBar";
 import { RetailHero } from "./components/RetailHero";
 import { PersonalizedMetrics } from "./components/PersonalizedMetrics";
 import {paymentAllocationValid,saleReceipts,suggestCompatibleAccessories} from "./utils/retailIntegrity";
+import {restoreCancelledSaleStock} from "./utils/saleCancellation";
 import {allocateCartImeis,cartStockQuantity,cartIdentifiersValid} from "./utils/cartIntegrity";
 import {RetailBusinessCopilot} from "./components/RetailBusinessCopilot";
 import {CustomerShareStudio} from "./components/CustomerShareStudio";
@@ -2818,20 +2819,7 @@ export default function App() {
     const sale = updated.sales.find((x) => x.id === s.id);
     if (!sale) return;
 
-    // Reverse stock for every line item.
-    sale.items.forEach((item) => {
-      const prod = updated.products.find((p) => p.id === item.productId);
-      if (prod) {
-        prod.stock += item.qty;
-        addStockBatch(updated,prod.id,item.qty,item.purchasePrice,todayStr(),{source:"sale_cancel",ref:sale.invoiceNo});
-        (item.selectedImeis || []).forEach((imeiStr: string) => {
-          const unit = (prod.units || []).find((u) => u.imei1 === imeiStr);
-          if (unit && unit.status === "Sold") unit.status = "In Stock";
-          const regUnit = (updated.imeiRegistry || []).find((u) => u.imei1 === imeiStr);
-          if (regUnit && regUnit.status === "Sold") regUnit.status = "In Stock";
-        });
-      }
-    });
+    try{restoreCancelledSaleStock(updated,sale,todayStr());}catch(error){showToast(error instanceof Error?error.message:"Cannot safely restore stock.","red");return;}
 
     // Reverse the customer's outstanding due, if this sale had added any.
     if (sale.customerId && sale.dueAmount > 0) {

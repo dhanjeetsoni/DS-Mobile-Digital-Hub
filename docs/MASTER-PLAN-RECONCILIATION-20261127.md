@@ -59,3 +59,6 @@ Live migration 20261127042809 adds a private validator and canonical store_state
 
 ## Finance origination journal (live)
 Migration 20261127044117 extends existing append-only POS journal with finance receivable and dealer subvention. Down payment goes to collected-payments clearing, not invented bank credit. Live SQL rollback verified balanced origination, expected net receivable and DBD, duplicate prevention, invalid loan allocation rejection and cancellation reversal. Frontend preview uses the same conservative account treatment; duplicate UTR in single-invoice settlement is blocked (batch settlement requires review). Actual bank-statement ingestion and settlement posting are still separate work; processing fees are not assumed to be shop income/expense.
+
+## Local cancellation stock lifecycle hardening
+Cancellation preflights every line before mutating the cloned state; returned/exchanged sales and settled/disputed finance require separate review. Restore original FIFO cost layers, verify every assigned device still belongs to this invoice, reject duplicate or incomplete identifiers, and clear sold metadata only on matching units. Four regression tests added. Relational atomic IMEI sale reservation and physical return acceptance remain pending.

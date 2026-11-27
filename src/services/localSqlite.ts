@@ -88,7 +88,7 @@ async function persist(db: Database) {
   }
 }
 
-export async function sqliteEnqueue(operation:string,entity:string,payload:unknown,id=crypto.randomUUID()){
+export async function sqliteEnqueue(operation:string,entity:string,payload:unknown,id:string=crypto.randomUUID()){
  return withDb(async db=>{
   db.run("INSERT INTO offline_queue (id,operation,entity,payload,created_at) VALUES (?,?,?,?,?)",[id,operation,entity,JSON.stringify(payload),new Date().toISOString()]);
   await persist(db);return id;

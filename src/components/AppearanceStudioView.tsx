@@ -12,12 +12,8 @@ import { DENSITY_SCALE, TEXT_SCALE, ThemePicker, useAppearance } from "@/theme";
  * density + text-size controls, and the shared Button/Card/Badge primitives)
  * added to the app.
  *
- * It is intentionally self-contained: everything below lives inside a single
- * `.ds-scope` wrapper carrying its own `data-theme` / `data-mode` pair and
- * its own density/text CSS variables, so switching themes here can never
- * affect the look of any other screen in the app (which keeps running its
- * own, separate 22-theme system exactly as before via the sidebar's
- * existing "Theme" dropdown).
+ * Theme choices apply globally via the root theme bridge. This wrapper previews
+ * the shared design primitives with the same active palette.
  */
 export default function AppearanceStudioView() {
   const themeId = useAppearance((s) => s.themeId);
@@ -98,7 +94,7 @@ export default function AppearanceStudioView() {
             }}
           >
             <Card>
-              <CardHeader title="Today's sales" subtitle="Live preview card" />
+              <CardHeader title="Today's sales" subtitle="Illustrative preview · not live sales" />
               <CardBody>
                 <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>₹ 12,480</p>
                 <p style={{ margin: "4px 0 0", fontSize: "0.8125rem", color: "var(--ink-muted)" }}>

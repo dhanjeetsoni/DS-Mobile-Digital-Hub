@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, Bot, Cloud, Cpu, Database as DbIcon, RefreshCw, Send, Users, CheckCircle, AlertTriangle, Play, ShieldCheck } from "lucide-react";
 import { getGeminiKeyStatus, GeminiKeySlotStatus } from "../services/geminiKeys";
 import { pollTelegramConnection, describeFunctionsError } from "../services/telegram";
@@ -87,8 +87,11 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
   const [cloudflareNotConfigured, setCloudflareNotConfigured] = useState(false);
   const [cloudflareError, setCloudflareError] = useState("");
 
+  const requestGeneration=useRef(0);
   const refresh = useCallback(async () => {
+    const generation=++requestGeneration.current;
     setLoading(true);
+    setLastChecked(null);
 
     const [geminiRes, telegramRes, staffRes, supabaseRes, cloudflareRes] = await Promise.allSettled([
       getGeminiKeyStatus(),
@@ -98,6 +101,8 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
       storeId ? getCloudflareUsage(storeId) : Promise.reject(new Error("Store abhi load nahi hua.")),
     ]);
 
+    const telegramIssue=telegramRes.status === "rejected" ? await describeFunctionsError(telegramRes.reason).catch(()=>"Telegram status unavailable") : "";
+    if(generation!==requestGeneration.current)return;
     if (geminiRes.status === "fulfilled") {
       setGeminiSlots(geminiRes.value);
       setGeminiError("");
@@ -114,7 +119,7 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
     } else {
       setTelegramConnected(false);
       setBotConfigured(false);
-      setTelegramError(await describeFunctionsError(telegramRes.reason));
+      setTelegramError(telegramIssue);
     }
 
     if (staffRes.status === "fulfilled") {
@@ -152,7 +157,8 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
   }, [storeId]);
 
   useEffect(() => {
-    refresh();
+    void refresh();
+    return ()=>{requestGeneration.current++;};
   }, [refresh]);
 
   // ---- Gemini AI ----
@@ -192,7 +198,7 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
   const now = Date.now();
   const activeStaff = staff ? staff.filter((s) => s.access_enabled) : [];
   const onlineStaff = activeStaff.filter(
-    (s) => s.last_active_at && now - new Date(s.last_active_at).getTime() < ONLINE_WINDOW_MS
+    (s) => s.last_active_at && now - new Date(s.last_active_at).getTime() >= 0 && now - new Date(s.last_active_at).getTime() < ONLINE_WINDOW_MS
   );
   let staffColor: DotColor = "grey";
   let staffHeadline = "Unavailable";
@@ -231,7 +237,7 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
 
       <div
         className="storage-meter-grid"
-        style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}
+        style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))", gap: 14 }}
       >
         <StatusRow
           icon={<Cpu size={15} />}
@@ -247,7 +253,7 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
           color={telegramBotColor}
           loading={loading}
           headline={telegramBotHeadline}
-          detail={!botConfigured ? "TELEGRAM_BOT_TOKEN Supabase secret set nahi hai." : "Bot token configured hai."}
+          detail={!botConfigured ? "TELEGRAM_BOT_TOKEN Supabase secret set nahi hai." : "Bot configuration reported; actual delivery is checked separately."}
         />
         <StatusRow
           icon={<Send size={15} />}
@@ -259,7 +265,7 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
             !botConfigured
               ? "Pehle bot configure karo."
               : telegramConnected
-              ? "Reports/alerts/approvals is account par jaa rahe hain."
+              ? "Owner connection registered; verify delivery in Telegram bill monitor."
               : "Settings se Telegram connect karo taaki reports/alerts mile."
           }
         />
@@ -281,7 +287,7 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
             cloudflareNotConfigured
               ? "3 R2 secrets abhi Supabase mein set nahi — STEP7.1-CLOUDFLARE-SETUP.md dekho."
               : cloudflareOk
-              ? "Photos/KYC/invoices R2 mein safely store ho rahe hain."
+              ? "R2 usage endpoint responded; media upload/restore needs separate verification."
               : cloudflareError
           }
         />
@@ -291,7 +297,7 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
           color={supabaseColor}
           loading={loading}
           headline={supabaseHeadline}
-          detail={supabaseOk ? "Database reachable, sab data live sync ho raha hai." : supabaseError}
+          detail={supabaseOk ? "Database usage endpoint responded; device sync needs separate verification." : supabaseError}
         />
       </div>
 

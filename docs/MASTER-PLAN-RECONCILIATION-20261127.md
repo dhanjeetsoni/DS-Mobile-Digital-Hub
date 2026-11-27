@@ -151,3 +151,6 @@ The first large-catalog browser test exposed overly broad fuzzy results for an e
 
 ## Large-catalog rendered card fix
 The subsequent browser failure returned an empty innerText despite the correct one-card count. Removed content-visibility:auto from already paginated cards to avoid offscreen skipped contents. The smoke test explicitly scrolls the matching card into view, requires visibility, asserts its exact rendered name and repeats the search using exact SKU. No assertion weakened; all pagination limits retained.
+
+## Android package verification correction
+Tauri frontendDist embeds web assets into the native library (https://v2.tauri.app/reference/config/#buildconfig), rather than requiring loose ZIP HTML. Replaced incorrect ZIP-path assumption with checking every packaged Tauri ELF for exact built HTML/JS/CSS asset-map keys, verified against actual dist entrypoint references. Maintains package/versionCode, permissions and cryptographic APK signing checks. Negative tests reject missing/invalid library assets. This is static asset-key verification, not runtime boot or proof of physical hardware readiness.

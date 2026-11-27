@@ -444,7 +444,7 @@ jobs:
         shell: bash
         env:
           REQUIRE_RELEASE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        run: python3 scripts/verify-native-apk.py src-tauri/gen/android/app/build/outputs/apk "$APP_BUILD_NUMBER"
+        run: python3 scripts/verify-native-apk.py src-tauri/gen/android/app/build/outputs/apk "$APP_BUILD_NUMBER" dist
 
       - name: Upload ${{ matrix.variant }} APK
         uses: actions/upload-artifact@v6

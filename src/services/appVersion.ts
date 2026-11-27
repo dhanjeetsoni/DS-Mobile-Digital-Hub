@@ -153,7 +153,11 @@ export async function publishAppVersion(opts: {
   signature?: string;
   releaseNotes?: string;
 }): Promise<string> {
-  const path = await r2Upload("app", opts.storeId, opts.filename, opts.file, opts.contentType);
+  if(!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(opts.version)||!Number.isSafeInteger(opts.buildNumber)||opts.buildNumber<1||opts.buildNumber>2147483647)throw Error("Use stable release version and positive integer build number.");
+  if(opts.platform==="windows"&&(!opts.signature?.trim()||opts.signature.trim().length>8192))throw Error("Windows updater signature required.");
+  const filename=opts.filename.replace(/[^A-Za-z0-9._-]/g,"_");
+  if(filename.length>240||!(opts.platform==="windows"?/\.(exe|msi)$/i:/\.apk$/i).test(filename))throw Error("Invalid release installer filename.");
+  const path = await r2Upload("app", opts.storeId, filename, opts.file, opts.contentType);
   const { data, error } = await supabase.rpc("publish_app_version", {
     p_platform: opts.platform,
     p_version: opts.version,
@@ -166,7 +170,7 @@ export async function publishAppVersion(opts: {
   return data as string;
 }
 
-/** Marks an existing (already-uploaded) row live for its platform — this is the actual "push" moment every device's next check will see, and also doubles as an instant rollback (pick an older row to re-publish it). */
+/** Marks an existing (already-uploaded) row live for its platform — this is the actual "push" moment every device's next check will see, and only permits monotonic releases. Withdrawal stops offering an update; installed devices need a newer signed recovery build. */
 export async function setAppVersionLive(id: string): Promise<void> {
   const { error } = await supabase.rpc("set_app_version_live", { p_id: id });
   if (error) throw error;
@@ -176,3 +180,5 @@ export const PLATFORM_LABELS: Record<AppPlatform, string> = {
   windows: "Windows App",
   "mobile-android": "DS Mobile (Android)",
 };
+
+export async function withdrawAppVersion(id:string):Promise<void>{const {error}=await supabase.rpc("withdraw_live_app_version",{p_id:id});if(error)throw error;}

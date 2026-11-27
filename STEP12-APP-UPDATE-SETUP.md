@@ -112,3 +112,6 @@ khud dhyan rakhna.
 - [ ] Windows signature ke bina publish karo (khaali chhodo) → confirm karo
       `app-update-manifest` 204 (no update) return karta hai — yeh jaan-
       boojh kar hai (unsigned build kabhi silent-install nahi honi chahiye).
+
+## 2026-11-27 release hardening
+The unified Android publishing RPC accepts `mobile-android`; stable release version and matching Windows signature required. CI stamps native version and Android versionCode, and uses the same build number in JS (`1000000 + workflow run number`). Use stable tagged versions, not branch CI labels, for OTA. Withdraw a defective live version to stop offering it. Already-installed devices are not downgraded; rebuild a known-good source with a higher semver/build, sign, test and activate that replacement. Do not relabel an older binary. Physical device upgrade acceptance and R2 delivery must be verified before activation. No actual version was published during SQL rollback testing.

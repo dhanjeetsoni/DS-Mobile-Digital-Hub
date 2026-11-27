@@ -51,7 +51,7 @@ export async function checkDownloadInstallAndRelaunch(onProgress?: (p: WindowsUp
       // path is rare — mainly a race where the two checks briefly
       // disagree (e.g. signature missing so app-update-manifest is still
       // returning 204 while a Windows row without a signature is live).
-      onProgress?.({ phase: "done" });
+      onProgress?.({ phase: "error", message: "No newer signed native update is available." });
       return;
     }
 

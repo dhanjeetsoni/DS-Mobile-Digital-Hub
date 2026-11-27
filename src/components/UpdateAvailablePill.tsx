@@ -55,7 +55,7 @@ export const UpdateAvailablePill: React.FC<UpdateAvailablePillProps> = ({ info, 
       : progress?.phase === "installing"
       ? "Install ho raha hai..."
       : progress?.phase === "error"
-      ? `Update fail ho gaya (${progress.message}) — click karke installer download karein`
+      ? `Signed update failed — retry after checking connection and release (${progress.message})`
       : `UPDATE AVAILABLE v${info.version} — Update karein (auto-install)`
     : `UPDATE AVAILABLE v${info.version} — ${isAndroid ? "Download karke Install karein" : "Installer Download karein"}`;
 

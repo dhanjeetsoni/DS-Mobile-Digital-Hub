@@ -106,6 +106,11 @@ jobs:
             echo "Invalid version label"; exit 1
           fi
           printf 'APP_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+          printf 'APP_BUILD_NUMBER=%s\n' "$((1000000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
+      - name: Stamp native version and Android version code
+        shell: bash
+        run: node scripts/ci-stamp-native-version.mjs "$APP_VERSION" "$APP_BUILD_NUMBER"
 
       - name: Write .env (Windows build)
         shell: bash
@@ -115,7 +120,7 @@ jobs:
           echo "VITE_APP_VARIANT=full" >> .env
           echo "VITE_APP_PLATFORM=windows" >> .env
           echo "VITE_APP_VERSION=${{ env.APP_VERSION }}" >> .env
-          echo "VITE_APP_BUILD=${{ github.run_number }}" >> .env
+          echo "VITE_APP_BUILD=${{ env.APP_BUILD_NUMBER }}" >> .env
 
       - name: Check signing key presence
         id: signing_check
@@ -233,6 +238,11 @@ jobs:
             echo "Invalid version label"; exit 1
           fi
           printf 'APP_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+          printf 'APP_BUILD_NUMBER=%s\n' "$((1000000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
+      - name: Stamp native version and Android version code
+        shell: bash
+        run: node scripts/ci-stamp-native-version.mjs "$APP_VERSION" "$APP_BUILD_NUMBER"
 
       - name: Write .env (${{ matrix.variant }} Android build)
         # IMPORTANT: this must be plain ".env", not ".env.${{ matrix.variant }}".
@@ -255,7 +265,7 @@ jobs:
           echo "VITE_APP_VARIANT=${{ matrix.variant }}" >> .env
           echo "VITE_APP_PLATFORM=${{ matrix.variant }}-android" >> .env
           echo "VITE_APP_VERSION=${{ env.APP_VERSION }}" >> .env
-          echo "VITE_APP_BUILD=${{ github.run_number }}" >> .env
+          echo "VITE_APP_BUILD=${{ env.APP_BUILD_NUMBER }}" >> .env
 
       - name: Build frontend (dist/) explicitly before Android packaging
         # ROOT CAUSE of the blank/white-screen bug: `tauri android build`'s

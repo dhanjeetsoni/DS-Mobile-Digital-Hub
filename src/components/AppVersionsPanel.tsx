@@ -8,6 +8,7 @@ import {
   listAppVersions,
   publishAppVersion,
   setAppVersionLive,
+  withdrawAppVersion,
 } from "../services/appVersion";
 import { r2PublicUrl } from "../services/r2Client";
 
@@ -65,9 +66,10 @@ export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, sto
   const handlePublish = async () => {
     if (!storeId) return toast("Store abhi set nahi hua.", "red");
     if (!file) return toast("Pehle installer/APK file choose karo.", "red");
-    if (!version.trim()) return toast("Version number daalo (jaise 1.4.0).", "red");
+    if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version.trim())) return toast("Stable version daalo (jaise 1.4.0).", "red");
+    if(platform==="windows"&&!signature.trim())return toast("Signed Windows updater .sig required.","red");
     const build = Number(buildNumber);
-    if (!build || build < 1) return toast("Build number ek positive number hona chahiye (jaise 14).", "red");
+    if (!Number.isSafeInteger(build) || build < 1 || build > 2147483647) return toast("Build number ek positive number hona chahiye (jaise 14).", "red");
 
     setUploading(true);
     try {
@@ -97,6 +99,7 @@ export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, sto
   };
 
   const handleMakeLive = async (row: AppVersionRow) => {
+    if(!window.confirm("Offer this verified build to devices? Check signed artifacts and acceptance results before activation."))return;
     setBusyId(row.id);
     try {
       await setAppVersionLive(row.id);
@@ -108,6 +111,8 @@ export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, sto
       setBusyId(null);
     }
   };
+
+  const handleWithdraw=async(row:AppVersionRow)=>{if(!window.confirm("Stop offering this release? Devices already installed will not downgrade. Recovery needs a new signed higher version."))return;setBusyId(row.id);try{await withdrawAppVersion(row.id);toast("Release withdrawn; installed devices unchanged.","green");await refresh();}catch(e){toast(e instanceof Error?e.message:"Release withdrawal failed.","red");}finally{setBusyId(null);}};
 
   if (storeLoading) {
     return (
@@ -143,8 +148,7 @@ export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, sto
 
       <div className="notice" style={{ marginTop: 4, marginBottom: 12 }}>
         Naya build yahan upload karo, phir jab devices tak bhejna ho tab uski row par "Make Live" dabao — upload
-        karte hi kisi ke phone/PC par kuch nahi badalta jab tak "Make Live" na dabao. Purane version ko dobara
-        "Make Live" karke turant rollback bhi kar sakte ho.
+        karte hi kisi ke phone/PC par kuch nahi badalta jab tak "Make Live" na dabao. Withdraw stops offering an update; installed devices do not downgrade. Recover by rebuilding known-good source as a newer signed version.
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
@@ -186,7 +190,7 @@ export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, sto
           </label>
           <label>
             Installer / APK File
-            <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} accept={platform === "windows" ? ".exe,.msi,.msix" : ".apk"} />
+            <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} accept={platform === "windows" ? ".exe,.msi" : ".apk"} />
           </label>
         </div>
         <label style={{ display: "block", marginTop: 10 }}>
@@ -195,7 +199,7 @@ export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, sto
         </label>
         {platform === "windows" && (
           <label style={{ display: "block", marginTop: 10 }}>
-            Tauri Updater Signature (optional — `tauri signer sign` se mila .sig content, sirf Windows silent-update ke liye)
+            Tauri Updater Signature (required — matching signed installer .sig content)
             <textarea value={signature} onChange={(e) => setSignature(e.target.value)} rows={2} />
           </label>
         )}
@@ -234,8 +238,9 @@ export const AppVersionsPanel: React.FC<AppVersionsPanelProps> = ({ storeId, sto
                   <td>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <a className="btn sm" href={r2PublicUrl("app", r.downloadPath)} target="_blank" rel="noreferrer">Download</a>
+                      {r.isLive&&<button type="button" className="btn sm danger" disabled={busyId!==null} onClick={()=>void handleWithdraw(r)}>Withdraw</button>}
                       {!r.isLive && (
-                        <button className="btn sm primary" onClick={() => handleMakeLive(r)} disabled={busyId === r.id}>
+                        <button className="btn sm primary" onClick={() => handleMakeLive(r)} disabled={busyId !== null}>
                           {busyId === r.id ? <Loader2 size={12} className="spin" /> : <Rocket size={12} />} Make Live
                         </button>
                       )}

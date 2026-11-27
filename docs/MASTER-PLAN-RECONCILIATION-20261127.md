@@ -143,3 +143,5 @@ CI browser smoke now loads 125 synthetic local products and exercises the real i
 
 ## Selected point 7 — offline queue concurrency
 Cloud replay now conditionally claims by original status and attempts, store and queued-by profile, and uses attempt-scoped completion/failure updates. Rechecks authenticated account before replay, and only removes matching local envelopes. SQLite persistence reopens the latest durable database under a Web Lock (cross-tab where supported), or serializes within a single runtime if Web Locks are unavailable. A failed write no longer leaves a cached, unpersisted queue database as source of truth. New acceptance tests required; no physical multi-device sync claim.
+
+Added executable offline replay tests for competing-device claim loss, attempt-scoped completion, cross-account local cleanup protection and account switch. Real sql.js fallback persistence tests exercise concurrent enqueue/removal and write failure/recovery. These are simulated transport and actual local SQLite tests, not cloud device acceptance.

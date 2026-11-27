@@ -232,7 +232,7 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
                           </button>
                         ) : (
                           <span className="hint" style={{ fontSize: "11px" }}>
-                            UTR: {recordedSettlementHasReference(fin.utrRef)?fin.utrRef:"Reference needs review"}{fin.payoutStatus==="Settled in Bank"&&recordedSettlementHasReference(fin.utrRef)&&fin.settlementDate&&<div style={{marginTop:6}}><button type="button" className="btn sm" disabled={postingInvoice!==null||!!postedInvoices[s.invoiceNo]} onClick={()=>void postSettlement(s)}>{postedInvoices[s.invoiceNo]?"Journal posted":postingInvoice===s.invoiceNo?"Posting…":"Post settlement journal"}</button></div>}
+                            UTR: {recordedSettlementHasReference(fin.utrRef)?fin.utrRef:"Reference needs review"}{fin.payoutStatus==="Settled in Bank"&&recordedSettlementHasReference(fin.utrRef)&&fin.settlementDate&&<span style={{display:"block",marginTop:6}}><button type="button" className="btn sm" disabled={postingInvoice!==null||!!postedInvoices[sale.invoiceNo]} onClick={()=>void postSettlement(sale)}>{postedInvoices[sale.invoiceNo]?"Journal posted":postingInvoice===sale.invoiceNo?"Posting…":"Post settlement journal"}</button></span>}
                           </span>
                         )}
                       </td>

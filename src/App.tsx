@@ -1073,6 +1073,7 @@ export default function App() {
 
   // Customer Checkout WhatsApp & VIP Discount
   const [autoSendWhatsApp, setAutoSendWhatsApp] = useState<boolean>(false);
+  const [officialWhatsApp,setOfficialWhatsApp]=useState(false);
 
   // Repair ticket states
   const [isJobModalOpen, setIsJobModalOpen] = useState(false);
@@ -2459,7 +2460,7 @@ export default function App() {
           return { product_id: realId, quantity: i.qty, unit_price: i.price, selected_imeis:i.selectedImeis??[], is_gift: i.isGift ?? false, warranty_enabled: i.warrantyEnabled, warranty_months: i.warrantyMonths, warranty_start: i.warrantyStart ?? null, warranty_end: i.warrantyEnd ?? null };
         }));
 
-        const { data: atomicSaleId, error: atomicError } = await supabase.rpc("atomic_complete_sale_v2", {
+        const { data: atomicSaleId, error: atomicError } = await supabase.rpc(officialWhatsApp?"atomic_complete_sale_v3":"atomic_complete_sale_v2", {
           p_store_id: cloudProfile.store_id,
           p_invoice_no: invoiceNo,
           p_customer_name: customerData.name || null,
@@ -2473,9 +2474,10 @@ export default function App() {
           p_due_amount: dueAmount,
           p_finance_loan_amount: financeDetails?.loanAmount ?? null,
           p_finance_net_receivable: financeDetails?.netBankReceivable ?? null,
+          ...(officialWhatsApp?{p_whatsapp_consent:true}:{}),
         });
         if (atomicError) throw atomicError;
-        if (atomicSaleId) showToast("Cloud transaction committed atomically", "green");
+        if (atomicSaleId) {showToast("Cloud transaction committed atomically", "green");if(officialWhatsApp)void supabase.functions.invoke("whatsapp-invoice-worker",{body:{trigger:"checkout"}}).catch(()=>{});}
       } catch (e: any) {
         const msg = String(e?.message || e || "");
         const businessFailure = /insufficient|inventory mismatch|selling price|not authorized|invoice number already exists|invalid quantity|invalid payment amount|hardening_nonnegative_stock|IMEI reservation/i.test(msg);
@@ -2485,7 +2487,7 @@ export default function App() {
         }
         console.warn("Cloud sale unavailable; queuing offline transaction", e);
         try {
-          await queueOfflineOperation("sale", "sales", { invoiceNo, items: saleItems, total, payment: isFinanceMode ? `Finance (${financeForm.company})` : paymentMode, customer: customerData, discount: cartDiscount, taxAmount, amountPaid, dueAmount, financeLoanAmount: financeDetails?.loanAmount ?? null, financeNetReceivable: financeDetails?.netBankReceivable ?? null }, idempotencyKey);
+          await queueOfflineOperation("sale", "sales", { invoiceNo, items: saleItems, total, payment: isFinanceMode ? `Finance (${financeForm.company})` : paymentMode, customer: customerData, discount: cartDiscount, taxAmount, amountPaid, dueAmount, financeLoanAmount: financeDetails?.loanAmount ?? null, financeNetReceivable: financeDetails?.netBankReceivable ?? null, whatsappConsent:officialWhatsApp }, idempotencyKey);
         } catch (queueError) {
           showToast("Sale could not be safely queued. Please retry.", "red");
           return;
@@ -2610,7 +2612,7 @@ export default function App() {
   // typed, so "9876" alone can find "9876543210". Closed the moment a
   // suggestion is tapped or the field is cleared.
   const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
-  useEffect(()=>setAutoSendWhatsApp(false),[checkoutCustomer.phone]);
+  useEffect(()=>{setAutoSendWhatsApp(false);setOfficialWhatsApp(false);},[checkoutCustomer.phone]);
 
   const handleStartCheckout = () => {
     if (cart.length === 0) {
@@ -2631,7 +2633,7 @@ export default function App() {
       }));
     }
 
-    setAutoSendWhatsApp(false);
+    setAutoSendWhatsApp(false);setOfficialWhatsApp(false);
     setIsCustomerModalOpen(true);
   };
 
@@ -6435,12 +6437,13 @@ export default function App() {
                         type="checkbox"
                         checked={autoSendWhatsApp}
                         disabled={!checkoutCustomer.phone.trim()}
-                        onChange={(e) => setAutoSendWhatsApp(e.target.checked)}
+                        onChange={(e) => {setAutoSendWhatsApp(e.target.checked);if(e.target.checked)setOfficialWhatsApp(false);}}
                       />
                       <span style={{ fontWeight: 700, color: "var(--ink)" }}>
                         Customer agrees to WhatsApp invoice text — open WhatsApp after billing (manual Send)
                       </span>
                     </label>
+                    <label style={{display:"flex",gap:8,alignItems:"center",marginTop:8}}><input type="checkbox" checked={officialWhatsApp} disabled={!cloudProfile?.store_id||!/^(91)?[6-9][0-9]{9}$/.test(checkoutCustomer.phone.replace(/[^0-9]/g,""))} onChange={e=>{setOfficialWhatsApp(e.target.checked);if(e.target.checked)setAutoSendWhatsApp(false);}}/> Customer explicitly agrees to official automatic WhatsApp receipt (requires configured business template; queues after cloud sync)</label>
                   </div>
                 );
               })()}

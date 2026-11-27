@@ -501,7 +501,7 @@ async function processOperation(row: any, storeId: string) {
     }));
 
     const hasPaymentDetails = typeof sale.amountPaid === "number" && Number.isFinite(sale.amountPaid) && typeof sale.dueAmount === "number" && Number.isFinite(sale.dueAmount);
-    const { data: saleId, error } = await supabase.rpc(hasPaymentDetails ? "atomic_complete_sale_v2" : "atomic_complete_sale", {
+    const { data: saleId, error } = await supabase.rpc(hasPaymentDetails ? sale.whatsappConsent===true?"atomic_complete_sale_v3":"atomic_complete_sale_v2" : "atomic_complete_sale", {
       p_store_id: storeId,
       p_invoice_no: invoiceNo,
       p_customer_name: sale.customer?.name || null,
@@ -511,9 +511,10 @@ async function processOperation(row: any, storeId: string) {
       p_tax: Number(sale.taxAmount || 0),
       p_idempotency_key: row.operation_id,
       p_items: resolvedItems,
-      ...(hasPaymentDetails ? { p_amount_paid: sale.amountPaid, p_due_amount: sale.dueAmount, p_finance_loan_amount: sale.financeLoanAmount ?? null, p_finance_net_receivable: sale.financeNetReceivable ?? null } : {}),
+      ...(hasPaymentDetails ? { p_amount_paid: sale.amountPaid, p_due_amount: sale.dueAmount, p_finance_loan_amount: sale.financeLoanAmount ?? null, p_finance_net_receivable: sale.financeNetReceivable ?? null, ...(sale.whatsappConsent===true?{p_whatsapp_consent:true}:{}) } : {}),
     });
     if (error) throw error;
+    if(sale.whatsappConsent===true&&hasPaymentDetails)void supabase.functions.invoke("whatsapp-invoice-worker",{body:{trigger:"offline-replay"}}).catch(()=>{});
     return { serverId: saleId, invoiceNo };
   }
 

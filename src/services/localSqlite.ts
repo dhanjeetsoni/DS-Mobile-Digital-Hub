@@ -3,7 +3,13 @@ import wasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 
 const DB_KEY = "dsmdh-sqlite-v2";
 const DB_STORE = "sqlite";
-let dbPromise: Promise<Database> | null = null;
+let sqlPromise: ReturnType<typeof initSqlJs> | null = null;
+let localTail:Promise<unknown>=Promise.resolve();
+const QUEUE_LOCK="dsmdh-offline-queue-v2";
+function serialized<T>(work:()=>Promise<T>):Promise<T>{
+  if(typeof navigator!=="undefined"&&navigator.locks?.request)return navigator.locks.request(QUEUE_LOCK,{mode:"exclusive"},work);
+  const next=localTail.then(work,work);localTail=next.catch(()=>{});return next;
+}
 
 function idbAvailable() {
   return typeof indexedDB !== "undefined";
@@ -54,26 +60,19 @@ async function readLegacyLocalStorage(): Promise<Uint8Array | undefined> {
   }
 }
 
-async function openDb() {
-  if (dbPromise) return dbPromise;
-  dbPromise = (async () => {
-    const SQL = await initSqlJs({ locateFile: () => wasmUrl });
-    const bytes = (await readIndexedDb()) || (await readLegacyLocalStorage());
-    const db = new SQL.Database(bytes);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS offline_queue (
-        id TEXT PRIMARY KEY,
-        operation TEXT NOT NULL,
-        entity TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT
-      )
-    `);
-    return db;
-  })();
-  return dbPromise;
+async function withDb<T>(work:(db:Database)=>Promise<T>):Promise<T>{
+ return serialized(async()=>{
+  sqlPromise??=initSqlJs({locateFile:()=>wasmUrl});
+  const SQL=await sqlPromise;
+  const bytes=(await readIndexedDb())||(await readLegacyLocalStorage());
+  const db=new SQL.Database(bytes);
+  try{
+   db.run(`CREATE TABLE IF NOT EXISTS offline_queue (
+      id TEXT PRIMARY KEY,operation TEXT NOT NULL,entity TEXT NOT NULL,payload TEXT NOT NULL,created_at TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT
+    )`);
+   return await work(db);
+  }finally{db.close();}
+ });
 }
 
 async function persist(db: Database) {
@@ -89,46 +88,21 @@ async function persist(db: Database) {
   }
 }
 
-export async function sqliteEnqueue(operation: string, entity: string, payload: unknown, id = crypto.randomUUID()) {
-  const db = await openDb();
-  db.run(
-    "INSERT INTO offline_queue (id,operation,entity,payload,created_at) VALUES (?,?,?,?,?)",
-    [id, operation, entity, JSON.stringify(payload), new Date().toISOString()]
-  );
-  await persist(db);
-  return id;
+export async function sqliteEnqueue(operation:string,entity:string,payload:unknown,id=crypto.randomUUID()){
+ return withDb(async db=>{
+  db.run("INSERT INTO offline_queue (id,operation,entity,payload,created_at) VALUES (?,?,?,?,?)",[id,operation,entity,JSON.stringify(payload),new Date().toISOString()]);
+  await persist(db);return id;
+ });
 }
-
-export async function sqliteReplace(operation: string, entity: string, payload: unknown, id: string) {
-  const db=await openDb();
-  db.run("INSERT OR REPLACE INTO offline_queue (id,operation,entity,payload,created_at) VALUES (?,?,?,?,?)",[id,operation,entity,JSON.stringify(payload),new Date().toISOString()]);
-  await persist(db);
+export async function sqliteReplace(operation:string,entity:string,payload:unknown,id:string){
+ return withDb(async db=>{db.run("INSERT OR REPLACE INTO offline_queue (id,operation,entity,payload,created_at) VALUES (?,?,?,?,?)",[id,operation,entity,JSON.stringify(payload),new Date().toISOString()]);await persist(db);});
 }
-
-export async function sqliteList() {
-  const db = await openDb();
-  const result = db.exec(
-    "SELECT id,operation,entity,payload,created_at,attempts,last_error FROM offline_queue ORDER BY created_at"
-  );
-  return result[0]?.values ?? [];
+export async function sqliteList(){
+ return withDb(async db=>db.exec("SELECT id,operation,entity,payload,created_at,attempts,last_error FROM offline_queue ORDER BY created_at")[0]?.values??[]);
 }
-
-export async function sqliteRemove(id: string) {
-  const db = await openDb();
-  db.run("DELETE FROM offline_queue WHERE id=?", [id]);
-  await persist(db);
+export async function sqliteRemove(id:string){
+ return withDb(async db=>{db.run("DELETE FROM offline_queue WHERE id=?",[id]);await persist(db);});
 }
-
-export async function sqliteTransaction<T>(fn: (db: Database) => T) {
-  const db = await openDb();
-  db.run("BEGIN IMMEDIATE");
-  try {
-    const result = fn(db);
-    db.run("COMMIT");
-    await persist(db);
-    return result;
-  } catch (e) {
-    db.run("ROLLBACK");
-    throw e;
-  }
+export async function sqliteTransaction<T>(fn:(db:Database)=>T){
+ return withDb(async db=>{db.run("BEGIN IMMEDIATE");let result:T;try{result=fn(db);db.run("COMMIT");}catch(e){db.run("ROLLBACK");throw e;}await persist(db);return result;});
 }

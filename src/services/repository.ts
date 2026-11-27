@@ -429,6 +429,7 @@ export async function queueOfflineOperation(
 
   if (!profile?.store_id || operation === "snapshot" || operation === "snapshot_conflict") return operationId;
 
+  await assertReplayScope(profile);
   const { error } = await supabase.from("sync_queue").upsert({
     store_id: profile.store_id,
     client_id: deviceId,
@@ -447,12 +448,23 @@ export async function queueOfflineOperation(
   return operationId;
 }
 
-async function markSync(id: string, patch: Record<string, unknown>) {
-  const { error } = await supabase.from("sync_queue").update({
-    ...patch,
-    updated_at: new Date().toISOString(),
-  }).eq("id", id).select("id").single();
-  if (error) throw error;
+type QueueScope={store_id:string;id:string};
+async function assertReplayScope(scope:QueueScope){
+  const {data,error}=await supabase.auth.getSession();
+  if(error||data.session?.user.id!==scope.id)throw Error("SYNC_ACCOUNT_CHANGED: retained pending records");
+}
+async function markSync(id:string,patch:Record<string,unknown>,scope:QueueScope,expected:{status:string;attempts:number|null}) {
+  await assertReplayScope(scope);
+  let q=supabase.from("sync_queue").update({...patch,updated_at:new Date().toISOString()}).eq("id",id).eq("store_id",scope.store_id).eq("queued_by",scope.id).eq("status",expected.status);
+  q=expected.attempts===null?q.is("attempts",null):q.eq("attempts",expected.attempts);
+  const {data,error}=await q.select("id").maybeSingle();
+  if(error)throw error;
+  return !!data;
+}
+async function removeMatchingLocal(operationId:string,scope:QueueScope){
+  const local=(await sqliteList()).find(r=>String(r[0])===operationId);
+  if(!local)return;
+  try{const e=JSON.parse(String(local[3]));if(e.scope?.storeId===scope.store_id&&e.scope?.profileId===scope.id&&e.deviceId===deviceId&&e.operationId===operationId)await sqliteRemove(operationId);}catch(e){console.warn("Local queue cleanup deferred",e);}
 }
 
 async function processOperation(row: any, storeId: string) {
@@ -786,6 +798,7 @@ async function flushOfflineQueueInner() {
   // Restore device-only entries without resetting previously processed server rows.
   // Unscoped legacy entries and stale full-state snapshots require reconciliation.
   for (const local of await sqliteList()) {
+    await assertReplayScope(profile);
     let envelope: any;
     try { envelope = JSON.parse(String(local[3])); } catch { continue; }
     if (envelope?.scope?.storeId !== profile.store_id || envelope?.scope?.profileId !== profile.id || envelope?.deviceId !== deviceId) continue;
@@ -795,7 +808,7 @@ async function flushOfflineQueueInner() {
     const { data: existing, error: lookupError } = await supabase.from("sync_queue")
       .select("status").eq("store_id", profile.store_id).eq("queued_by", profile.id).eq("operation_id", operationId).maybeSingle();
     if (lookupError) throw lookupError;
-    if (existing?.status === "processed") { await sqliteRemove(operationId); continue; }
+    if (existing?.status === "processed") { await removeMatchingLocal(operationId,profile); continue; }
     if (existing || operation === "snapshot" || operation === "snapshot_conflict" || operation === "snapshot_recovery") continue;
     const { error: uploadError } = await supabase.from("sync_queue").upsert({
       store_id: profile.store_id, client_id: deviceId, device_id: deviceId,
@@ -836,52 +849,32 @@ async function flushOfflineQueueInner() {
 
   let processed = 0, failed = 0;
   for (const row of rows || []) {
+    await assertReplayScope(profile);
+    const before={status:String(row.status),attempts:row.attempts==null?null:Number(row.attempts)};
     if (String(row.operation_type || row.operation) === "snapshot") {
-      await markSync(row.id,{status:"abandoned",last_error:"SNAPSHOT_REVIEW_REQUIRED: no trusted base version"});
-      failed++;
+      if(await markSync(row.id,{status:"abandoned",last_error:"SNAPSHOT_REVIEW_REQUIRED: no trusted base version"},profile,before))failed++;
       continue;
     }
     if (Number(row.retry_count || 0) >= MAX_RETRIES) {
-      const giveUpNote = `Gave up after ${MAX_RETRIES} failed attempts — needs manual review.`;
-      try {
-        await markSync(row.id, { status: "abandoned", last_error: giveUpNote });
-      } catch {
-        // status.in.(...) filters this query by "pending"/"failed"/stale-"syncing"
-        // only, so if the DB's status CHECK constraint doesn't (yet) allow
-        // "abandoned" and this write rejects, falling back to "failed" here
-        // would put the row right back in front of this same MAX_RETRIES gate
-        // next cycle -- which correctly skips it again without ever calling
-        // processOperation, so it still stops hammering the DB.
-        await markSync(row.id, { status: "failed", last_error: giveUpNote }).catch(() => {});
-      }
-      failed++;
+      const giveUpNote=`Gave up after ${MAX_RETRIES} failed attempts — needs manual review.`;
+      try{if(await markSync(row.id,{status:"abandoned",last_error:giveUpNote},profile,before))failed++;}
+      catch{await markSync(row.id,{status:"failed",last_error:giveUpNote},profile,before).catch(()=>{});failed++;}
       continue;
     }
-    try {
-      await markSync(row.id, {
-        status: "syncing",
-        retry_count: Number(row.retry_count || 0) + 1,
-        attempts: Number(row.attempts || 0) + 1,
-        last_attempt_at: new Date().toISOString(),
-      });
-
-      const result = await processOperation(row, profile.store_id);
-      await markSync(row.id, {
-        status: "processed",
-        last_error: null,
-        server_reference: result?.serverId || null,
-      });
-
-      const localRows = await sqliteList();
-      const local = localRows.find((r: any[]) => r[0] === row.operation_id);
-      if (local) await sqliteRemove(String(local[0]));
-      processed++;
-    } catch (err: any) {
+    const attempt=Number(row.attempts||0)+1;
+    const claimed=await markSync(row.id,{status:"syncing",retry_count:Number(row.retry_count||0)+1,attempts:attempt,last_attempt_at:new Date().toISOString()},profile,before);
+    if(!claimed)continue; // another device has already claimed or completed this row
+    const lease={status:"syncing",attempts:attempt};
+    try{
+      await assertReplayScope(profile);
+      const result=await processOperation(row,profile.store_id);
+      if(await markSync(row.id,{status:"processed",last_error:null,server_reference:result?.serverId||null},profile,lease)){
+        await removeMatchingLocal(String(row.operation_id),profile);
+        processed++;
+      }
+    }catch(err:any){
       failed++;
-      await markSync(row.id, {
-        status: "failed",
-        last_error: String(err?.message || err),
-      });
+      await markSync(row.id,{status:"failed",last_error:String(err?.message||err)},profile,lease);
     }
   }
   return { processed, failed };

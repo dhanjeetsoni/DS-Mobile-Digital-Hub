@@ -47,3 +47,6 @@ Migration 20261127041031: existing cybercafe revenue immutable through staff sna
 
 ## Follow-up FIFO cost audit (2026-11-27)
 Source review found invalid batch purchase cost could survive allocation and historical NaN could become zero in fifoCostTotal. Reject non-finite/negative costs before mutating batches; validate cost aggregation and preserve legitimate zero-cost batches. Regression tests added. New commit requires CI verification; no physical-device or production DB acceptance claimed.
+
+## Mobile counter calculator and release reliability follow-up
+Replaced calculator with mobile-first accessible keypad, standard immediate-execution chaining, operator replacement, contextual percentages, repeated equals, sign, precision, recoverable divide-by-zero, GST add/remove, separate markup and gross margin, recallable history and keyboard handling. Seven unit scenarios and browser desktop/mobile touch acceptance added. Android previous build failure traced to Maven Central HTTP 429; bounded exponential backoff for transient dependency errors, deterministic failures fail immediately. No claim of new CI pass until results arrive. Existing feature scope preserved; native hardware and external provider acceptance remain pending.

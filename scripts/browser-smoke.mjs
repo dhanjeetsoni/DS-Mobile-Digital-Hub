@@ -35,6 +35,30 @@ try{
   await p.getByRole("button",{name:"Create PIN & Unlock",exact:true}).click();
   await p.locator("#app").waitFor({timeout:30000});
  };
+ const testCalculator=async(p,mobile=false)=>{
+  await p.keyboard.press("Alt+k");
+  const d=p.getByRole("dialog",{name:"Counter calculator"});
+  await d.waitFor();
+  const hit=async name=>{const key=d.getByRole("button",{name,exact:true});if(mobile)await key.tap();else await key.click();};
+  const value=()=>d.getByTestId("calculator-result").innerText();
+  await hit("All clear");for(const key of ["2","0","0","Subtract","1","0","Percent","Equals"])await hit(key);
+  assert.equal(await value(),"180","Contextual percentage discount");
+  await hit("All clear");for(const key of ["2","Add","3","Multiply","4","Equals"])await hit(key);
+  assert.equal(await value(),"20","Chained arithmetic");
+  await hit("Equals");assert.equal(await value(),"80","Repeated equals");
+  await hit("All clear");for(const key of ["1","0","0"])await hit(key);
+  await hit("GST & pricing");await hit("+18% GST");assert.equal(await value(),"118");
+  await hit("GST & pricing");await hit("Remove 18%");assert.equal(await value(),"100");
+  await hit("History");assert((await d.getByText("Recent calculations").count())===1);
+  await hit("Back to keypad");await hit("All clear");
+  await d.focus();await p.keyboard.type("12.5+7.5");await p.keyboard.press("Enter");
+  assert.equal(await value(),"20","Keyboard calculation");
+  const geom=await d.evaluate(el=>({w:el.getBoundingClientRect().width,h:el.getBoundingClientRect().height,vw:innerWidth,vh:innerHeight,minKey:Math.min(...Array.from(el.querySelectorAll(".ds-calc-key")).map(k=>k.getBoundingClientRect().height)),overflow:el.scrollWidth-el.clientWidth}));
+  assert(geom.w<=geom.vw&&geom.h<=geom.vh&&geom.minKey>=48&&geom.overflow<=1,"Calculator layout "+JSON.stringify(geom));
+  await p.screenshot({path:"visual-review/calculator-"+(mobile?"mobile":"desktop")+".png",animations:"disabled"});
+  await hit("Close calculator");await d.waitFor({state:"detached"});
+  console.log("PASS "+(mobile?"mobile touch":"desktop")+" calculator: arithmetic, percent, GST, history, keyboard, fit");
+ };
  await page.goto(url,{waitUntil:"domcontentloaded"});
  await page.getByText("Owner Confidential Area",{exact:true}).first().waitFor({timeout:30000});
  await page.getByText("Login (ID / Password)",{exact:true}).click();
@@ -54,6 +78,7 @@ try{
  await owner.getByRole("button",{name:"Unlock",exact:true}).click();
  await owner.getByText("All Products",{exact:true}).first().waitFor({timeout:30000});
  console.log("PASS local owner PIN creation and persistent unlock");
+ await testCalculator(owner);
  await owner.getByText("Sales / New Bill",{exact:true}).first().click();
  // Exercise a real checkout in the isolated browser's local-only database.
  // No customer phone, external notification, production account or real sale.
@@ -211,6 +236,7 @@ try{
  await mobile.getByText("Owner Confidential Area",{exact:true}).first().click();
  await mobile.screenshot({path:"visual-review/android-login.png",animations:"disabled"});
  await setupLocalOwner(mobile);
+ await testCalculator(mobile,true);
  await mobile.getByRole("button",{name:"More",exact:true}).click();
  const mobileSearch=mobile.getByRole("textbox",{name:"Search tools"});
  await mobileSearch.fill("backup");

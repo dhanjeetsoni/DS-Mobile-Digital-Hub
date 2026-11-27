@@ -353,12 +353,19 @@ jobs:
       - name: Build ${{ matrix.variant }} Android APK
         shell: bash
         run: |
-          # Retry transient Gradle/SDK download failures, not silently ignore them.
-          for attempt in 1 2 3; do
-            if npm run android:${{ matrix.variant }}:build; then exit 0; fi
-            if [ "$attempt" = "3" ]; then exit 1; fi
-            echo "::warning::Android build attempt $attempt failed; retrying"
-            sleep $((attempt * 15))
+          # Maven Central/Gradle can return HTTP 429 on hosted runners.
+          # Back off only for identifiable transient failures; never mask compile/signing errors.
+          set -o pipefail
+          for attempt in 1 2 3 4; do
+            log="$RUNNER_TEMP/android-build-$attempt.log"
+            if npm run android:${{ matrix.variant }}:build 2>&1 | tee "$log"; then exit 0; fi
+            if [ "$attempt" = "4" ]; then exit 1; fi
+            if ! grep -Eqi 'status code (429|502|503|504)|Too Many Requests|Connection reset|Read timed out|checksum failed|Could not GET.*(timed out|temporarily)' "$log"; then
+              echo "::error::Non-transient Android build failure"; exit 1
+            fi
+            delay=$((60 * 2 ** (attempt - 1)))
+            echo "::warning::Transient Android dependency failure; retrying in ${delay}s"
+            sleep "$delay"
           done
 
       - name: Rename APK with variant name (Tauri gives Staff and Owner builds the identical filename otherwise)

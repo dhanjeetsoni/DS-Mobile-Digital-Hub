@@ -463,7 +463,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               fontSize: "12px",
               fontWeight: 800,
             }}
-            onClick={onOpenCalculator}
+            onClick={()=>{onCloseMobile?.();onOpenCalculator();}}
+            aria-label="Open counter calculator"
             title="Open Counter GST & Margin Calculator"
           >
             <Calculator size={15} style={{ color: "var(--brand)" }} />

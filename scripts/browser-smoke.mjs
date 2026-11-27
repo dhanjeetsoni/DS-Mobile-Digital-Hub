@@ -36,7 +36,7 @@ try{
   await p.locator("#app").waitFor({timeout:30000});
  };
  const testCalculator=async(p,mobile=false)=>{
-  await p.keyboard.press("Alt+k");
+  if(mobile){await p.getByRole("button",{name:"More",exact:true}).click();await p.getByRole("button",{name:"Open counter calculator",exact:true}).tap();}else await p.keyboard.press("Alt+k");
   const d=p.getByRole("dialog",{name:"Counter calculator"});
   await d.waitFor();
   const hit=async name=>{const key=d.getByRole("button",{name,exact:true});if(mobile)await key.tap();else await key.click();};

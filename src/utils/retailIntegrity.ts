@@ -49,3 +49,14 @@ export function validateDeviceIdentifiers(first:string,second:string,existing:{i
  if(used.has(a)||b&&used.has(b))return "This IMEI is already registered. Check both SIM slots.";
  return null;
 }
+
+export function validatePhoneRegistrationPrices(p:{purchaseCost:number;confidentialPrice:number;sellingPrice:number;mrp:number;warrantyMonths:number}):string|null{
+ const prices=[p.purchaseCost,p.confidentialPrice,p.sellingPrice,p.mrp];
+ if(prices.some(v=>!Number.isFinite(v)||v<0||Math.abs(v-round2(v))>1e-8))return "Enter valid, non-negative prices with at most two decimals.";
+ if(p.sellingPrice<=0)return "Enter a positive selling price.";
+ if(p.confidentialPrice>0&&p.confidentialPrice<p.purchaseCost)return "Confidential price cannot be below purchase cost.";
+ if(p.sellingPrice<Math.max(p.purchaseCost,p.confidentialPrice))return "Selling price cannot be below purchase cost or confidential price.";
+ if(p.mrp>0&&p.sellingPrice>p.mrp)return "Selling price cannot exceed the entered MRP.";
+ if(!Number.isSafeInteger(p.warrantyMonths)||p.warrantyMonths<0)return "Warranty months must be a non-negative whole number.";
+ return null;
+}

@@ -7,7 +7,7 @@ import { BoxOcrModal } from "./BoxOcrModal";
 import { OcrPhoneResult } from "../utils/aiOcr";
 import { ModelAutoSuggestInput } from "./ModelAutoSuggestInput";
 import { PasteButton } from "./PasteButton";
-import {validateDeviceIdentifiers} from "../utils/retailIntegrity";
+import {validateDeviceIdentifiers,validatePhoneRegistrationPrices} from "../utils/retailIntegrity";
 
 interface ImeiAuditViewProps {
   db: Database;
@@ -136,16 +136,8 @@ export const ImeiAuditView: React.FC<ImeiAuditViewProps> = ({
     }
     const validation=validateDeviceIdentifiers(phoneForm.imei1,phoneForm.imei2,[...(db.imeiRegistry||[]),...db.products.flatMap(p=>p.units||[])]);
     if(validation){toast(validation,"red");return;}
-    // Step 3.3 — same 4-Tier Pricing ordering rule as AddProductModal /
-    // EditProductModal: Original ≤ Confidential ≤ Selling.
-    if (phoneForm.confidentialPrice > 0 && phoneForm.purchaseCost > 0 && phoneForm.confidentialPrice < phoneForm.purchaseCost) {
-      toast("Confidential Price, Purchase Cost se kam nahi ho sakti.", "red");
-      return;
-    }
-    if (phoneForm.confidentialPrice > 0 && phoneForm.sellingPrice < phoneForm.confidentialPrice) {
-      toast("Selling Price, Confidential Price se kam nahi ho sakti — staff isse neeche kabhi bech nahi payega.", "red");
-      return;
-    }
+    const priceError=validatePhoneRegistrationPrices(phoneForm);
+    if(priceError){toast(priceError,"red");return;}
 
     // BUG FIX: nothing stopped the same physical phone (same IMEI) from being
     // registered twice — by accident (re-scanning the same box) or by mistake —

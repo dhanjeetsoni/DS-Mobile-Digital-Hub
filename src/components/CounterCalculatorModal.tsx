@@ -35,7 +35,7 @@ export const CounterCalculatorModal:React.FC<CounterCalculatorModalProps>=({isOp
    if(e.ctrlKey||e.metaKey||e.altKey)return;
    if(e.key==="Escape"){e.preventDefault();e.stopImmediatePropagation();closeRef.current();return;}
    if(e.key==="Tab"){
-    const nodes=Array.from(dialog.current?.querySelectorAll<HTMLElement>("button:not([disabled]),input:not([disabled]),[tabindex='0']")||[]);
+    const nodes=Array.from(dialog.current?.querySelectorAll("button:not([disabled]),input:not([disabled]),[tabindex='0']")||[]) as HTMLElement[];
     const first=nodes[0],last=nodes[nodes.length-1];
     if(first&&last&&(e.shiftKey?(document.activeElement===first||document.activeElement===dialog.current):document.activeElement===last)){e.preventDefault();(e.shiftKey?last:first).focus();}
     return;
@@ -55,6 +55,7 @@ export const CounterCalculatorModal:React.FC<CounterCalculatorModalProps>=({isOp
   window.addEventListener("keydown",handler,true);
   return()=>{window.removeEventListener("keydown",handler,true);if(previous?.isConnected)previous.focus();};
  },[isOpen]);
+ useEffect(()=>{setCopyStatus("");},[state.display]);
  if(!isOpen)return null;
  const n=Number(state.display);
  const valid=state.display!=="Error"&&Number.isFinite(n);

@@ -18,7 +18,7 @@ export function calculatorReducer(s:CalcState,a:CalcAction):CalcState {
     const base=s.fresh||s.display==="Error"?"0":s.display;
     let value=base;
     if(a.type==="decimal"){if(!base.includes("."))value=base+".";}
-    else if(/^\d$/.test(a.digit))value=base==="0"?a.digit:base==="-0"?"-"+a.digit:base.length<16?base+a.digit:base;
+    else if("digit" in a && /^\d$/.test(a.digit))value=base==="0"?a.digit:base==="-0"?"-"+a.digit:base.length<16?base+a.digit:base;
     return {...s,display:value,fresh:false,done:false,repeat:null,equation:s.op?s.equation:""};
   }
   if(s.display==="Error")return s;

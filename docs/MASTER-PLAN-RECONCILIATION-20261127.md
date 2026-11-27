@@ -166,3 +166,6 @@ Migration 20261127112046 adds separate opt-in rich catalog link kinds. Existing 
 
 ## Independent R2 media archive and safe restore
 Owner-only paginated inventory of flat media objects in both R2 buckets, conditional ETag read, AES-256-GCM local archive with SHA-256 per object, 16 MiB / 50-file batch limit, no exposed secrets. Restore only creates missing objects (conditional PUT); existing objects never overwritten and exact SHA-256 readback required. Excludes nested releases and database backup archives; larger or unsupported objects and independent cross-project recovery still need operator handling. Actual configured-R2 owner export/restore pending; no real private media downloaded by audit.
+
+## Actual OCR provider self-test
+Owner-only synthetic OCR request exercises the same vision model, failover and structured OCR pipeline as real phone scans, with known PNG brand/model and deliberately absent IMEI/serial/price. Exact marker and no invented absent fields required before success. Raw provider errors are no longer persisted into key status for this gateway. No real image or provider quota used without owner action. Regression validates result acceptance/rejection; actual external provider call remains owner-initiated.

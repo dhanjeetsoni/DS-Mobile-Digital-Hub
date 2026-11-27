@@ -1,3 +1,4 @@
+import {OCR_TEST_PNG,validSyntheticOcr} from "./synthetic-ocr.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { GoogleGenAI, Type } from "npm:@google/genai@2";
@@ -201,7 +202,7 @@ async function markKeyResult(
         .update({
           status: failureStatus,
           cooldown_until: failureStatus === "exhausted" ? new Date(Date.now() + 60_000).toISOString() : null,
-          last_error: (errMsg || "").slice(0, 300),
+          last_error: failureStatus==="invalid"?"Provider rejected credentials or authorization":"Provider unavailable, quota limited or timed out",
         })
         .eq("store_id", storeId)
         .eq("slot", slot);
@@ -1278,12 +1279,18 @@ Deno.serve(async (req: Request) => {
         const {data:profile,error}=await supabaseAdmin!.from("profiles").select("role,store_id").eq("id",ctx.userId).maybeSingle();
         if(error||profile?.role!=="owner"||profile.store_id!==ctx.storeId)return json({success:false,error:"Owner access required."},403);
         if(!checkRateLimit("provider-test:"+ctx.userId,60000,2))return json({success:false,error:"Please wait before testing again."},429);
+        const request=await req.json().catch(()=>({}));const mode=request.mode==="ocr"?"ocr":"text";
         const started=Date.now();
         try{
+          if(mode==="ocr"){
+            const result=await runGeminiPhoneOcr(ctx.storeId,OCR_TEST_PNG,"image/png","box");
+            if(!validSyntheticOcr(result))return json({success:false,error:"OCR responded but did not extract the exact synthetic brand/model or invented an absent identifier/price.",elapsedMs:Date.now()-started},502);
+            return json({success:true,verified:"ocr",elapsedMs:Date.now()-started});
+          }
           const response=await runWithGeminiFailover(ctx.storeId,ai=>ai.models.generateContent({model:GEMINI_MODEL_TEXT,contents:{parts:[{text:"Connectivity test. Reply with exactly DSMDH_TEST_OK and no other text."}]},config:TEXT_MODE_CONFIG}));
           if(!/^DSMDH_TEST_OK[.!]?$/.test(String(response.text||"").trim()))return json({success:false,error:"Provider replied but the synthetic verification marker did not match.",elapsedMs:Date.now()-started},502);
           return json({success:true,verified:"text",elapsedMs:Date.now()-started});
-        }catch{return json({success:false,error:"No configured text provider completed the synthetic request. Check key status, quota and model availability."},503);}
+        }catch{return json({success:false,error:"No configured provider completed the requested synthetic test. Check key status, quota and model availability."},503);}
       }
 
       case "ocr-phone": {

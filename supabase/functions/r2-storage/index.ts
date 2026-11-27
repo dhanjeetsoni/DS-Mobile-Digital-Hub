@@ -84,7 +84,7 @@ function amzDateNow(): { amzDate: string; dateStamp: string } {
 }
 
 /** Signs + sends a request straight to R2's S3-compatible endpoint. Body is streamed through unread (UNSIGNED-PAYLOAD) so uploads never get buffered in memory here. */
-async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: string, opts: { body?: BodyInit | null; contentType?: string } = {}): Promise<Response> {
+async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: string, opts: { body?: BodyInit | null; contentType?: string; createOnly?: boolean } = {}): Promise<Response> {
   const host = `${CF_ACCOUNT_ID}.r2.cloudflarestorage.com`;
   const region = "auto";
   const service = "s3";
@@ -98,6 +98,7 @@ async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: st
     "x-amz-date": amzDate,
   };
   if (method === "PUT" && opts.contentType) headersToSign["content-type"] = opts.contentType;
+  if (method === "PUT" && opts.createOnly) headersToSign["if-none-match"] = "*";
 
   const sortedKeys = Object.keys(headersToSign).sort();
   const canonicalHeaders = sortedKeys.map((k) => `${k}:${headersToSign[k]}\n`).join("");
@@ -122,6 +123,7 @@ async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: st
     Authorization: authorization,
   };
   if (method === "PUT" && opts.contentType) fetchHeaders["content-type"] = opts.contentType;
+  if (method === "PUT" && opts.createOnly) fetchHeaders["if-none-match"] = "*";
 
   return fetch(`https://${host}${canonicalUri}`, { method, headers: fetchHeaders, body: opts.body ?? undefined });
 }
@@ -245,7 +247,7 @@ function parsePath(kind: string, rest: string): { storeId: string; path: string 
   const storeId = parts[0];
   const filename = parts.slice(1).join("/");
   if (!/^[a-zA-Z0-9_-]+$/.test(storeId)) return null;
-  if (!/^[a-zA-Z0-9_.-]+$/.test(filename)) return null;
+  if (!/^[a-zA-Z0-9_.-]+$/.test(filename) || filename==="." || filename==="..") return null;
   return { storeId, path: `${storeId}/${filename}` };
 }
 
@@ -313,7 +315,8 @@ Deno.serve(async (req: Request) => {
         if(req.headers.get("content-type")?.split(";")[0]!=="application/octet-stream")return Response.json({error:"Encrypted checkpoint bytes required"},{status:415,headers:CORS_HEADERS});
         let size=0;const reader=req.body?.getReader();if(!reader)return Response.json({error:"Empty backup"},{status:400,headers:CORS_HEADERS});
         const body=new ReadableStream({async pull(controller){const {done,value}=await reader.read();if(done){controller.close();return;}size+=value.byteLength;if(size>70*1024*1024){await reader.cancel();controller.error(Error("Checkpoint too large"));return;}controller.enqueue(value);},cancel(){return reader.cancel();}});
-        const result=await r2Fetch("PUT",CF_BUCKET_PRIVATE,key,{body,contentType:"application/octet-stream"});
+        const result=await r2Fetch("PUT",CF_BUCKET_PRIVATE,key,{body,contentType:"application/octet-stream",createOnly:true});
+        if(result.status===412)return Response.json({error:"Backup already exists; use a new checkpoint reference"},{status:409,headers:CORS_HEADERS});
         if(!result.ok)return Response.json({error:"Checkpoint upload failed"},{status:502,headers:CORS_HEADERS});
         return Response.json({path:parsed.path},{headers:{...CORS_HEADERS,"Cache-Control":"no-store"}});
       }
@@ -332,6 +335,21 @@ Deno.serve(async (req: Request) => {
     return Response.json({ error: "Invalid path. Expected /<kind>/<storeId>/<filename>." }, { status: 400, headers: CORS_HEADERS });
   }
   const bucket = bucketFor(kind);
+  // Isolate binaries from every generic product/boxscan/invoice path.
+  const filename=parsed.path.split("/")[1];
+  const objectKey=kind==="app"?parsed.storeId+"/releases/"+filename:parsed.path;
+  if(kind==="app"){
+    if(!/^(windows|mobile-android)-v[0-9]+\.[0-9]+\.[0-9]+-b[0-9]+-[A-Za-z0-9._-]+\.(exe|msi|apk)$/i.test(filename)||filename.length>240)return Response.json({error:"Invalid release filename"},{status:400,headers:CORS_HEADERS});
+    if(req.method==="DELETE")return Response.json({error:"Release binaries are immutable; withdraw the release instead"},{status:405,headers:CORS_HEADERS});
+    if(req.method==="PUT"){
+      const token=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"").trim();
+      const clientKey=Deno.env.get("SUPABASE_ANON_KEY")||Deno.env.get("SUPABASE_PUBLISHABLE_KEY")||"";
+      if(!token||!clientKey)return Response.json({error:"Release administrator required"},{status:403,headers:CORS_HEADERS});
+      const caller=createClient(SUPABASE_URL,clientKey,{global:{headers:{Authorization:"Bearer "+token}},auth:{persistSession:false}});
+      const {data,error}=await caller.rpc("can_upload_release_artifact",{p_store_id:parsed.storeId});
+      if(error||data!==true)return Response.json({error:"Release administrator required"},{status:403,headers:CORS_HEADERS});
+    }
+  }
   const isPrivate = PRIVATE_KINDS.has(kind);
 
   // Auth is required for every PUT/DELETE, and for every GET on the private (kyc) kind.
@@ -346,7 +364,8 @@ Deno.serve(async (req: Request) => {
   try {
     if (req.method === "PUT") {
       const contentType = req.headers.get("content-type") || "application/octet-stream";
-      const r2res = await r2Fetch("PUT", bucket, parsed.path, { body: req.body, contentType });
+      const r2res = await r2Fetch("PUT", bucket, objectKey, { body: req.body, contentType, createOnly:kind==="app" });
+      if (kind==="app"&&r2res.status===412)return Response.json({error:"Release artifact already exists; choose a fresh release filename"},{status:409,headers:CORS_HEADERS});
       if (!r2res.ok) {
         const text = await r2res.text().catch(() => "");
         return Response.json({ error: `R2 upload failed (${r2res.status}): ${text.slice(0, 300)}` }, { status: 502, headers: CORS_HEADERS });
@@ -355,7 +374,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (req.method === "GET") {
-      const r2res = await r2Fetch("GET", bucket, parsed.path);
+      const r2res = await r2Fetch("GET", bucket, objectKey);
       if (!r2res.ok) {
         return Response.json({ error: "File not found" }, { status: r2res.status === 404 ? 404 : 502, headers: CORS_HEADERS });
       }
@@ -366,7 +385,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (req.method === "DELETE") {
-      const r2res = await r2Fetch("DELETE", bucket, parsed.path);
+      const r2res = await r2Fetch("DELETE", bucket, objectKey);
       if (!r2res.ok && r2res.status !== 404) {
         const text = await r2res.text().catch(() => "");
         return Response.json({ error: `R2 delete failed (${r2res.status}): ${text.slice(0, 300)}` }, { status: 502, headers: CORS_HEADERS });

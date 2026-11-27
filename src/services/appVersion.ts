@@ -157,6 +157,8 @@ export async function publishAppVersion(opts: {
   if(opts.platform==="windows"&&(!opts.signature?.trim()||opts.signature.trim().length>8192))throw Error("Windows updater signature required.");
   const filename=opts.filename.replace(/[^A-Za-z0-9._-]/g,"_");
   if(filename.length>240||!(opts.platform==="windows"?/\.(exe|msi)$/i:/\.apk$/i).test(filename))throw Error("Invalid release installer filename.");
+  const {data:allowed,error:accessError}=await supabase.rpc("can_upload_release_artifact",{p_store_id:opts.storeId});
+  if(accessError||allowed!==true)throw Error("Release administrator access required.");
   const path = await r2Upload("app", opts.storeId, filename, opts.file, opts.contentType);
   const { data, error } = await supabase.rpc("publish_app_version", {
     p_platform: opts.platform,

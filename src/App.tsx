@@ -1792,7 +1792,7 @@ export default function App() {
       try{
         const result=await cleanupStaleOutOfStockPhotos(scope.storeId,dbRef.current.products,()=>sameScope()?dbRef.current.products:[],async id=>{
           if(!sameScope())return false;
-          const {data,error}=await supabase.from("products_staff_view").select("id,stock_qty").eq("store_id",scope.storeId).eq("id",id).maybeSingle();
+          const {data,error}=await supabase.from("products_staff_view").select("id,stock_qty").eq("store_id",scope.storeId).eq("client_id",id).maybeSingle();
           return !error&&!!data&&data.stock_qty!==null&&Number(data.stock_qty)===0&&sameScope();
         });
         if(!sameScope())return;

@@ -1,5 +1,6 @@
 import { supabase, getCurrentProfile } from "./supabaseClient";
 import type { Database } from "../types";
+import {collectCatalogRows,stockMapFromRows} from "../utils/liveCatalogPagination";
 import { sqliteEnqueue, sqliteList, sqliteRemove, sqliteReplace } from "./localSqlite";
 
 const LOCAL_KEY = "dsmdh_cache_v4";
@@ -111,15 +112,18 @@ export async function fetchAuditLogs(storeId: string, limit = 200): Promise<Audi
     createdAt: row.created_at,
   }));
 }
+async function readAllLiveProductRows(storeId:string,columns:string):Promise<any[]>{
+ return collectCatalogRows<any>(async after=>{
+  let q=supabase.from("products_staff_view").select(columns).eq("store_id",storeId).order("id",{ascending:true}).limit(500);
+  if(after!==null)q=q.gt("id",after);
+  const {data,error}=await q;
+  if(error)throw error;
+  if(!Array.isArray(data))throw Error("Live catalog page unavailable");
+  return data;
+ });
+}
 export async function fetchLiveStock(storeId: string): Promise<Record<string, number>> {
-  const { data, error } = await supabase
-    .from("products_staff_view")
-    .select("id,stock_qty")
-    .eq("store_id", storeId);
-  if (error) throw error;
-  const map: Record<string, number> = {};
-  for (const row of data || []) map[row.id] = Number(row.stock_qty || 0);
-  return map;
+  return stockMapFromRows(await readAllLiveProductRows(storeId,"id,client_id,stock_qty"));
 }
 
 /**
@@ -141,8 +145,11 @@ export function subscribeToLiveStock(storeId: string, onChange: (productId: stri
       "postgres_changes",
       { event: "*", schema: "public", table: "products_staff_view", filter: `store_id=eq.${storeId}` },
       (payload: any) => {
-        const row = payload.new || payload.old;
-        if (row?.id) onChange(row.id, Number(row.stock_qty || 0));
+        if(payload.eventType==="DELETE")return;
+        const row=payload.new;
+        if(!row?.id||row.stock_qty==null||!Number.isFinite(Number(row.stock_qty)))return;
+        onChange(row.id,Number(row.stock_qty));
+        if(row.client_id&&row.client_id!==row.id)onChange(row.client_id,Number(row.stock_qty));
       }
     )
     .subscribe();
@@ -215,11 +222,7 @@ export async function fetchLiveCatalog(storeId: string): Promise<{ byClientId: R
   // this silently returned zero rows for every staff session. The mirror
   // carries the exact same LIVE_CATALOG_COLUMNS set (still excluding
   // cost_price/confidential_price), so this is a like-for-like swap.
-  const { data, error } = await supabase
-    .from("products_staff_view")
-    .select(LIVE_CATALOG_COLUMNS)
-    .eq("store_id", storeId) as { data: any[] | null; error: any };
-  if (error) throw error;
+  const data=await readAllLiveProductRows(storeId,LIVE_CATALOG_COLUMNS);
   const byClientId: Record<string, LiveCatalogEntry> = {};
   const bySku: Record<string, LiveCatalogEntry> = {};
   for (const row of data || []) {

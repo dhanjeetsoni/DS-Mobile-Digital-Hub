@@ -1,0 +1,38 @@
+/* Retail workspace V5: shared, theme-aware finish. No hidden features. */
+@media screen {
+ #app #page .section-head { align-items:flex-start; }
+ #app #page .section-head h2 { line-height:1.25; overflow-wrap:anywhere; }
+ #app #page .section-head > div { min-width:0; }
+ #app #page .card h3 { overflow-wrap:anywhere; }
+ #app #page .section { border-color:var(--line); }
+ #app #page .section-head::before { content:""; width:4px; height:24px; flex:0 0 4px; border-radius:4px; background:linear-gradient(180deg,var(--brand),var(--accent)); align-self:flex-start; }
+ #app #page .section-head { justify-content:flex-start; }
+ #app #page .section-head > :last-child:not(:first-child) { margin-inline-start:auto; }
+ #app #page .field > label, #app #page label.field { overflow-wrap:anywhere; }
+ #app #page .btn:focus-visible, #app #page input:focus-visible, #app #page select:focus-visible, #app #page textarea:focus-visible, #app .workspace-group-toggle:focus-visible { outline:2px solid var(--brand);outline-offset:2px; }
+ #app #page .table-wrap { min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain; }
+ #app #page .table-wrap th { white-space:nowrap; }
+ @media(max-width:900px) {
+   #app #page .section-head { flex-wrap:wrap; gap:8px; }
+   #app #page .section-head::before { display:none; }
+   #app #page .section-head > * { min-width:0;max-width:100%; }
+   #app #page .section-head > :last-child:not(:first-child) { margin-inline-start:0; }
+   #app #page .section-head .btn, #app #page .actions .btn, #app #page .toolbar .btn { min-height:44px;white-space:normal; }
+   #app #page .formgrid > *,#app #page .field,#app #page .formgrid input:not([type=checkbox]):not([type=radio]),#app #page .formgrid select,#app #page .formgrid textarea { min-width:0;max-width:100%;box-sizing:border-box; }
+   #app #page .grid > * { min-width:0; }
+   #app #page .grid .card .big { font-size:clamp(17px,5vw,26px);overflow-wrap:anywhere; }
+   #app #page .actions,#app #page .toolbar,#app #page .filter-bar { flex-wrap:wrap;min-width:0;max-width:100%; }
+   #app #page .ds-scope { min-width:0;max-width:100%;overflow-wrap:anywhere; }
+ }
+ @media(max-width:360px) {
+   #app #page { padding-inline:8px; }
+   #app #page .section,#app #page .card { padding:10px; }
+   #app #page .section-head h2 { font-size:clamp(15px,5vw,19px); }
+   #app #page .retail-metrics .card .big { font-size:17px; }
+   #app #page .product-card-actions .btn { font-size:11px;padding-inline:6px; }
+   #app #page .retail-hero .retail-hero-copy { min-width:0; }
+ }
+ @media(prefers-reduced-motion:reduce) {
+   #app #page .section,#app #page .card,#app #page .btn { scroll-behavior:auto!important; }
+ }
+}

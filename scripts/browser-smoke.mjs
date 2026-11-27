@@ -349,6 +349,34 @@ try{
    assert(geometry.scroll<=geometry.width+1&&geometry.page>150,"Mobile layout issue "+key+" "+JSON.stringify(geometry));
    await mobile.screenshot({path:"visual-review/android-"+label+".png",animations:"disabled"});
  }
+ // Every registered owner route must be reachable at the Android emulator's
+ // compact 320px viewport, in both light and dark, without a blank section.
+ const mobileRouteAudit=[];
+ await mobile.setViewportSize({width:320,height:640});
+ for(const mode of ["Light","Dark"]){
+   await mobile.getByRole("button",{name:"Open global tool search"}).click();
+   await mobile.getByRole("textbox",{name:"Find a tool"}).fill("appearanceStudio");
+   await mobile.locator('[data-command-key="appearanceStudio"]').click();
+   await mobile.getByRole("button",{name:mode,exact:true}).click();
+   assert.equal(await mobile.locator("html").getAttribute("data-mode"),mode.toLowerCase());
+   for(const mod of modules){
+     await mobile.getByRole("button",{name:"Open global tool search"}).click();
+     await mobile.getByRole("textbox",{name:"Find a tool"}).fill(mod.key);
+     await mobile.locator('[data-command-key="'+mod.key+'"]').click();
+     await mobile.locator('#page[data-current-page="'+mod.key+'"]').waitFor();
+     await mobile.waitForFunction(()=>!document.querySelector("#page")?.textContent?.includes("Loading view..."));
+     const result=await mobile.evaluate(()=>{const p=document.querySelector("#page");const box=p.getBoundingClientRect();return {width:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,pageWidth:box.width,pageHeight:box.height,text:(p.innerText||"").trim().length};});
+     assert(result.text>0&&result.pageHeight>80&&result.pageWidth>0&&result.scroll<=result.width+1,"Compact Android module render/viewport failure: "+mod.key+"/"+mode+" "+JSON.stringify(result));
+     mobileRouteAudit.push({key:mod.key,mode,...result});
+   }
+   await mobile.getByRole("button",{name:"Open global tool search"}).click();
+   await mobile.getByRole("textbox",{name:"Find a tool"}).fill("dashboard");
+   await mobile.locator('[data-command-key="dashboard"]').click();
+   await mobile.locator('#page[data-current-page="dashboard"]').waitFor();
+   await mobile.screenshot({path:"visual-review/android-compact-dashboard-"+mode.toLowerCase()+".png",animations:"disabled"});
+ }
+ writeFileSync("visual-review/compact-mobile-routes.json",JSON.stringify(mobileRouteAudit,null,2));
+ console.log("PASS compact Android owner route renders:",mobileRouteAudit.length);
  for(const key of ["dashboard","sell"]){
   await search.fill(key);await directory.locator('[data-tool-key="'+key+'"]').click();
   await directory.locator('#page[data-current-page="'+key+'"]').waitFor();

@@ -15,6 +15,7 @@ import './fx.css';
 import './retail-premium.css';
 import './retail-studio-v2.css';
 import './retail-studio-v3.css';
+import './retail-studio-v5.css';
 import {applyRetailMotion,getRetailMotion} from './components/RetailHero';
 import { startAppearanceSync } from '../theme';
 

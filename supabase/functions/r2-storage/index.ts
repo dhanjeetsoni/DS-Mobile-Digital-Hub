@@ -84,7 +84,7 @@ function amzDateNow(): { amzDate: string; dateStamp: string } {
 }
 
 /** Signs + sends a request straight to R2's S3-compatible endpoint. Body is streamed through unread (UNSIGNED-PAYLOAD) so uploads never get buffered in memory here. */
-async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: string, opts: { body?: BodyInit | null; contentType?: string; createOnly?: boolean } = {}): Promise<Response> {
+async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: string, opts: { body?: BodyInit | null; contentType?: string; createOnly?: boolean; match?: string } = {}): Promise<Response> {
   const host = `${CF_ACCOUNT_ID}.r2.cloudflarestorage.com`;
   const region = "auto";
   const service = "s3";
@@ -99,6 +99,7 @@ async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: st
   };
   if (method === "PUT" && opts.contentType) headersToSign["content-type"] = opts.contentType;
   if (method === "PUT" && opts.createOnly) headersToSign["if-none-match"] = "*";
+  if (method === "GET" && opts.match) headersToSign["if-match"]=opts.match;
 
   const sortedKeys = Object.keys(headersToSign).sort();
   const canonicalHeaders = sortedKeys.map((k) => `${k}:${headersToSign[k]}\n`).join("");
@@ -124,18 +125,20 @@ async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: st
   };
   if (method === "PUT" && opts.contentType) fetchHeaders["content-type"] = opts.contentType;
   if (method === "PUT" && opts.createOnly) fetchHeaders["if-none-match"] = "*";
+  if (method === "GET" && opts.match) fetchHeaders["if-match"]=opts.match;
 
   return fetch(`https://${host}${canonicalUri}`, { method, headers: fetchHeaders, body: opts.body ?? undefined });
 }
 
 /** Lists objects under `${storeId}/` in a bucket via R2's S3-compatible ListObjectsV2, paging through all continuation tokens, and returns total byte count + object count. Used only by the Step 7.3 usage route — never exposed to clients directly (they only see the summed totals). */
-async function r2ListPrefixTotal(bucket: string, prefix: string): Promise<{ bytes: number; count: number }> {
+async function r2ListPrefixTotal(bucket: string, prefix: string, pageOnly=false, cursor:string|null=null): Promise<{ bytes: number; count: number; objects:{name:string;size:number;etag:string}[];nextCursor:string|null;skipped:number }> {
   const host = `${CF_ACCOUNT_ID}.r2.cloudflarestorage.com`;
   const region = "auto";
   const service = "s3";
   let bytes = 0;
   let count = 0;
-  let continuationToken: string | null = null;
+  let continuationToken: string | null = cursor;
+  const objects:{name:string;size:number;etag:string}[]=[];let skipped=0;
 
   do {
     const { amzDate, dateStamp } = amzDateNow();
@@ -143,7 +146,7 @@ async function r2ListPrefixTotal(bucket: string, prefix: string): Promise<{ byte
     const queryParams: Record<string, string> = {
       "list-type": "2",
       prefix,
-      "max-keys": "1000",
+      "max-keys": pageOnly?"100":"1000",
     };
     if (continuationToken) queryParams["continuation-token"] = continuationToken;
     const sortedQueryKeys = Object.keys(queryParams).sort();
@@ -187,12 +190,19 @@ async function r2ListPrefixTotal(bucket: string, prefix: string): Promise<{ byte
       bytes += Number(m[1]) || 0;
       count += 1;
     }
+    if(pageOnly)for(const m of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)){
+      const key=m[1].match(/<Key>([^<]*)<\/Key>/)?.[1]||"",size=Number(m[1].match(/<Size>(\d+)<\/Size>/)?.[1]),etag=(m[1].match(/<ETag>([^<]*)<\/ETag>/)?.[1]||"").replaceAll("&quot;",'"');
+      const name=key.startsWith(prefix)?key.slice(prefix.length):"";
+      if(!/^[A-Za-z0-9_.-]{1,240}$/.test(name)||name==="."||name===".."||!Number.isSafeInteger(size)||size<0||!/^"[a-fA-F0-9]{32}(-\d+)?"$/.test(etag)){skipped++;continue;}
+      objects.push({name,size,etag});
+    }
     const truncated = /<IsTruncated>true<\/IsTruncated>/.test(xml);
     const tokenMatch = xml.match(/<NextContinuationToken>([^<]*)<\/NextContinuationToken>/);
-    continuationToken = truncated && tokenMatch ? tokenMatch[1] : null;
-  } while (continuationToken);
+    continuationToken = truncated && tokenMatch ? tokenMatch[1].replaceAll("&amp;","&") : null;
+    if(truncated&&!continuationToken)throw Error("R2 pagination token missing");
+  } while (!pageOnly&&continuationToken);
 
-  return { bytes, count };
+  return { bytes, count, objects, nextCursor:continuationToken,skipped };
 }
 
 // ---------- auth: who is calling, which store do they belong to ----------
@@ -298,6 +308,42 @@ Deno.serve(async (req: Request) => {
     } catch (e) {
       return Response.json({ error: String((e as Error)?.message || e) }, { status: 502, headers: CORS_HEADERS });
     }
+  }
+
+  // Owner-only independent media recovery: only flat media objects, never releases/backups.
+  if(kind==="media-list"||kind==="media-object"){
+    const [store,scope,name,...extra]=restParts;
+    if(!/^[0-9a-f-]{36}$/.test(store||"")||!["public","private"].includes(scope)||extra.length||kind==="media-list"&&name!==undefined||kind==="media-object"&&(!/^[A-Za-z0-9_.-]{1,240}$/.test(name||"")||name==="."||name===".."))return Response.json({error:"Invalid media path"},{status:400,headers:CORS_HEADERS});
+    const caller=await getCallerStoreAndRole(req);
+    if(!caller||caller.role!=="owner"||caller.storeId!==store)return Response.json({error:"Owner access required"},{status:403,headers:CORS_HEADERS});
+    const bucket=scope==="private"?CF_BUCKET_PRIVATE:CF_BUCKET_PUBLIC,headers={...CORS_HEADERS,"Cache-Control":"private, no-store","Access-Control-Expose-Headers":"ETag,Content-Type,Content-Length","X-Content-Type-Options":"nosniff"};
+    try{
+      if(kind==="media-list"&&req.method==="GET"){
+        const cursor=url.searchParams.get("cursor");if(cursor&&cursor.length>2048)return Response.json({error:"Invalid cursor"},{status:400,headers});
+        const result=await r2ListPrefixTotal(bucket,store+"/",true,cursor);
+        return Response.json({objects:result.objects,nextCursor:result.nextCursor,skipped:result.skipped},{headers});
+      }
+      if(kind==="media-object"&&req.method==="GET"){
+        const match=url.searchParams.get("etag")||undefined;if(match&&!/^"[a-fA-F0-9]{32}(-\d+)?"$/.test(match))return Response.json({error:"Invalid ETag"},{status:400,headers});
+        const result=await r2Fetch("GET",bucket,store+"/"+name,{match});
+        if(!result.ok)return Response.json({error:"Media unavailable or changed"},{status:[404,412].includes(result.status)?result.status:502,headers});
+        const type=result.headers.get("content-type")||"application/octet-stream",length=Number(result.headers.get("content-length"));
+        if(!Number.isFinite(length)||length>24*1024*1024)return Response.json({error:"Media exceeds recovery batch limit"},{status:413,headers});
+        return new Response(result.body,{headers:{...headers,"Content-Type":type,"Content-Disposition":"attachment","Content-Length":String(length),"ETag":result.headers.get("etag")||""}});
+      }
+      if(kind==="media-object"&&req.method==="PUT"){
+        const type=req.headers.get("content-type")?.split(";")[0]||"application/octet-stream";
+        if(!["image/jpeg","image/png","image/webp","application/pdf","application/octet-stream"].includes(type))return Response.json({error:"Unsupported media type"},{status:415,headers});
+        const len=Number(req.headers.get("content-length"));if(len>24*1024*1024)return Response.json({error:"Media too large"},{status:413,headers});
+        const reader=req.body?.getReader();if(!reader)return Response.json({error:"Missing object"},{status:400,headers});let size=0;
+        const body=new ReadableStream({async pull(controller){const {done,value}=await reader.read();if(done){controller.close();return;}size+=value.byteLength;if(size>24*1024*1024){await reader.cancel();controller.error(Error("Media too large"));return;}controller.enqueue(value);},cancel(){return reader.cancel();}});
+        const result=await r2Fetch("PUT",bucket,store+"/"+name,{body,contentType:type,createOnly:true});
+        if(result.status===412)return Response.json({error:"Existing object not overwritten"},{status:409,headers});
+        if(!result.ok)return Response.json({error:"Restore write failed"},{status:502,headers});
+        return Response.json({restored:true},{headers});
+      }
+      return Response.json({error:"Method not allowed"},{status:405,headers});
+    }catch{return Response.json({error:"Media storage unavailable"},{status:502,headers});}
   }
 
   // Encrypted checkpoint namespace: inaccessible through legacy flat KYC paths.

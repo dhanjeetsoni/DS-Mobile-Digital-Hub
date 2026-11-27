@@ -110,7 +110,8 @@ export const XeroxGrid: React.FC<XeroxGridProps> = ({ db, onUpdate, toast, owner
   const todayProfit = todayEntries.reduce((a, x) => a + xeroxProfit(x), 0);
 
   const handle1TapAdd = (srv: CybercafeService) => {
-    const total = srv.rate * copiesCount;
+    const total = Math.round(srv.rate * copiesCount * 100) / 100;
+    if(!Number.isSafeInteger(copiesCount)||copiesCount<=0||!Number.isFinite(srv.rate)||srv.rate<=0||!Number.isFinite(total)||total<=0||total>1000000000){toast("Enter a valid positive service rate and quantity.","red");return;}
     const autoCost = (srv.defaultCost || 0) * copiesCount;
     const cost = manualCost.trim() !== "" ? Math.max(0, Number(manualCost) || 0) : autoCost;
     const entry: XeroxEntry = {
@@ -130,7 +131,7 @@ export const XeroxGrid: React.FC<XeroxGridProps> = ({ db, onUpdate, toast, owner
     onUpdate();
 
     const profitNote = ownerMode && cost > 0 ? ` (cost ${inr(cost)}, profit ${inr(total - cost)})` : "";
-    toast(`+${inr(total)} logged for ${copiesCount}x ${srv.label} (${payMethod})${profitNote}`, "green");
+    toast(`+${inr(total)} recorded for ${copiesCount}x ${srv.label} (${payMethod})${profitNote}. Telegram bill after cloud sync`, "green");
     setCopiesCount(1); // reset counter after adding
     setManualCost(""); // reset one-off cost override after adding
   };

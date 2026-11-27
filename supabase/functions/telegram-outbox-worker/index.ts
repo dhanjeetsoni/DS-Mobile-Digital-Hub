@@ -1,66 +1,50 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
-
-const corsHeaders={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type, x-cron-secret","Access-Control-Allow-Methods":"POST, OPTIONS"};
-const json=(body:unknown,status=200)=>Response.json(body,{status,headers:corsHeaders});
+import {createClient} from "npm:@supabase/supabase-js@2";
+const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type, x-cron-secret","Access-Control-Allow-Methods":"POST, OPTIONS"};
+const json=(body:unknown,status=200)=>Response.json(body,{status,headers:cors});
 function secret(){const r=Deno.env.get("SUPABASE_SECRET_KEYS");if(r){try{return JSON.parse(r).default}catch{}}return Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";}
 function pub(){const r=Deno.env.get("SUPABASE_PUBLISHABLE_KEYS");if(r){try{return JSON.parse(r).default}catch{}}return Deno.env.get("SUPABASE_ANON_KEY")||"";}
-function esc(s:string){return s.replace(/\\/g,"\\\\").replace(/\(/g,"\\(").replace(/\)/g,"\\)").replace(/[^\x20-\x7E]/g,"?");}
-function pdf(lines:string[]){const body=["BT","/F1 10 Tf","40 800 Td",...lines.slice(0,48).flatMap((x,i)=>[i?"0 -16 Td":"",`(${esc(x).slice(0,105)}) Tj`]),"ET"].filter(Boolean).join("\n");const objs=["<< /Type /Catalog /Pages 2 0 R >>","<< /Type /Pages /Kids [3 0 R] /Count 1 >>","<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>","<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",`<< /Length ${body.length} >>\nstream\n${body}\nendstream`];let out="%PDF-1.4\n",offs:number[]=[0];for(let i=0;i<objs.length;i++){offs.push(out.length);out+=`${i+1} 0 obj\n${objs[i]}\nendobj\n`;}const x=out.length;out+=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`;for(let i=1;i<offs.length;i++)out+=`${String(offs[i]).padStart(10,"0")} 00000 n \n`;out+=`trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF`;return new TextEncoder().encode(out);}
+const clean=(x:unknown)=>String(x??"-").replace(/[\x00-\x1f\x7f]/g," ").trim();
+const esc=(s:string)=>s.replace(/₹/g,"INR ").replace(/[^\x20-\x7e]/g,"?").replace(/\\/g,"\\\\").replace(/\(/g,"\\(").replace(/\)/g,"\\)");
+function pdf(lines:string[]){const wrapped=lines.flatMap(s=>{const a=clean(s);return a.match(/.{1,88}/gu)||[""];});const pages:string[][]=[];for(let i=0;i<wrapped.length;i+=45)pages.push(wrapped.slice(i,i+45));if(!pages.length)pages.push(["Bill"]);const objs=["<< /Type /Catalog /Pages 2 0 R >>","", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];const kids:string[]=[];for(const [n,page] of pages.entries()){const i=objs.length+1;kids.push(i+" 0 R");const body=["BT","/F1 10 Tf","40 800 Td",...page.flatMap((x,k)=>[k?"0 -16 Td":"",`(${esc(x)}) Tj`]),"0 -22 Td",`(Page ${n+1} of ${pages.length}) Tj`,"ET"].filter(Boolean).join("\n");objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${i+1} 0 R >>`,`<< /Length ${body.length} >>\nstream\n${body}\nendstream`);}objs[1]=`<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${pages.length} >>`;let out="%PDF-1.4\n",offs=[0];for(let i=0;i<objs.length;i++){offs.push(out.length);out+=`${i+1} 0 obj\n${objs[i]}\nendobj\n`;}const x=out.length;out+=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`;for(let i=1;i<offs.length;i++)out+=`${String(offs[i]).padStart(10,"0")} 00000 n \n`;out+=`trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF`;return new TextEncoder().encode(out);}
+class DeliveryError extends Error{constructor(message:string,public retrySeconds=0,public review=false){super(message)}}
+async function telegram(token:string,method:string,body:FormData|Record<string,unknown>){let r:Response;try{r=await fetch("https://api.telegram.org/bot"+token+"/"+method,{method:"POST",...(body instanceof FormData?{body}:{headers:{"content-type":"application/json"},body:JSON.stringify(body)}),signal:AbortSignal.timeout(20000)});}catch{throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: Telegram response uncertain",0,true);}const b=await r.json().catch(()=>null);if(!b)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: Telegram returned an unreadable response",0,true);if(!r.ok||!b.ok)throw new DeliveryError("Telegram rejected "+method+" (HTTP "+r.status+")",Math.max(0,Number(b.parameters?.retry_after)||0));const id=b.result?.message_id;if(!Number.isSafeInteger(id)||id<=0)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: missing Telegram message ID",0,true);return String(id);}
 Deno.serve(async(req)=>{
-  // Called directly from the browser as the offline-queue "client-pump"
-  // (App.tsx), so it needs the same CORS preflight handling as the other
-  // two functions — this was missing here too.
-  if(req.method==="OPTIONS")return new Response(null,{status:204,headers:corsHeaders});
-  try{
-  const url=Deno.env.get("SUPABASE_URL")||"";
-  const admin=createClient(url,secret());
-  const token=Deno.env.get("TELEGRAM_BOT_TOKEN");
-  if(!token)return json({error:"TELEGRAM_BOT_TOKEN is not configured"},503);
-
-  // Scheduler mode: a Postgres cron job (pg_cron + pg_net) calls this on a
-  // fixed interval and cannot carry a real user session, so it authenticates
-  // with a shared secret instead and sweeps every store's due messages.
-  const cronSecret=Deno.env.get("CRON_SECRET")||"";
-  const providedCronSecret=req.headers.get("x-cron-secret")||"";
-  const isCronSweep=cronSecret.length>0 && providedCronSecret.length>0 && providedCronSecret===cronSecret;
-
-  let storeFilter: string|null=null;
-  if(!isCronSweep){
-    const auth=req.headers.get("Authorization");
-    if(!auth)return json({error:"Unauthorized"},401);
-    const user=createClient(url,pub(),{global:{headers:{Authorization:auth}}});
-    const {data:{user:u}}=await user.auth.getUser();
-    if(!u)return json({error:"Unauthorized"},401);
-    const {data:allowed,error:accessError}=await user.rpc("current_account_allowed");
-    if(accessError||allowed!==true)return json({error:"Account access disabled or expired"},403);
-    const {data:p}=await admin.from("profiles").select("store_id,role").eq("id",u.id).maybeSingle();
-    if(!p?.store_id)return json({error:"Store membership not found"},403);
-    storeFilter=p.store_id;
-  }
-
-  // A crashed delivery has ambiguous external state; do not blindly resend it.
-  const staleAt=new Date(Date.now()-10*60_000).toISOString();
-  let stale=admin.from("telegram_outbox").update({status:"failed",last_error:"DELIVERY_REVIEW_REQUIRED: interrupted send; confirm Telegram delivery before retry"}).eq("status","sending").or(`claimed_at.lt.${staleAt},and(claimed_at.is.null,created_at.lt.${staleAt})`);
-  if(storeFilter)stale=stale.eq("store_id",storeFilter);
-  const staleResult=await stale;if(staleResult.error)throw staleResult.error;
-  let q=admin.from("telegram_outbox").select("id,chat_id,message,attempts,sale_id,invoice_id,store_id,telegram_message_id,telegram_document_id").eq("status","pending").lte("next_attempt_at",new Date().toISOString()).order("created_at",{ascending:true}).limit(isCronSweep?50:20);
-  if(storeFilter)q=q.eq("store_id",storeFilter);
-  const {data:rows,error}=await q;
-  if(error)throw error;let sent=0,failed=0;for(const row of rows||[]){try{
-    // BUG FIX (2026-09-05): this update set last_attempt_at, a column that
-    // does not exist on telegram_outbox (only next_attempt_at/sent_at do).
-    // PostgREST rejected every single claim attempt with a schema-cache
-    // error, and `if(claim.error||!claim.data)continue;` swallowed that
-    // error silently — so this worker has *never* successfully sent a
-    // single Telegram invoice since it was written; every row just sat as
-    // "pending" forever with last_error left null, looking untouched, on
-    // every 2-minute cron sweep. Removed the bad column reference; a real
-    // claim error is now also recorded instead of silently skipped.
-    const claim=await admin.from("telegram_outbox").update({status:"sending",claimed_at:new Date().toISOString(),attempts:Number(row.attempts||0)+1}).eq("id",row.id).eq("status","pending").select("id").maybeSingle();
-    if(claim.error){
-      failed++;
-      await admin.from("telegram_outbox").update({last_error:`CLAIM_FAILED: ${String(claim.error.message||claim.error)}`}).eq("id",row.id);
-      continue;
-    }
-    if(!claim.data)continue;const sale=row.sale_id?(await admin.from("sales").select("invoice_no,customer_name,customer_phone,payment_method,total,created_at").eq("id",row.sale_id).maybeSingle()).data:null;const items=row.sale_id?(await admin.from("sale_items").select("quantity,unit_price,product_id,service_name,products(model,brand)").eq("sale_id",row.sale_id)).data||[]:[];const inv=row.invoice_id?(await admin.from("invoices").select("invoice_no").eq("id",row.invoice_id).maybeSingle()).data:null;let textId=row.telegram_message_id; if(!textId){const r=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:row.chat_id,text:row.message})});const b=await r.json().catch(()=>({}));if(!r.ok||!b.ok)throw new Error(b.description||`Telegram HTTP ${r.status}`);textId=String(b.result?.message_id||"");const saved=await admin.from("telegram_outbox").update({telegram_message_id:textId}).eq("id",row.id);if(saved.error)throw new Error("DELIVERY_REVIEW_REQUIRED: text sent but checkpoint failed");}const lines=["DS MOBILE & DIGITAL HUB",`Invoice: ${inv?.invoice_no||sale?.invoice_no||"-"}`,`Date: ${sale?.created_at||"-"}`,`Customer: ${sale?.customer_name||"Walk-in"}`,`Phone: ${sale?.customer_phone||"-"}`,`Payment: ${sale?.payment_method||"-"}`,"Products:"];for(const i of items as any[])lines.push(`${i.service_name||i.products?.model||i.products?.brand||"Product"} x ${i.quantity} @ ${i.unit_price}`);lines.push(`Total: ${sale?.total??"-"}`);const f=new FormData();f.append("chat_id",row.chat_id);f.append("caption",`Invoice ${inv?.invoice_no||sale?.invoice_no||"-"}`);f.append("document",new Blob([pdf(lines)],{type:"application/pdf"}),`${inv?.invoice_no||sale?.invoice_no||"invoice"}.pdf`);let documentId=row.telegram_document_id;if(!documentId){const d=await fetch(`https://api.telegram.org/bot${token}/sendDocument`,{method:"POST",body:f});const db=await d.json().catch(()=>({}));if(!d.ok||!db.ok)throw new Error(db.description||`Telegram document HTTP ${d.status}`);documentId=String(db.result?.message_id||"");const saved=await admin.from("telegram_outbox").update({telegram_document_id:documentId}).eq("id",row.id);if(saved.error)throw new Error("DELIVERY_REVIEW_REQUIRED: document sent but checkpoint failed");}const done=await admin.from("telegram_outbox").update({status:"sent",sent_at:new Date().toISOString(),last_error:null,claimed_at:null,telegram_message_id:textId,telegram_document_id:documentId}).eq("id",row.id);if(done.error)throw new Error("DELIVERY_REVIEW_REQUIRED: completion checkpoint failed");sent++;}catch(e){failed++;const attempts=Number(row.attempts||0)+1;await admin.from("telegram_outbox").update({status:attempts>=8||String(e).includes("DELIVERY_REVIEW_REQUIRED")?"failed":"pending",claimed_at:null,next_attempt_at:new Date(Date.now()+Math.min(300000,2000*Math.pow(2,Math.max(0,attempts-1)))).toISOString(),last_error:String(e)}).eq("id",row.id);}}return json({sent,failed,processed:(rows||[]).length});}catch(e){return json({error:String(e)},500)}});
+ if(req.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
+ if(req.method!=="POST")return json({error:"Method not allowed"},405);
+ try{
+ const url=Deno.env.get("SUPABASE_URL")||"",admin=createClient(url,secret()),token=Deno.env.get("TELEGRAM_BOT_TOKEN");
+ const cronSecret=Deno.env.get("CRON_SECRET")||"",provided=req.headers.get("x-cron-secret")||"";
+ const cron=!!cronSecret&&!!provided&&provided===cronSecret;let store:string|null=null;
+ if(!cron){const auth=req.headers.get("Authorization");if(!auth)return json({error:"Unauthorized"},401);const user=createClient(url,pub(),{global:{headers:{Authorization:auth}}});const {data:{user:u}}=await user.auth.getUser();if(!u)return json({error:"Unauthorized"},401);const {data:allowed,error:accessError}=await user.rpc("current_account_allowed");if(accessError||allowed!==true)return json({error:"Account access denied"},403);const {data:p,error:pe}=await admin.from("profiles").select("store_id").eq("id",u.id).maybeSingle();if(pe||!p?.store_id)return json({error:"Store membership not found"},403);store=p.store_id;}
+ if(!token)return json({error:"Telegram bot not configured; queued bills retained"},503);
+ const staleAt=new Date(Date.now()-10*60_000).toISOString();let stale=admin.from("telegram_outbox").update({status:"failed",last_error:"DELIVERY_REVIEW_REQUIRED: interrupted send; confirm delivery before retry"}).eq("status","sending").or(`claimed_at.lt.${staleAt},and(claimed_at.is.null,created_at.lt.${staleAt})`);if(store)stale=stale.eq("store_id",store);if((await stale).error)throw Error("Queue recovery failed");
+ let q=admin.from("telegram_outbox").select("id,chat_id,message,attempts,sale_id,invoice_id,store_id,telegram_message_id,telegram_document_id,bill_source_key,bill_payload").eq("status","pending").lte("next_attempt_at",new Date().toISOString()).order("created_at",{ascending:true}).limit(cron?30:10);if(store)q=q.eq("store_id",store);
+ const {data:rows,error}=await q;if(error)throw Error("Queue query failed");let sent=0,failed=0,waiting=0;
+ for(const row of rows||[]){const bill=!!(row.sale_id||row.bill_payload||row.bill_source_key);const attempts=Number(row.attempts||0)+1;
+ const claim=await admin.from("telegram_outbox").update({status:"sending",claimed_at:new Date().toISOString(),attempts}).eq("id",row.id).eq("status","pending").select("id").maybeSingle();if(claim.error){failed++;continue;}if(!claim.data)continue;
+ try{let chat=row.chat_id;let text=clean(row.message),lines:string[]=[],reference="notice",textId=row.telegram_message_id,documentId=row.telegram_document_id;
+ if(bill){
+ const {data:ownerChat,error:ce}=await admin.rpc("owner_bill_chat",{p_store:row.store_id});if(ce)throw Error("Owner route unavailable");
+ if(!ownerChat){waiting++;const hold=await admin.from("telegram_outbox").update({status:"pending",claimed_at:null,last_error:"OWNER_TELEGRAM_NOT_CONNECTED",next_attempt_at:new Date(Date.now()+120000).toISOString()}).eq("id",row.id);if(hold.error)throw Error("Queue checkpoint failed");continue;}
+ if((textId||documentId)&&chat!==ownerChat)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: owner connection changed during delivery",0,true);
+ chat=ownerChat;const route=await admin.from("telegram_outbox").update({chat_id:chat}).eq("id",row.id);if(route.error)throw Error("Queue route update failed");
+ if(row.sale_id){
+ const {data:s,error:se}=await admin.from("sales").select("invoice_no,customer_name,customer_phone,payment_method,total,subtotal,discount,tax,amount_paid,due_amount,created_at,created_by,status,finance_loan_amount,finance_net_receivable").eq("id",row.sale_id).eq("store_id",row.store_id).maybeSingle();if(se||!s)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: sale source missing",0,true);
+ const {data:items,error:ie}=await admin.from("sale_items").select("quantity,unit_price,service_name,is_gift,products(model,brand)").eq("sale_id",row.sale_id).order("id").limit(1001);if(ie||!items||!items.length||items.length>1000)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: incomplete or oversized invoice items",0,true);
+ const {data:actor}=s.created_by?await admin.from("profiles").select("full_name,staff_name").eq("id",s.created_by).eq("store_id",row.store_id).maybeSingle():{data:null};reference=clean(s.invoice_no);
+ const date=new Date(s.created_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"});
+ lines=["DS MOBILE & DIGITAL HUB","Invoice: "+reference,"Date (IST): "+date,"Sold by: "+clean(actor?.staff_name||actor?.full_name||"Staff"),"Customer: "+clean(s.customer_name||"Walk-in"),"Phone: "+clean(s.customer_phone),"Payment: "+clean(s.payment_method),"Status: "+clean(s.status),"Items:",...items.map((i:any)=>clean(i.service_name||i.products?.model||i.products?.brand||"Item")+" x "+i.quantity+" @ INR "+i.unit_price+(i.is_gift?" (gift)":"")),"Subtotal: INR "+s.subtotal,"Discount: INR "+s.discount,"Tax: INR "+s.tax,"Total: INR "+s.total,"Paid: "+(s.amount_paid==null?"Not recorded":"INR "+s.amount_paid),"Due: "+(s.due_amount==null?"Not recorded":"INR "+s.due_amount)];
+ if(s.finance_loan_amount!=null)lines.push("Finance loan: INR "+s.finance_loan_amount);
+ }else{const b=row.bill_payload;if(!b||typeof b.reference!=="string"||!Array.isArray(b.items)||!b.items.length||b.items.length>1000)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: missing service bill data",0,true);reference=clean(b.reference);lines=["DS MOBILE & DIGITAL HUB",clean(b.kind),"Bill: "+reference,"Date: "+clean(b.date)+" "+clean(b.time),"Sold by: "+clean(b.soldBy),"Payment: "+clean(b.payment),"Items:",...b.items.map((i:any)=>clean(i.name)+" x "+i.quantity+" @ INR "+i.unitPrice),"Total: INR "+b.total];}
+ text=lines.join("\n");if(text.length>3800)text=lines.slice(0,8).join("\n")+"\nSee attached complete bill PDF.\n"+lines.slice(-5).join("\n");text=text.slice(0,4000);
+ }
+ if(!chat)throw new DeliveryError("No destination configured",120);
+ if(!textId){textId=await telegram(token,"sendMessage",{chat_id:chat,text:bill?text:String(row.message).slice(0,4000)});const saved=await admin.from("telegram_outbox").update({telegram_message_id:textId}).eq("id",row.id);if(saved.error)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: text checkpoint failed",0,true);}
+ if(bill&&!documentId){const form=new FormData();form.append("chat_id",chat);form.append("caption","Bill "+reference.slice(0,180));form.append("document",new Blob([pdf(lines)],{type:"application/pdf"}),reference.replace(/[^a-zA-Z0-9_-]/g,"_").slice(0,120)+".pdf");documentId=await telegram(token,"sendDocument",form);const saved=await admin.from("telegram_outbox").update({telegram_document_id:documentId}).eq("id",row.id);if(saved.error)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: document checkpoint failed",0,true);}
+ const done=await admin.from("telegram_outbox").update({status:"sent",sent_at:new Date().toISOString(),last_error:null,claimed_at:null,telegram_message_id:textId,telegram_document_id:documentId}).eq("id",row.id);if(done.error)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: completion checkpoint failed",0,true);sent++;
+ }catch(e){failed++;const review=e instanceof DeliveryError&&e.review;const delay=Math.max(e instanceof DeliveryError?e.retrySeconds*1000:0,Math.min(3600000,2000*Math.pow(2,Math.min(attempts,11))));await admin.from("telegram_outbox").update({status:review||(!bill&&attempts>=8)?"failed":"pending",claimed_at:null,next_attempt_at:new Date(Date.now()+delay).toISOString(),last_error:e instanceof DeliveryError?e.message:"Queue processing failed; retry scheduled"}).eq("id",row.id);}
+ }
+ return json({sent,failed,waiting,processed:(rows||[]).length});
+ }catch{return json({error:"Telegram queue processing unavailable"},500);}
+});

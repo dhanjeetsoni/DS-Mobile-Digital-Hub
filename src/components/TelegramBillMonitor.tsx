@@ -1,0 +1,27 @@
+import React,{useEffect,useRef,useState} from "react";
+import {isCloudConfigured,supabase} from "../services/supabaseClient";
+type Bill={id:string;reference:string;status:string;attempts:number;created_at:string;sent_at:string|null;last_error:string|null;text_sent:boolean;pdf_sent:boolean};
+type Status={connected:boolean;pending:number;failed:number;missingSales:number;missingCyber:number;bills:Bill[]};
+export function TelegramBillMonitor({profileId,storeId}:{profileId?:string;storeId?:string}){
+ const scope=String(profileId||"")+":"+String(storeId||"");
+ const [snapshot,setSnapshot]=useState<{scope:string;data:Status}|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState("");const seq=useRef(0),pending=useRef(false);
+ useEffect(()=>{seq.current++;pending.current=false;setBusy(false);setMessage("");setSnapshot(null);return()=>{seq.current++;};},[scope]);
+ const run=async(action:"refresh"|"pump"|"retry",id?:string)=>{if(!profileId||!storeId||!isCloudConfigured||pending.current)return;
+ if(action==="retry"&&!window.confirm("Check the owner's Telegram first. Retrying an uncertain delivery may duplicate the text or PDF. Retry the missing delivery?"))return;
+ const n=++seq.current;pending.current=true;setBusy(true);setMessage("");
+ try{const {data:user,error:ue}=await supabase.auth.getUser();if(ue||user.user?.id!==profileId)throw Error("Owner session changed.");
+ if(action==="retry"){const {data,error}=await supabase.rpc("retry_telegram_bill",{p_id:id});if(error||data!==true)throw Error("This bill cannot be retried automatically. Check recovery/delivery review.");}
+ if(action!=="refresh"){const {error}=await supabase.functions.invoke("telegram-outbox-worker",{body:{trigger:"owner-bill-monitor"}});if(error&&n===seq.current)setMessage("Delivery worker could not be reached; queued records remain saved.");}
+ const {data,error}=await supabase.rpc("get_telegram_bill_status");if(error||!data||!Array.isArray(data.bills))throw Error("Cannot verify bill queue. Check owner session and internet.");
+ if(n===seq.current)setSnapshot({scope,data});
+ }catch(e){if(n===seq.current){setSnapshot(null);setMessage(e instanceof Error?e.message:"Bill monitor unavailable.");}}finally{if(n===seq.current){pending.current=false;setBusy(false);}}
+ };
+ const d=snapshot?.scope===scope?snapshot.data:null;const online=!!profileId&&!!storeId&&isCloudConfigured;
+ return <section className="section"><div className="section-head"><div><h2>Telegram bill delivery</h2><p className="hint">Owner-only monitoring for synchronized POS, cybercafe, repair and other recorded receipts. A bill is delivered only after Telegram acknowledges its text and PDF. Offline transactions wait for synchronization; no internet or disconnected bot means delayed delivery.</p></div></div>
+ <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}><button type="button" className="btn primary" disabled={!online||busy} onClick={()=>void run("refresh")}>Refresh bill status</button><button type="button" className="btn" disabled={!online||busy} onClick={()=>void run("pump")}>Process due bills now</button></div>
+ {!online&&<p className="hint">Cloud owner sign-in required. Local-only data cannot reach Telegram.</p>}{message&&<p className="hint" role="status">{message}</p>}
+ {d&&<><p className="hint">Owner bot: {d.connected?"Connected":"Not connected — bills stay queued"}. Latest 100 bill records. TEST references are delivery checks, not sales.</p><div className="grid cols-3"><div className="card"><h3>Pending / sending</h3><div className="big">{d.pending}</div></div><div className="card"><h3>Needs review</h3><div className="big">{d.failed}</div></div><div className="card"><h3>Missing queue entries</h3><div className="big">{d.missingSales+d.missingCyber}</div><p className="hint">POS {d.missingSales} · Cybercafe {d.missingCyber}</p></div></div>
+ {!!(d.missingSales+d.missingCyber)&&<p className="alert red">Some source records have no bill queue entry. Request an operator reconciliation; do not re-enter the sale.</p>}
+ <div className="table-wrap"><table><thead><tr><th>Reference</th><th>Status</th><th>Text</th><th>PDF</th><th>Attempts</th><th>Delivery / issue</th><th>Action</th></tr></thead><tbody>{d.bills.map(b=><tr key={b.id}><td>{b.reference}</td><td>{b.status}</td><td>{b.text_sent?"Acknowledged":"Waiting"}</td><td>{b.pdf_sent?"Acknowledged":"Waiting"}</td><td>{b.attempts}</td><td>{b.sent_at?new Date(b.sent_at).toLocaleString("en-IN"):b.last_error||"Queued"}</td><td>{b.status==="failed"&&!b.last_error?.startsWith("RESTORE_REVIEW_REQUIRED:")&&<button className="btn sm" disabled={busy} onClick={()=>void run("retry",b.id)}>Review &amp; retry</button>}</td></tr>)}</tbody></table></div></>}
+ <p className="hint">No staff routing control. Definite rejection retries are scheduled; interrupted or uncertain sends need review to avoid duplicates. The owner bot must remain connected and able to receive messages.</p></section>;
+}

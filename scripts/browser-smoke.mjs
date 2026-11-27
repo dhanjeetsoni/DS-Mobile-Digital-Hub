@@ -80,6 +80,17 @@ try{
  assert.equal(record.status,"Paid");
  assert.equal(record.amountPaid,record.total);
  console.log("PASS actual local-only counter-service checkout, invoice and persisted payment");
+ // Exercise the one-tap cybercafe entry as a distinct sale source, not a POS duplicate.
+ await owner.getByRole("textbox",{name:"Search tools"}).fill("xeroxGrid");
+ await owner.locator('[data-tool-key="xeroxGrid"]').click();
+ await owner.locator('#page[data-current-page="xeroxGrid"]').waitFor();
+ await owner.getByRole("button",{name:/Xerox B&W.*2/}).first().click();
+ await owner.waitForFunction(()=>{try{const raw=localStorage.getItem("dsmdh_cache_v4")||localStorage.getItem("dsmdh_db_v2");return !!raw&&JSON.parse(raw).xeroxEntries?.some(e=>e.serviceType==="Xerox B&W"&&e.totalAmount===2&&e.paymentMethod==="Cash");}catch{return false;}},{},{timeout:30000});
+ const cyber=await owner.evaluate(()=>JSON.parse(localStorage.getItem("dsmdh_cache_v4")||localStorage.getItem("dsmdh_db_v2")));
+ assert.equal(cyber.xeroxEntries.filter(e=>e.serviceType==="Xerox B&W"&&e.totalAmount===2).length,1);
+ assert.equal(cyber.sales.filter(s=>s.items.some(i=>i.name==="CI test service")).length,1);
+ console.log("PASS actual local-only one-tap cybercafe recording; separate POS and service sources");
+
  // Exercise every registered module in a fresh local owner context.
  const directory=await browser.newPage({viewport:{width:1440,height:900}});
  directory.on("pageerror",e=>errors.push(e.message));

@@ -1,0 +1,40 @@
+# Master plan reconciliation — 2026-11-27
+## Evidence rules
+A plan checkmark is not proof. Baseline source main 17b9acb, successful native/validation run 45806985178: 95/95 tests, 17 test files, npm audit 0 reported vulnerabilities, browser local-only POS checkout and 52 owner routes/22 palettes. No physical-device execution, authenticated multi-device acceptance, or full external provider test implied. Encrypted backup branch e0872b73 validation passed; native build still running when audited. Universal Telegram work builds on that branch. This is a cross-plan gap audit, not a claim that every checkbox is accepted.
+
+## All 29 planning/handoff documents inventoried and fetched
+Primary long plans: PROJECT_PLAN.md (2478 lines), DS_Mobile_Master_Plan_Completed_Points.md (958 lines), DS_Mobile_Master_Plan.md, DS_MOBILE_UNIFIED_APP_PLAN.md, WORK-PLAN-2026-09-17.md, STEP13-TESTING-GOLIVE-CHECKLIST.md, docs/MASTER-IMPLEMENTATION-ROADMAP.md. Related: BUILD-ANDROID.md, COPY-PASTE-HANDOFF.md, DEEP-RECHECK-REPORT.md, PART-1-NOTES.md, PRODUCTION-AUDIT.md, PROJECT-STATUS-NOTES.md, README.md, SETUP-GUIDE.md, STAFF-ACCESS-PART-1-NOTES.md, STAFF-ACCESS-PART-2-NOTES.md, STAFF-ACCESS-PART-3-NOTES.md, STAFF-ACCESS-PART-4-NOTES.md, STEP12-APP-UPDATE-SETUP.md, STEP2-INVALID-KEY-FIX-2026-09-01.md, STEP7.1-CLOUDFLARE-SETUP.md, SUPABASE-REPO-SYNC-2026-09-17.md, SUPABASE-SYNC-2026-09-01.md, SUPABASE-TELEGRAM-SETUP.md, docs/PRODUCTION-RELIABILITY-PASS-20261125.md, docs/RECOVERY-AND-RELEASE-RUNBOOK.md, docs/RETAIL-STUDIO-V3-RELEASE.md, docs/RETAIL-STUDIO-V4.md.
+
+## Cross-plan results
+| Plan area | Verified evidence | Still open |
+|---|---|---|
+| Core data, login, roles (Steps 1–4, Phases 1–3, 9, 16, 18) | Live RLS and guarded functions; SQL registered staff session/revocation tests; local browser owner/staff entry; atomic POS and FIFO | Authenticated physical owner/staff multi-device sync, stale offline cache/reset behavior, permanent hardware allowlist and action-by-action server access |
+| Selling, gifts, invoices (Steps 4, 5, 8, Phases 6, 10) | Browser service checkout; payment guards; gift, offer and profit protection tests; invoice rendering and live server queue | Real inventory sale, split channels persisted relationally, returns/exchange accounting and thermal printer; repeated offer application and full GST |
+| Cybercafe & all receipts | Found missing one-tap Xerox notification: snapshot not invoices; fixed via new durable trigger; live Telegram synthetic message + PDF acknowledged; owner/staff rollback tests | Actual authenticated native sale from each device, offline reconnect, correction notices, historical source gaps; real SIM payment not stored |
+| AI / advanced (Steps 2, 6, Phases 6, 8, 11) | Gateway live auth, key pool, business copilot/local forecast and scanner source; anonymous OCR denied | Actual authenticated OCR/photo/model results, quota/key fallback, voice/mic and anomaly calibration |
+| Inventory / commerce (Steps 3, 7, Phases 7, 8, 19) | Catalog UI/render/search, inventory filters, compatibility and supplier comparisons; offline download UI and stock guards | Physical scan, actual R2 upload/retention/backup bytes, large catalog benchmarking, IMEI uniqueness, stock-review acceptance |
+| UI & performance (Steps 9, 10, Phases 4, 12–14, 17) | 52 routes, 12 groups, 22 palettes, responsive viewport, configurable metrics, no route loader flash, native packages | Real Android touch/scroll and Windows scale, memory/startup performance with live catalog, native customer display/printing |
+| Financials, reports, recovery (Step 7, Phase 5 and master roadmap) | Live balanced owner-reviewed journal for POS, purchases, collections/payments, expenses/drawings; rollback restoration and checksum; encrypted export source | Finance settlement/returns/exchanges/GST journals, bank statements, period lock, complete reconciled cash, independent encrypted copy and storage bytes |
+| Customers / sharing | Private receipt and repair GET synthetic 200, expiry/revocation/auth negative tests; downloadable catalog/vCard | Actual authenticated create link and real customer workflow; hosted catalog; official WhatsApp approval/credentials; consent-aware delivery |
+| Release / Day Zero (Steps 11–13, Phases 15, 17, 19) | Main PR merged, same source tree, CI compiled Windows/unified Android; setup wizard screen exists | Signed production installer/OTA/rollback, native hardware, full go-live checklist, latest branch validation |
+| Supabase repo drift (Sept 1/17 plans) | Applied new migrations are committed, worker v14 source synchronized | Historical migrations drift; do not blindly replay on fresh/live production; rotate historical hardcoded cron secret using coordinated server secret and schedule change |
+
+## Selected 48 suggestions — acceptance matrix
+The 48 selected IDs exclude shelf #15 and multi-branch #48. Categories: V = verified narrow automated/SQL evidence, P = partially implemented or only screen/source verified, O = major missing feature.
+| IDs | State | Evidence / gap |
+|---|---|---|
+| 1,2,3,4,5,6 | V/P | Navigation and visual UI smoke, dashboard settings and search; live accessibility/device and animation performance pending |
+| 7 | P | Startup routing improvements, benchmark not complete |
+| 8,9,10,11,12 | P | Compatibility recommendations, split checkout validation, preview display, offers, price protection; end-to-end real transactions and hardware |
+| 13 | P | Print workflow, physical thermal/A4 test missing |
+| 14 | P | Receipt portal backend verified synthetic GET, authenticated create/real bill pending |
+| 16,17,18,19,20,21 | P | Stock audit, restock, dead stock, supplier comparison, compatibility, IMEI tools; live data/concurrency/uniqueness not fully tested |
+| 22,23,24,25,26,27,28 | P | Copilot, OCR, voice, product AI, alerts, forecast, daily advisor; live AI acceptance and model/data quality |
+| 29 | P | Permanent journal partial; finance/returns/exchanges/GST not implemented |
+| 30,31,32,33,34 | P | Accounting review, P&L, exports, supplier due calendar and cash closing; bank/cash reconciliation and accountant review |
+| 35,36,37,38,39,40 | P | Profile, manual WhatsApp, membership, static catalog, repair link, vCard; official WhatsApp and hosted catalog remain open |
+| 41,42,43,44,45,46,47 | P | Recovery v2 verified in SQL, encryption source, sync, permissions, audit, session registry, updater and security audit; independent/offsite, device and production rollout acceptance pending |
+| 49,50 | P | Owner mobile and setup wizard screens; physical device / full setup test pending |
+
+## Telegram evidence and hard limitations
+Live worker v14; synthetic service bill TEST-NOT-A-SALE-20261127 delivered text and PDF (both Telegram acknowledgement IDs, sent_at 2026-11-27 03:58:56 UTC, one attempt, HTTP 200). Test is not a shop sale. SQL rollback tested POS invoice+deferred source dedup, disconnected owner retention, owner/staff cybercafe, other income, repair advance/delivery, SIM plan record, no private service details, authorization. No production sales were created. Queue remains pending without owner connection; explicit rejection retries, uncertain delivery needs human review. Telegram cannot guarantee exactly-once delivery across a network failure. Physical client, cloud snapshot/replay behavior, repair payment amount and actual SIM collection require separate acceptance. All normal POS and cybercafe records must be saved/synchronized to server before dispatch. No other module may claim actual payment from estimates or wallet totals.

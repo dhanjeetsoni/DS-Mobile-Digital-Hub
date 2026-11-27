@@ -1,0 +1,1 @@
+do $patch$ declare f text;begin f:=pg_get_functiondef('public.get_telegram_bill_status()'::regprocedure);if position('select id,coalesce(bill_payload' in f)=0 then raise exception 'status anchor missing';end if;execute replace(f,'select id,coalesce(bill_payload','select o.id,coalesce(o.bill_payload');end $patch$;

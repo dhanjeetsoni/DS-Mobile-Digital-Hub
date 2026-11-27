@@ -114,6 +114,7 @@ import { sqliteList } from "./services/localSqlite";
 import { mergeStoreState, sameState } from "./services/syncMerge";
 import { saveSnapshotRecovery, readSnapshotRecovery, clearSnapshotRecovery, archiveSnapshotRecovery } from "./services/repository";
 import {EncryptedBackupPanel} from "./components/EncryptedBackupPanel";
+import {TelegramBillMonitor} from "./components/TelegramBillMonitor";
 import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert } from "./services/telegram";
 import { getRepairDiagnosis, getDetailedRepairDiagnostics, DetailedRepairDiagnostics } from "./services/aiOps";
 import { findAiSearchMatches } from "./services/aiSearch";
@@ -2568,7 +2569,7 @@ export default function App() {
     // NOTE (2026-09-04): invoice delivery to the owner's Telegram bot is
     // handled entirely server-side now — see the `enqueue_invoice_telegram`
     // trigger on `public.invoices` (supabase/migrations) which enqueues into
-    // `telegram_outbox`, and the `telegram-outbox-worker` function which a
+    // `telegram_outbox`, plus the deferred sale and snapshot service triggers. The `telegram-outbox-worker` function which a
     // pg_cron job sweeps every 2 minutes regardless of whether any device's
     // app is open. That path always resolves the shop's Owner/Manager chat
     // (not the specific signed-in user), includes "Sold By", and works for
@@ -4847,7 +4848,7 @@ export default function App() {
 
       case "statusDashboard":
         return (
-          <StatusDashboardView
+          <>{(!cloudProfile||cloudProfile.role==="owner")&&<TelegramBillMonitor storeId={cloudProfile?.store_id} profileId={cloudProfile?.id}/>}<StatusDashboardView
             storeId={cloudProfile?.store_id}
             storageLimitSupabaseMb={db.settings.storageLimitSupabaseMb}
             storageLimitCloudflareMb={db.settings.storageLimitCloudflareMb}
@@ -4856,7 +4857,7 @@ export default function App() {
               saveState({ ...db, settings: { ...db.settings, storageLimitSupabaseMb: supabaseLimitMb, storageLimitCloudflareMb: cloudflareLimitMb } });
               showToast("Storage plan limits saved.", "green");
             }}
-          />
+          /></>
         );
 
       case "appearanceStudio":

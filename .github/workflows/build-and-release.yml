@@ -16,6 +16,7 @@ on:
     branches:
       - main
       - 'hardening/production-reliability-*'
+      - 'hardening/selected-scope-*'
   workflow_dispatch:
     inputs:
       version:

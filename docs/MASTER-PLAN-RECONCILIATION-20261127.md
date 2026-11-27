@@ -113,3 +113,6 @@ Bounded offline catalog download, rejects duplicate IDs across changing pages ra
 
 ## Selected point 8 — private encrypted R2 checkpoint copy
 Adds an explicit owner-only encrypted database checkpoint upload, isolated nested private-bucket namespace, no public GET and no staff writes, authenticated read-back and byte comparison plus decryption verification. Existing local export remains. This protects database checkpoint bytes only; media/invoice/KYC object backup and cross-project restoration remain separate. Requires configured R2 and an actual authenticated owner session; no real business backup uploaded by the audit. Deployment follows existing live r2-storage version.
+
+## Selected point 2 — owner journal close
+Migration 20261127092603 adds owner-only explicit close date, monotonically increasing lock, blocks backdated journal insertions, protects closed history from reset or incompatible restore and records an audit event. Rollback tested close, later date acceptance, backdate rejection and shortening rejection. No real period closed. UI requires two confirmations. This is a posted-journal close, not statutory closing or complete opening balances. Selected-scope native builds now trigger automatically.

@@ -104,3 +104,6 @@ A native Android run failed after Maven HTTP 429 because the retry discovered ne
 
 ## Selected scope (2, 5–16)
 Explicitly defer GST, additional finance and serialized exchange development (1,3,4). Owner Telegram coverage RPC reports synchronized records, queued and fully acknowledged text/PDF per source. Shape/anon-denial rollback passed. Posted trial balance and classified financial review show unallocated accounts rather than fabricate a complete balance sheet. Responsive retail polish retains themes and features. No physical hardware or provider acceptance implied. CI required.
+
+## Selected point 10 — online catalog
+Owner-created revocable 6-day bearer link to synchronized in-stock catalog, explicit opt-in prices, allowlisted product name/category/brand only, max 500, no quantities, cost, notes, device IDs or customer data. Existing receipt and repair links unchanged. Public response plain text. DB kind constraint deployed; edge implementation and UI source committed, live provider acceptance pending.

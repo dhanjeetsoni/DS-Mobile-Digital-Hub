@@ -1,5 +1,5 @@
 import {createClient} from "@supabase/supabase-js";
-import {receiptText,repairText,validBearer,validResource} from "./format.ts";
+import {receiptText,repairText,catalogText,validBearer,validResource} from "./format.ts";
 const url=Deno.env.get("SUPABASE_URL")||"",key=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"",anon=Deno.env.get("SUPABASE_ANON_KEY")||Deno.env.get("SUPABASE_PUBLISHABLE_KEY")||"";
 const admin=url&&key?createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}}):null;
 const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization,apikey,content-type,x-client-info","Access-Control-Allow-Methods":"GET,POST,OPTIONS"};
@@ -14,7 +14,9 @@ async function owner(req:Request){const token=(req.headers.get("authorization")|
 async function record(store:string,kind:string,id:string,byInvoice=false){
  if(!admin)return null;const {data:shop,error:shopError}=await admin.from("stores").select("name").eq("id",store).maybeSingle();if(shopError||!shop)return null;
  if(kind==="receipt"){const q=admin.from("sales").select("id,invoice_no,status,created_at,total,amount_paid,due_amount").eq("store_id",store);const {data:s,error}=await (byInvoice?q.eq("invoice_no",id):q.eq("id",id)).maybeSingle();if(error||!s||s.status==="Cancelled")return null;const {data:items,error:ie}=await admin.from("sale_items").select("quantity,unit_price,service_name,warranty_end,products(model,store_id)").eq("sale_id",s.id).limit(101);if(ie||!items||items.length>100)return null;const filtered=items.map((i:any)=>({...i,products:i.products?.store_id===store?{model:i.products.model}:null}));return {id:s.id,text:receiptText(shop.name,s,filtered)};}
- const {data:state,error}=await admin.from("store_state").select("state").eq("store_id",store).maybeSingle();if(error||!Array.isArray(state?.state?.jobs))return null;
+ const {data:state,error}=await admin.from("store_state").select("state").eq("store_id",store).maybeSingle();if(error||!state?.state)return null;
+ if(kind==="catalog"||kind==="catalog-price"){if(id!=="shop")return null;return {id:"shop",text:catalogText(shop.name,state.state.products,kind==="catalog-price")};}
+ if(kind!=="repair"||!Array.isArray(state.state.jobs))return null;
  const j=state.state.jobs.find((j:any)=>j?.id===id);return j?{id:String(j.id),text:repairText(shop.name,j)}:null;
 }
 Deno.serve(async(req)=>{

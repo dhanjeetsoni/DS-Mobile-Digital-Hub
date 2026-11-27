@@ -154,3 +154,6 @@ The subsequent browser failure returned an empty innerText despite the correct o
 
 ## Android package verification correction
 Tauri frontendDist embeds web assets into the native library (https://v2.tauri.app/reference/config/#buildconfig), rather than requiring loose ZIP HTML. Replaced incorrect ZIP-path assumption with checking every packaged Tauri ELF for exact built HTML/JS/CSS asset-map keys, verified against actual dist entrypoint references. Maintains package/versionCode, permissions and cryptographic APK signing checks. Negative tests reject missing/invalid library assets. This is static asset-key verification, not runtime boot or proof of physical hardware readiness.
+
+## Owner-reviewed opening balances
+Migration 20261127111817 creates a unique opening journal before all posted activity, explicit evidence reference, balanced allowlisted accounts and cutoff preventing older/same-day ordinary postings. Idempotent replay and anonymous denial tested in rollback, no shop balances entered. UI allows reviewed source amounts and exact paise validation; summary includes opening equity. Statutory balance sheet completeness still requires real reconciled records and review of unclassified gross purchases.

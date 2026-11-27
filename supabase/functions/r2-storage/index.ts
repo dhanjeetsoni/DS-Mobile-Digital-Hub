@@ -298,6 +298,31 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // Encrypted checkpoint namespace: inaccessible through legacy flat KYC paths.
+  if(kind==="backup"){
+    if(!["GET","PUT"].includes(req.method))return Response.json({error:"Method not allowed"},{status:405,headers:CORS_HEADERS});
+    const parsed=parsePath(kind,rest);
+    if(!parsed||!/^checkpoint-[0-9a-f-]{36}\.dsbackup$/.test(parsed.path.split("/")[1]))return Response.json({error:"Invalid checkpoint path"},{status:400,headers:CORS_HEADERS});
+    const caller=await getCallerStoreAndRole(req);
+    if(!caller||caller.role!=="owner"||caller.storeId!==parsed.storeId)return Response.json({error:"Owner access required"},{status:403,headers:CORS_HEADERS});
+    const key=parsed.storeId+"/backups/"+parsed.path.split("/")[1];
+    try{
+      if(req.method==="PUT"){
+        const declared=Number(req.headers.get("content-length"));
+        if(declared>70*1024*1024)return Response.json({error:"Checkpoint too large"},{status:413,headers:CORS_HEADERS});
+        if(req.headers.get("content-type")?.split(";")[0]!=="application/octet-stream")return Response.json({error:"Encrypted checkpoint bytes required"},{status:415,headers:CORS_HEADERS});
+        let size=0;const reader=req.body?.getReader();if(!reader)return Response.json({error:"Empty backup"},{status:400,headers:CORS_HEADERS});
+        const body=new ReadableStream({async pull(controller){const {done,value}=await reader.read();if(done){controller.close();return;}size+=value.byteLength;if(size>70*1024*1024){await reader.cancel();controller.error(Error("Checkpoint too large"));return;}controller.enqueue(value);},cancel(){return reader.cancel();}});
+        const result=await r2Fetch("PUT",CF_BUCKET_PRIVATE,key,{body,contentType:"application/octet-stream"});
+        if(!result.ok)return Response.json({error:"Checkpoint upload failed"},{status:502,headers:CORS_HEADERS});
+        return Response.json({path:parsed.path},{headers:{...CORS_HEADERS,"Cache-Control":"no-store"}});
+      }
+      const result=await r2Fetch("GET",CF_BUCKET_PRIVATE,key);
+      if(!result.ok)return Response.json({error:"Checkpoint unavailable"},{status:result.status===404?404:502,headers:CORS_HEADERS});
+      return new Response(result.body,{headers:{...CORS_HEADERS,"Cache-Control":"private, no-store","Content-Type":"application/octet-stream","X-Content-Type-Options":"nosniff"}});
+    }catch{return Response.json({error:"Checkpoint storage unavailable"},{status:502,headers:CORS_HEADERS});}
+  }
+
   if (!kind || !VALID_KINDS.has(kind)) {
     return Response.json({ error: "Unknown storage kind. Use one of: product, boxscan, invoice, kyc, app." }, { status: 400, headers: CORS_HEADERS });
   }

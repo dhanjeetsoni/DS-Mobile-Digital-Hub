@@ -10,7 +10,7 @@
 // before this works end-to-end.
 import { supabase, SUPABASE_URL, isCloudConfigured } from "./supabaseClient";
 
-export type R2Kind = "product" | "boxscan" | "invoice" | "kyc" | "app";
+export type R2Kind = "product" | "boxscan" | "invoice" | "kyc" | "app" | "backup";
 
 function functionBase(): string {
   return `${SUPABASE_URL.replace(/\/+$/, "")}/functions/v1/r2-storage`;
@@ -84,3 +84,5 @@ export async function r2Delete(kind: R2Kind, path: string): Promise<void> {
     // best-effort — ignore
   }
 }
+
+export async function readEncryptedR2Checkpoint(storeId:string,filename:string):Promise<string>{if(!isCloudConfigured||!/^checkpoint-[0-9a-f-]{36}\.dsbackup$/.test(filename))throw Error("Invalid checkpoint reference");const res=await fetch(functionBase()+"/backup/"+encodeURIComponent(storeId)+"/"+filename,{headers:await authHeader(),cache:"no-store"});if(!res.ok)throw Error("Unable to read private encrypted checkpoint");const blob=await res.blob();if(blob.size>70*1024*1024)throw Error("Checkpoint too large");return blob.text();}

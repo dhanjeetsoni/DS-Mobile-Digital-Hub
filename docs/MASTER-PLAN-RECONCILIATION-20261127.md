@@ -110,3 +110,6 @@ Owner-created revocable 6-day bearer link to synchronized in-stock catalog, expl
 
 ## Selected points 7, 12, 15 — catalog and printer reliability
 Bounded offline catalog download, rejects duplicate IDs across changing pages rather than overwrite last valid cache, revalidates identity each page and excludes supplier/notes from staff-safe cache. Adds regression coverage. ESC/POS receipt retains exact paise and fractional due, strips injected printer control bytes from user text, handles long unbroken item names; tests both widths. Physical transport still requires hardware. Online catalog edge v2 deployed successfully after explicit import-map path correction. No real public link created during testing.
+
+## Selected point 8 — private encrypted R2 checkpoint copy
+Adds an explicit owner-only encrypted database checkpoint upload, isolated nested private-bucket namespace, no public GET and no staff writes, authenticated read-back and byte comparison plus decryption verification. Existing local export remains. This protects database checkpoint bytes only; media/invoice/KYC object backup and cross-project restoration remain separate. Requires configured R2 and an actual authenticated owner session; no real business backup uploaded by the audit. Deployment follows existing live r2-storage version.

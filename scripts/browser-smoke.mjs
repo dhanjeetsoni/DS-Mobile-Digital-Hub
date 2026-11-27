@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { buildSync } from "esbuild";
 import assert from "node:assert/strict";
-import {readFileSync,mkdirSync,writeFileSync} from "node:fs";
+import {readFileSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
 const port=4179;
 const server=spawn(process.execPath,["node_modules/vite/bin/vite.js","preview","--host","127.0.0.1","--port",String(port),"--strictPort"],{stdio:"inherit",env:process.env});
 let browser;
@@ -29,10 +29,12 @@ try{
  console.log("PASS production API health and all registered anonymous AI endpoint denials");
  browser=await chromium.launch({headless:true});
  // Exercise the actual IndexedDB implementation in a separate browser context.
- // The CI-only module is intercepted, not shipped as a production asset.
+ // Temporary CI-only file in the preview output; removed before test exit.
  const snapshotModule=buildSync({entryPoints:["src/services/scopedSnapshotCache.ts"],bundle:true,format:"esm",platform:"browser",write:false}).outputFiles[0].text;
- const recoveryContext=await browser.newContext();
- await recoveryContext.route("**/__ci_scoped_snapshot.mjs",route=>route.fulfill({contentType:"text/javascript",body:snapshotModule}));
+ writeFileSync("dist/__ci_scoped_snapshot.mjs",snapshotModule);
+ const recoveryContext=await browser.newContext({serviceWorkers:"block"});
+ const moduleResponse=await fetch(url+"/__ci_scoped_snapshot.mjs");
+ assert(moduleResponse.ok&&(moduleResponse.headers.get("content-type")||"").includes("javascript"),"CI snapshot module was not served as JavaScript");
  const recoveryPage=await recoveryContext.newPage();
  await recoveryPage.goto(url,{waitUntil:"domcontentloaded"});
  const recoveryInfo=await recoveryPage.evaluate(async()=>{
@@ -412,4 +414,4 @@ try{
  writeFileSync("visual-review/summary.json",JSON.stringify({moduleCount:modules.length,paletteCount:ids.length*2,mobileViewport:"390x844",desktopViewport:"1440x900",note:"Synthetic local data; native hardware not tested."},null,2));
  assert.deepEqual(errors,[],"Uncaught browser errors");
  console.log("PASS production UI boot, local-mode entry, local owner/staff entry and inventory/POS navigation");
-}finally{await browser?.close();apiServer?.kill();server.kill();}
+}finally{rmSync("dist/__ci_scoped_snapshot.mjs",{force:true});await browser?.close();apiServer?.kill();server.kill();}

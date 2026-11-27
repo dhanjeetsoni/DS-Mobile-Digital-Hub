@@ -6,5 +6,18 @@ describe("durable offline SQLite queue",()=>{
  beforeEach(()=>{map=new Map();fail=false;vi.stubGlobal("indexedDB",undefined);vi.stubGlobal("navigator",{});vi.stubGlobal("localStorage",{getItem:(k:string)=>map.get(k)??null,setItem:(k:string,v:string)=>{if(fail)throw Error("quota exceeded");map.set(k,v);}});});
  afterEach(()=>vi.unstubAllGlobals());
  it("serializes concurrent writes and removals against durable state",async()=>{await Promise.all(Array.from({length:12},(_,i)=>sqliteEnqueue("sale","sales",{i},"op-"+i)));expect((await sqliteList()).length).toBe(12);await Promise.all([sqliteRemove("op-0"),sqliteReplace("sale","sales",{i:99},"op-1"),sqliteEnqueue("sale","sales",{i:12},"op-12")]);const rows=await sqliteList();expect(rows.length).toBe(12);expect(rows.some(r=>r[0]==="op-0")).toBe(false);expect(JSON.parse(String(rows.find(r=>r[0]==="op-1")?.[3]))).toEqual({i:99});});
+ it("fails closed on an IndexedDB open error rather than overwriting an unread queue",async()=>{
+  await sqliteEnqueue("sale","sales",{i:1},"old");
+  const before=map.get("dsmdh-sqlite-v2");let opens=0;
+  vi.stubGlobal("indexedDB",{open:()=>{opens++;const req:any={error:new Error("temporary IDB failure")};queueMicrotask(()=>req.onerror?.());return req;}});
+  await expect(sqliteEnqueue("sale","sales",{i:2},"new")).rejects.toThrow("temporary IDB failure");
+  expect(opens).toBe(1);expect(map.get("dsmdh-sqlite-v2")).toBe(before);
+  vi.stubGlobal("indexedDB",undefined);expect((await sqliteList()).map(r=>r[0])).toEqual(["old"]);
+ });
+ it("rejects corrupted legacy bytes instead of starting an empty queue",async()=>{
+  map.set("dsmdh-sqlite-v2","!!!invalid!!!");
+  await expect(sqliteEnqueue("sale","sales",{},"new")).rejects.toThrow("corrupt");
+  expect(map.get("dsmdh-sqlite-v2")).toBe("!!!invalid!!!");
+ });
  it("does not report an unpersisted mutation as durable",async()=>{await sqliteEnqueue("sale","sales",{i:1},"old");fail=true;await expect(sqliteEnqueue("sale","sales",{i:2},"lost")).rejects.toThrow("quota");fail=false;expect((await sqliteList()).map(r=>r[0])).toEqual(["old"]);await sqliteEnqueue("sale","sales",{i:3},"new");expect((await sqliteList()).map(r=>r[0]).sort()).toEqual(["new","old"]);});
 });

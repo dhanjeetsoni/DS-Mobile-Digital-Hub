@@ -17,20 +17,33 @@ function idbAvailable() {
 
 function readIndexedDb(): Promise<Uint8Array | undefined> {
   if (!idbAvailable()) return Promise.resolve(undefined);
-  return new Promise((resolve) => {
-    const req = indexedDB.open("ds-mobile-digital-hub", 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
-    req.onsuccess = () => {
-      const tx = req.result.transaction(DB_STORE, "readonly");
-      const get = tx.objectStore(DB_STORE).get(DB_KEY);
-      get.onsuccess = () => {
-        const value = get.result ? new Uint8Array(get.result) : undefined;
-        tx.oncomplete = () => { try { req.result.close(); } catch {} };
-        resolve(value);
-      };
-      get.onerror = () => { try { req.result.close(); } catch {}; resolve(undefined); };
+  return new Promise((resolve,reject) => {
+    const req=indexedDB.open("ds-mobile-digital-hub",1);
+    let settled=false;
+    const fail=(error:unknown)=>{if(!settled){settled=true;reject(error instanceof Error?error:new Error("Offline queue storage read failed"));}};
+    req.onupgradeneeded=()=>req.result.createObjectStore(DB_STORE);
+    req.onblocked=()=>fail(new Error("Offline queue storage is blocked; close other app instances and retry"));
+    req.onerror=()=>fail(req.error||new Error("Offline queue storage unavailable"));
+    req.onsuccess=()=>{
+      const conn=req.result;
+      if(settled){conn.close();return;}
+      try{
+        const tx=conn.transaction(DB_STORE,"readonly");
+        const get=tx.objectStore(DB_STORE).get(DB_KEY);
+        let value:Uint8Array|undefined;
+        let valid=false;
+        get.onsuccess=()=>{
+          if(get.result===undefined){valid=true;return;}
+          if(get.result instanceof ArrayBuffer&&get.result.byteLength>0){value=new Uint8Array(get.result);valid=true;}
+          else if(ArrayBuffer.isView(get.result)&&get.result.byteLength>0){value=new Uint8Array(get.result.buffer,get.result.byteOffset,get.result.byteLength).slice();valid=true;}
+          else fail(new Error("Stored offline queue is invalid; recovery required"));
+        };
+        get.onerror=()=>fail(get.error||new Error("Offline queue record read failed"));
+        tx.onerror=()=>{conn.close();fail(tx.error||new Error("Offline queue read transaction failed"));};
+        tx.onabort=()=>{conn.close();fail(tx.error||new Error("Offline queue read transaction aborted"));};
+        tx.oncomplete=()=>{conn.close();if(!settled){if(!valid)fail(new Error("Offline queue read not verified"));else{settled=true;resolve(value);}}};
+      }catch(error){conn.close();fail(error);}
     };
-    req.onerror = () => resolve(undefined);
   });
 }
 
@@ -51,13 +64,11 @@ function writeIndexedDb(bytes: Uint8Array): Promise<void> {
 }
 
 async function readLegacyLocalStorage(): Promise<Uint8Array | undefined> {
-  try {
-    const raw = localStorage.getItem(DB_KEY) || localStorage.getItem(DB_KEY.replace("-v2", "-v1"));
-    if (!raw) return undefined;
-    return Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
-  } catch {
-    return undefined;
-  }
+  const raw=localStorage.getItem(DB_KEY)??localStorage.getItem(DB_KEY.replace("-v2","-v1"));
+  if(raw===null)return undefined;
+  if(!raw)throw new Error("Stored offline queue is empty or corrupt; recovery required");
+  try{return Uint8Array.from(atob(raw),c=>c.charCodeAt(0));}
+  catch{throw new Error("Stored offline queue is corrupt; recovery required");}
 }
 
 async function withDb<T>(work:(db:Database)=>Promise<T>):Promise<T>{

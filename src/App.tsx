@@ -16,6 +16,7 @@ import {
 import { inr, round2, numberToWordsIndian, computeSaleTotals, computeDiscountPercent } from "./utils/indianCurrency";
 import { uid, todayStr, nowTimeStr, genSku, backfillMissingSkus, addStockBatch, consumeFIFO, fifoCostTotal, getAvailableStock } from "./utils/fifoEngine";
 import { naturalMatch } from "./utils/naturalSearch";
+import {preferExactCatalogMatches} from "./utils/catalogIdentitySearch";
 import { Sidebar, PRIMARY_NAV_ITEMS, SECONDARY_NAV_ITEMS } from "./components/Sidebar";
 import { RetailCommandBar, RetailQuickRail } from "./components/RetailCommandBar";
 import {findWorkspaceRecords,type RecordHit} from "./utils/workspaceSearch";
@@ -3378,7 +3379,7 @@ export default function App() {
           { id: "Cyber & Xerox", label: "🖨️ Cyber/Xerox" },
         ];
 
-        const filteredProds = catalogProducts.filter((p) => {
+        const candidateProds = catalogProducts.filter((p) => {
           if (stockOf(p) <= 0) return false;
           // Phase 8: "search currently only searches within whatever
           // category tab you're already in" -- the category filter used to
@@ -3414,7 +3415,7 @@ export default function App() {
               (p.compatibleModels || []).some((m) => naturalMatch(m, sellSearchQuery)) ||
               p.sku.toLowerCase().includes(q) ||
               (p.barcode || "").toLowerCase().includes(q) ||
-              (p.units || []).some((u) => u.imei1.includes(q)) ||
+              (p.units || []).some((u) => (u.imei1||"").includes(q)||(u.imei2||"").includes(q)) ||
               aiSearchMatchIds.includes(p.id)
             );
           }
@@ -3428,6 +3429,7 @@ export default function App() {
           return true;
         });
 
+        const filteredProds=preferExactCatalogMatches<Product>(candidateProds,sellSearchQuery);
         const sellSlice=boundedPage<Product>(filteredProds,sellPage,60);
         return (
           <>
@@ -4009,10 +4011,11 @@ export default function App() {
       case "products": {
         const categories=[...new Set(catalogProducts.map(p=>p.category).filter(Boolean))].sort();
         const query=inventoryQuery.trim();
-        const shown=catalogProducts.filter(p=>(!inventoryCategory||p.category===inventoryCategory)&&
+        const candidates=catalogProducts.filter(p=>(!inventoryCategory||p.category===inventoryCategory)&&
           (inventoryStock==="all"||(inventoryStock==="available"&&stockOf(p)>0)||(inventoryStock==="low"&&stockOf(p)>0&&stockOf(p)<=p.minStock)||(inventoryStock==="out"&&stockOf(p)<=0))&&
-          (!query||[p.name,p.brand,p.category,p.sku,p.barcode,...(p.compatibleModels||[]),...(p.units||[]).map(u=>u.imei1)].some(value=>naturalMatch(value||"",query))))
+          (!query||[p.name,p.brand,p.category,p.sku,p.barcode,...(p.compatibleModels||[]),...(p.units||[]).flatMap(u=>[u.imei1,u.imei2])].some(value=>naturalMatch(value||"",query))))
           .sort((x,y)=>inventorySort==="priceLow"?x.sellingPrice-y.sellingPrice:inventorySort==="priceHigh"?y.sellingPrice-x.sellingPrice:inventorySort==="stock"?stockOf(y)-stockOf(x):x.name.localeCompare(y.name));
+        const shown=preferExactCatalogMatches<Product>(candidates,query);
         const inventorySlice=boundedPage<Product>(shown,inventoryPage,48);
         return (
           <div>

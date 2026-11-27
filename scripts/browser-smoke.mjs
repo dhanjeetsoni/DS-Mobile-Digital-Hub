@@ -283,7 +283,7 @@ try{
  await nav.getByRole("button",{name:"Last",exact:true}).click();
  assert.equal(await large.locator(".product-card-grid .product-card").count(),29);
  await large.getByRole("textbox",{name:"Search inventory"}).fill("CI Product 124");
- await large.locator(".product-card-grid .product-card").first().waitFor();
+ await large.waitForFunction(()=>document.querySelectorAll(".product-card-grid .product-card").length===1);
  assert.equal(await large.locator(".product-card-grid .product-card").count(),1);
  assert.match(await large.locator(".product-card-grid .product-card").innerText(),/CI Product 124/);
  await large.getByRole("button",{name:"Reset filters"}).click();

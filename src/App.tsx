@@ -113,6 +113,7 @@ import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { sqliteList } from "./services/localSqlite";
 import { mergeStoreState, sameState } from "./services/syncMerge";
 import { saveSnapshotRecovery, readSnapshotRecovery, clearSnapshotRecovery, archiveSnapshotRecovery } from "./services/repository";
+import {EncryptedBackupPanel} from "./components/EncryptedBackupPanel";
 import { openTelegramConnection, pollTelegramConnection, sendTelegramTest, sendTelegramSecurityAlert } from "./services/telegram";
 import { getRepairDiagnosis, getDetailedRepairDiagnostics, DetailedRepairDiagnostics } from "./services/aiOps";
 import { findAiSearchMatches } from "./services/aiSearch";
@@ -4819,6 +4820,7 @@ export default function App() {
               </button>
             </div>
             <p className="hint">Cloud export uses a verified server business checkpoint. It does not include photo files, Auth credentials or project secrets. Keep a separate encrypted copy.</p>
+            {(!cloudProfile||cloudProfile.role==="owner")&&<EncryptedBackupPanel storeId={cloudProfile?.store_id} profileId={cloudProfile?.id}/>}
             {cloudProfile?.store_id || localStorage.getItem("dsmdh_cloud_identity_seen") ? (
               <p className="hint">Cloud restore/reset is available only through the controlled operator recovery procedure. A device JSON file cannot overwrite the shared business ledger.</p>
             ) : <div style={{marginTop:24}}>

@@ -83,3 +83,6 @@ Migration 20261127054345 fixes live RPC platform mismatch (mobile-android), vali
 
 ## CI runner reliability
 Verified-return hardening workflow passed, but its duplicate release validation runner encountered HTTP 403 fetching the unrelated Microsoft apt package feed. CI now disables only the stock Microsoft prod source on ephemeral Linux runners if present; Ubuntu signature verification, Chromium installation and browser smoke remain mandatory. No test bypass.
+
+## Exchange and return Telegram receipts
+Migration 20261127054642 adds deferred exchange/return bill triggers (after all lines exist), immutable payloads with original invoice and net exchange settlement or aggregated refund, owner route, idempotency and delivery retry integration. SQL rollback passed exchange receipt and multi-line refund aggregation; no external test messages sent. These receipts do not represent new revenue or proof of refund. Real delivery for these new sources still needs first actual transaction acceptance.

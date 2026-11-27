@@ -75,14 +75,17 @@ export async function r2Usage(storeId: string): Promise<R2UsageSummary> {
 }
 
 /** Best-effort delete — never throws, matches the old Supabase Storage behaviour (an orphaned file isn't worth failing a save over). */
-export async function r2Delete(kind: R2Kind, path: string): Promise<void> {
-  if (!isCloudConfigured) return;
+export async function r2DeleteConfirmed(kind: R2Kind, path: string): Promise<boolean> {
+  if (!isCloudConfigured) return false;
   try {
-    const headers = await authHeader();
-    await fetch(`${functionBase()}/${kind}/${path}`, { method: "DELETE", headers });
-  } catch {
-    // best-effort — ignore
-  }
+    const headers=await authHeader();
+    if(!headers.Authorization)return false;
+    const res=await fetch(`${functionBase()}/${kind}/${path}`,{method:"DELETE",headers});
+    return res.ok;
+  } catch {return false;}
+}
+export async function r2Delete(kind: R2Kind, path: string): Promise<void> {
+  await r2DeleteConfirmed(kind,path);
 }
 
 export async function readEncryptedR2Checkpoint(storeId:string,filename:string):Promise<string>{if(!isCloudConfigured||!/^checkpoint-[0-9a-f-]{36}\.dsbackup$/.test(filename))throw Error("Invalid checkpoint reference");const res=await fetch(functionBase()+"/backup/"+encodeURIComponent(storeId)+"/"+filename,{headers:await authHeader(),cache:"no-store"});if(!res.ok)throw Error("Unable to read private encrypted checkpoint");const blob=await res.blob();if(blob.size>70*1024*1024)throw Error("Checkpoint too large");return blob.text();}

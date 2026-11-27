@@ -13,7 +13,8 @@
 import { isCloudConfigured } from "./supabaseClient";
 import { compressImageToBlob } from "../utils/imageCompress";
 import { Database, Product } from "../types";
-import { r2Upload, r2PublicUrl, r2Delete } from "./r2Client";
+import { r2Upload, r2PublicUrl, r2Delete, r2DeleteConfirmed } from "./r2Client";
+import {stalePhotoEligible,type DeletedProductPhoto} from "../utils/productPhotoIntegrity";
 
 const KIND = "product" as const;
 
@@ -98,34 +99,30 @@ export async function deleteProductPhotoByUrl(url: string | undefined): Promise<
 // deletion" wording.
 export async function cleanupStaleOutOfStockPhotos(
   storeId: string | undefined,
-  products: Product[]
-): Promise<string[]> {
-  if (!isCloudConfigured || !storeId) return [];
-  const cutoffMs = Date.now() - OUT_OF_STOCK_PHOTO_CLEANUP_DAYS * 24 * 60 * 60 * 1000;
-  const stale = products.filter((p) => {
-    if (p.stock > 0 || !p.outOfStockSince) return false;
-    const hasAnyRealPhoto = isStorageUrl(p.photo) || (p.photos || []).some((url) => isStorageUrl(url));
-    if (!hasAnyRealPhoto) return false;
-    const since = new Date(p.outOfStockSince).getTime();
-    return Number.isFinite(since) && since <= cutoffMs;
-  });
-  const cleanedIds: string[] = [];
-  for (const p of stale) {
-    try {
-      // Phase 7 audit fix: this used to only ever delete p.photo — for a
-      // product with a second/"back" photo (Phase 6's photos[] array),
-      // that second file was never cleaned up here, left orphaned in R2
-      // forever after the product's main photo was already cleared.
-      const urls = new Set([p.photo, ...(p.photos || [])].filter((u) => isStorageUrl(u)));
-      for (const url of urls) {
-        await deleteProductPhotoByUrl(url);
-      }
-      cleanedIds.push(p.id);
-    } catch {
-      // best-effort — try this one again on the next daily pass
+  products: Product[],
+  currentProducts:()=>Product[],
+  verifyStock:(productId:string)=>Promise<boolean>
+): Promise<{deleted:DeletedProductPhoto[];incomplete:boolean}> {
+  const deleted:DeletedProductPhoto[]=[];
+  if (!isCloudConfigured || !storeId) return {deleted,incomplete:true};
+  const cutoffMs=Date.now()-OUT_OF_STOCK_PHOTO_CLEANUP_DAYS*86400000;
+  let incomplete=false;
+  const prefix=r2PublicUrl(KIND,storeId+"/");
+  for(const p of products.filter(x=>stalePhotoEligible(x,cutoffMs))){
+    for(const url of new Set([p.photo,...(p.photos||[])].filter(u=>u?.startsWith(prefix)))){
+      const name=url.slice(prefix.length);
+      if(!/^[A-Za-z0-9_.-]+$/.test(name)||name==="."||name===".."){incomplete=true;continue;}
+      const eligible=()=>{
+        const latest=currentProducts(),current=latest.find(x=>x.id===p.id);
+        return !!current&&current.outOfStockSince===p.outOfStockSince&&stalePhotoEligible(current,cutoffMs)&&[current.photo,...(current.photos||[])].includes(url)&&!latest.some(x=>x.id!==p.id&&[x.photo,...(x.photos||[])].includes(url));
+      };
+      try{
+        if(!eligible()||!await verifyStock(p.id)||!eligible()){incomplete=true;continue;}
+        if(await r2DeleteConfirmed(KIND,storeId+"/"+name))deleted.push({productId:p.id,url});else incomplete=true;
+      }catch{incomplete=true;}
     }
   }
-  return cleanedIds;
+  return {deleted,incomplete};
 }
 
 // Backfill: on any store that still has legacy base64 photos sitting in
@@ -151,7 +148,7 @@ let backfillRunning = false;
 export async function backfillLegacyProductPhotos(
   storeId: string | undefined,
   db: Database,
-  onProductPhotoMigrated: (productId: string, slotIndex: number, url: string) => void
+  onProductPhotoMigrated: (productId: string, slotIndex: number, url: string, source: string) => void
 ): Promise<void> {
   if (!isCloudConfigured || !storeId || backfillRunning) return;
   type PendingSlot = { productId: string; slotIndex: number; dataUrl: string };
@@ -173,7 +170,7 @@ export async function backfillLegacyProductPhotos(
         // same backfill pass never collides on the same R2 object key.
         const filenameSuffix = slot.slotIndex === 0 ? slot.productId : `${slot.productId}-back`;
         const url = await uploadProductPhotoBlob(storeId, filenameSuffix, blob);
-        onProductPhotoMigrated(slot.productId, slot.slotIndex, url);
+        onProductPhotoMigrated(slot.productId, slot.slotIndex, url, slot.dataUrl);
       } catch {
         // leave this one as data: URL — will retry on the next backfill pass
       }

@@ -114,6 +114,7 @@ import { MOBILE_LOCK_SERVICES } from "./utils/mobileLockServices";
 import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supabaseClient";
 import { deviceId, loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
+import {applyProductPhotoMigration,clearConfirmedDeletedPhotos} from "./utils/productPhotoIntegrity";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { sqliteList } from "./services/localSqlite";
 import { mergeStoreState, sameState } from "./services/syncMerge";
@@ -1726,16 +1727,12 @@ export default function App() {
   // once per store/db-load pair and never blocks or shows a spinner —
   // see services/photoStorage.ts.
   useEffect(() => {
-    if (!cloudUser || !cloudProfile?.store_id) return;
-    backfillLegacyProductPhotos(cloudProfile.store_id, db, (productId, slotIndex, url) => {
-      const product = db.products.find((p) => p.id === productId);
-      if (!product) return;
-      const photos = product.photos && product.photos.length ? [...product.photos] : [product.photo];
-      while (photos.length <= slotIndex) photos.push("");
-      photos[slotIndex] = url;
-      product.photos = photos.filter(Boolean);
-      if (slotIndex === 0) product.photo = url; // keep the legacy single-photo field in sync — every existing read site still uses it
-      saveState({ ...db });
+    if (!cloudUser || !cloudProfile?.store_id || cloudStatus!=="online") return;
+    const scope=cloudBaseRef.current;if(!scope||scope.profileId!==cloudUser.id||scope.storeId!==cloudProfile.store_id)return;
+    backfillLegacyProductPhotos(scope.storeId, dbRef.current, (productId, slotIndex, url, source) => {
+      const now=cloudBaseRef.current;if(!now||now.profileId!==scope.profileId||now.storeId!==scope.storeId)return;
+      const updated=applyProductPhotoMigration(dbRef.current,productId,slotIndex,source,url);
+      if(updated)saveState(updated);
     });
     // Deliberately not re-running on every db change — that would fight
     // with in-progress uploads. It re-checks on reconnect/store change,
@@ -1781,32 +1778,31 @@ export default function App() {
   // shared settings state and issues delete calls, same trust level as the
   // weekly report send just above it. Never touches a product record,
   // only its `photo` field, per the plan's own wording.
-  const photoCleanupCheckedRef = useRef(false);
+  const photoCleanupCheckedRef = useRef("");
   useEffect(() => {
-    if (!cloudUser || !ownerMode || !cloudProfile?.store_id || photoCleanupCheckedRef.current) return;
+    if (!cloudUser || !ownerMode || !cloudProfile?.store_id || cloudStatus!=="online") return;
+    const scope=cloudBaseRef.current;if(!scope||scope.profileId!==cloudUser.id||scope.storeId!==cloudProfile.store_id)return;
+    const scopeKey=scope.profileId+":"+scope.storeId;
+    if(photoCleanupCheckedRef.current===scopeKey)return;
+    const sameScope=()=>cloudBaseRef.current?.profileId===scope.profileId&&cloudBaseRef.current?.storeId===scope.storeId;
     const lastMs = db.settings.lastPhotoCleanupAt ? new Date(db.settings.lastPhotoCleanupAt).getTime() : 0;
     if (Date.now() - lastMs < 24 * 60 * 60 * 1000) return;
-    photoCleanupCheckedRef.current = true;
-    (async () => {
-      try {
-        const cleanedIds = await cleanupStaleOutOfStockPhotos(cloudProfile.store_id, db.products);
-        const updated: Database = structuredClone(db);
-        if (cleanedIds.length) {
-          const idSet = new Set(cleanedIds);
-          updated.products.forEach((p) => {
-            if (idSet.has(p.id)) p.photo = "";
-          });
-        }
-        updated.settings.lastPhotoCleanupAt = new Date().toISOString();
-        saveState(updated);
-        if (cleanedIds.length) {
-          showToast(`${cleanedIds.length} purani out-of-stock product photo(s) cleanup ho gayi (3+ mahine se stock mein nahi thi).`, "green");
-        }
-      } catch {
-        // offline or transient failure — will retry tomorrow, never blocks the app
-      }
+    photoCleanupCheckedRef.current=scopeKey;
+    (async()=>{
+      try{
+        const result=await cleanupStaleOutOfStockPhotos(scope.storeId,dbRef.current.products,()=>sameScope()?dbRef.current.products:[],async id=>{
+          if(!sameScope())return false;
+          const {data,error}=await supabase.from("products_staff_view").select("id,stock_qty").eq("store_id",scope.storeId).eq("id",id).maybeSingle();
+          return !error&&!!data&&data.stock_qty!==null&&Number(data.stock_qty)===0&&sameScope();
+        });
+        if(!sameScope())return;
+        const updated=clearConfirmedDeletedPhotos(dbRef.current,result.deleted);
+        if(!result.incomplete)updated.settings={...updated.settings,lastPhotoCleanupAt:new Date().toISOString()};
+        if(result.deleted.length||!result.incomplete)saveState(updated);
+        if(result.deleted.length)showToast(result.deleted.length+" stale photo deletion(s) acknowledged.", "green");
+      }catch{ /* failed media checks do not mark cleanup complete */ }
     })();
-  }, [cloudUser, ownerMode, cloudProfile?.store_id, db]);
+  }, [cloudUser, ownerMode, cloudProfile?.store_id, cloudStatus, db]);
 
   // Phase 5 — load the Daily Sales Digest on/off status the first time the
   // owner/manager actually opens Settings (not on every app load — this is

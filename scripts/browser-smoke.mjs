@@ -259,17 +259,22 @@ try{
  console.log("PASS inventory search and filter reset");
  // Exercise real rendered pagination with synthetic local inventory, not production data.
  const large=await browser.newPage({viewport:{width:1440,height:900}});
+ const largeTimings={};
  large.on("pageerror",e=>errors.push(e.message));
  await large.goto(url,{waitUntil:"domcontentloaded"});
  await large.getByText("Owner Confidential Area",{exact:true}).first().click();
  await setupLocalOwner(large);
- await large.evaluate(()=>{
+ const fixtureInfo=await large.evaluate(()=>{
   const key=localStorage.getItem("dsmdh_cache_v4")?"dsmdh_cache_v4":"dsmdh_db_v2";
   const db=JSON.parse(localStorage.getItem(key)||"{}");
-  db.products=Array.from({length:125},(_,i)=>({id:"ci-large-"+i,name:"CI Product "+String(i).padStart(3,"0"),category:"Chargers & Cables",brand:"Synthetic",sku:"CI-LARGE-"+i,photo:"",purchasePrice:10,pendingCost:false,sellingPrice:20,stock:5,minStock:1,warrantyEnabled:false,warrantyMonths:0,requireCustomerDetails:false,supplier:"",notes:"",compatibleModels:[],createdAt:"2026-01-01",updatedAt:"2026-01-01",units:[]}));
-  localStorage.setItem("dsmdh_db_v2",JSON.stringify(db));
-  if(key==="dsmdh_cache_v4")localStorage.setItem(key,JSON.stringify(db));
+  db.products=Array.from({length:10000},(_,i)=>({id:"ci-large-"+i,name:"CI Product "+String(i).padStart(5,"0"),category:"Chargers & Cables",brand:"Synthetic",sku:"CI-LARGE-"+i,photo:"",purchasePrice:10,pendingCost:false,sellingPrice:20,stock:5,minStock:1,warrantyEnabled:false,warrantyMonths:0,requireCustomerDetails:false,supplier:"",notes:"",compatibleModels:[],createdAt:"2026-01-01",updatedAt:"2026-01-01",units:[]}));
+  const raw=JSON.stringify(db);
+  // Use the real active cache key; duplicating a large fixture into legacy storage would artificially exceed quota.
+  localStorage.removeItem(key==="dsmdh_cache_v4"?"dsmdh_db_v2":"dsmdh_cache_v4");
+  localStorage.setItem(key,raw);
+  return {products:db.products.length,serializedBytes:new TextEncoder().encode(raw).length};
  });
+ const largeStart=performance.now();
  await large.reload({waitUntil:"domcontentloaded"});
  await large.getByText("Owner Confidential Area",{exact:true}).first().click();
  await large.getByPlaceholder("Enter Owner Device PIN").fill("5826");
@@ -279,19 +284,26 @@ try{
  await large.locator('#page[data-current-page="products"]').waitFor();
  const nav=large.getByRole("navigation",{name:"Inventory pages"});
  await nav.waitFor();
+ largeTimings.reloadUnlockAndInventoryMs=Math.round(performance.now()-largeStart);
  assert.equal(await large.locator(".product-card-grid .product-card").count(),48);
+ const lastStart=performance.now();
  await nav.getByRole("button",{name:"Last",exact:true}).click();
- assert.equal(await large.locator(".product-card-grid .product-card").count(),29);
- await large.getByRole("textbox",{name:"Search inventory"}).fill("CI Product 124");
+ assert.equal(await large.locator(".product-card-grid .product-card").count(),16);
+ largeTimings.lastInventoryPageMs=Math.round(performance.now()-lastStart);
+ const searchStart=performance.now();
+ await large.getByRole("textbox",{name:"Search inventory"}).fill("CI Product 09999");
  await large.waitForFunction(()=>document.querySelectorAll(".product-card-grid .product-card").length===1);
  assert.equal(await large.locator(".product-card-grid .product-card").count(),1);
  const foundName=large.locator(".product-card-grid .product-card .product-card-name");
  await foundName.scrollIntoViewIfNeeded();
  await foundName.waitFor({state:"visible"});
- assert.equal(await foundName.innerText(),"CI Product 124");
- await large.getByRole("textbox",{name:"Search inventory"}).fill("CI-LARGE-124");
- await large.waitForFunction(()=>document.querySelectorAll(".product-card-grid .product-card").length===1&&document.querySelector(".product-card-grid .product-card-name")?.textContent==="CI Product 124");
- assert.equal(await foundName.innerText(),"CI Product 124");
+ assert.equal(await foundName.innerText(),"CI Product 09999");
+ largeTimings.exactNameSearchMs=Math.round(performance.now()-searchStart);
+ const skuStart=performance.now();
+ await large.getByRole("textbox",{name:"Search inventory"}).fill("CI-LARGE-9999");
+ await large.waitForFunction(()=>document.querySelectorAll(".product-card-grid .product-card").length===1&&document.querySelector(".product-card-grid .product-card-name")?.textContent==="CI Product 09999");
+ assert.equal(await foundName.innerText(),"CI Product 09999");
+ largeTimings.exactSkuSearchMs=Math.round(performance.now()-skuStart);
  await large.getByRole("button",{name:"Reset filters"}).click();
  await nav.waitFor();
  assert.equal(await large.locator(".product-card-grid .product-card").count(),48);
@@ -300,9 +312,11 @@ try{
  await large.getByRole("navigation",{name:"POS catalog pages"}).waitFor();
  assert.equal(await large.getByRole("button",{name:"+ Add to Bill",exact:true}).count(),60);
  await large.getByRole("navigation",{name:"POS catalog pages"}).getByRole("button",{name:"Last",exact:true}).click();
- assert.equal(await large.getByRole("button",{name:"+ Add to Bill",exact:true}).count(),5);
+ assert.equal(await large.getByRole("button",{name:"+ Add to Bill",exact:true}).count(),40);
+ const runtime=await large.evaluate(()=>({domNodes:document.querySelectorAll("*").length,heapBytes:performance.memory?.usedJSHeapSize??null}));
+ writeFileSync("visual-review/large-catalog-performance.json",JSON.stringify({...fixtureInfo,timingsMs:largeTimings,runtime,environment:"CI Chromium desktop; synthetic local data; not native-device memory"},null,2));
  await large.close();
- console.log("PASS real rendered inventory/POS pagination, full-catalog search and page reset (125 synthetic products)");
+ console.log("PASS real rendered inventory/POS pagination, full-catalog search and page reset (10,000 synthetic products)",largeTimings);
 
  const mobile=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  mobile.on("pageerror",e=>errors.push(e.message));

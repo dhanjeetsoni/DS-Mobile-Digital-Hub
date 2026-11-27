@@ -101,6 +101,9 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Resolve pinned Rust dependencies
+        run: cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
+
       - name: Compute version string
         shell: bash
         env:
@@ -371,6 +374,15 @@ jobs:
             echo "No ANDROID_KEYSTORE_BASE64 secret set yet - no keystore.properties written."
             echo "The signing config injected above falls back to the auto-generated DEBUG key for the release build type, so this still produces an installable debug-signed APK — just not Play-Store-ready."
           fi
+
+      - name: Cache Gradle dependency downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper/dists
+          key: android-gradle-${{ runner.os }}-${{ hashFiles('package-lock.json', 'src-tauri/Cargo.toml', 'src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: android-gradle-${{ runner.os }}-
 
       - name: Build ${{ matrix.variant }} Android APK
         shell: bash

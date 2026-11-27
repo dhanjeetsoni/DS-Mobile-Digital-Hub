@@ -98,3 +98,6 @@ Migration 20261127090000 closes the older client bypass: mobile product lines wi
 
 ## Owner-confirmed finance payout ledger
 Migration 20261127091456 records synchronized owner-confirmed UTR/date/amount on the relational invoice, posts origination if needed and debits Bank (owner-confirmed), credits Finance receivable exactly once. Case-insensitive unique UTR, mismatch review and settled invoice mutation guard tested via rollback. The finance tracker can post after the evidence is saved and synced; no bank API, fee/clawback or batch payout allocation is inferred. Actual bank authenticity remains owner verification. CI pending.
+
+## Native build dependency alignment
+A native Android run failed after Maven HTTP 429 because the retry discovered newer Rust plugin versions than the locked JS packages. Pin Rust plugins to the corresponding existing JS lockfile versions: {"shell":"2.3.6","process":"2.3.1","biometric":"2.3.3","updater":"2.11.0"}. Resolve Cargo dependencies before packaging; cache Gradle dependency downloads. This preserves version mismatch checks and existing bounded retry. Native validation pending.

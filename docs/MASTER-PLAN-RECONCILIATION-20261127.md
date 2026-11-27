@@ -68,3 +68,6 @@ Migration 20261127045857 adds private per-store unique active IMEI reservations,
 
 ## Return/exchange integrity and recorded-tax review
 Preflight selected return lines and replacement FIFO; reject unsupported serialized, discounted, financed, credit and taxed refund allocations rather than guess; duplicate product lines require review. Failed offline queue no longer presents completion, and replacement FIFO failures no longer silently decrement flat stock. Recorded monthly tax review and CSV use invoice tax amounts only, flag credit notes/exchanges/cancellations and missing input tax. This is not a GST filing; serialized return/exchange completion still needs an explicit IMEI workflow and server release. Six regression cases added. CI pending.
+
+## Bank credit comparison
+Added local read-only finance settlement reconciliation against manually pasted normalized CSV, with exact UTR/date/amount matching, duplicate reference and batch payout review, invalid lines and unmatched credits. No bank API, automatic journal posting or persistent statement storage. Four regression scenarios. Requires real bank export for acceptance.

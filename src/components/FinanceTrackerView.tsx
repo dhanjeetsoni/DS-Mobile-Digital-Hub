@@ -3,6 +3,7 @@ import { Landmark, CheckCircle2, AlertCircle, DollarSign, Search, Calendar, Buil
 import { Database, Sale, MobileFinanceDetails } from "../types";
 import { inr } from "../utils/indianCurrency";
 import { todayStr } from "../utils/fifoEngine";
+import {BankStatementReview} from "./BankStatementReview";
 import {settlementEvidence,recordedSettlementHasReference,duplicateSettlementReference} from "../utils/settlementEvidence";
 
 interface FinanceTrackerViewProps {
@@ -234,6 +235,7 @@ export const FinanceTrackerView: React.FC<FinanceTrackerViewProps> = ({
         </div>
       </div>
 
+      <BankStatementReview sales={financeSales}/>
       {/* Modal: Mark Settled in Bank */}
       {settlementModalSale && settlementModalSale.financeDetails && (
         <div className="overlay show">

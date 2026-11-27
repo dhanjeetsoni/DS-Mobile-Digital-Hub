@@ -30,3 +30,5 @@ Owner Backup screen adds a fresh verified server checkpoint encrypted client-sid
 
 ## Recovery format v3: IMEI reservation history
 New checkpoints capture active and released serialized-sale reservations with checksum and counts. Restore refuses legacy checkpoints without this history when the shop has reservation rows. Same-shop foreign references are verified before restore. Capture/verification rollback tested; full v3 restore on a separate isolated project remains an acceptance step. No live shop reset was performed. Older format checkpoints remain verifiable.
+
+2026-11-27: same-database isolated synthetic-store v3 reset and restore acceptance passed, including original sale, phone reservation and uniqueness. No synthetic shop remains. Independent R2 object bytes / cross-project disaster recovery still require a separate storage backup and isolated target.

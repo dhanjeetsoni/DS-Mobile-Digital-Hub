@@ -92,3 +92,6 @@ Migration 20261127085748 adds explicit source kinds for ordinary fully paid, unt
 
 ## Offline browser acceptance and bank file workflow
 Added actual browser disconnection during local-only synthetic service checkout, reconnect/reload duplicate check and isolated context data check. Does not establish authenticated cross-device cloud replay. Bank comparison now accepts a bounded normalized CSV file directly, displays unmatched credits and exports matched/exception rows with formula-safe CSV. No bank file is uploaded or automatically posted. CI required.
+
+## Mandatory serialized checkout and isolated restore acceptance
+Migration 20261127090000 closes the older client bypass: mobile product lines without selected IMEI fail atomically, with no invoice or stock mutation; legacy nonserialized lines remain compatible. Current main sends selected_imeis; old queued phone transactions require operator reconciliation rather than silently bypassing protection. Rollback tested both missing and valid identifiers. Isolated synthetic-shop format-v3 checkpoint, reset, restore, active reservation and duplicate constraint all passed in a rolled-back transaction. No live-shop reset or external object recovery performed.

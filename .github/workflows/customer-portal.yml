@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main, 'hardening/selected-scope-*']
-    paths: ['customer-portal/**','.github/workflows/customer-portal.yml']
+    paths: ['customer-portal/**','scripts/customer-portal-smoke.mjs','.github/workflows/customer-portal.yml']
 permissions:
   contents: read
 jobs:
@@ -11,7 +11,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
       - run: node --check customer-portal/catalog.js
+      - run: npm install --no-save --package-lock=false playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - run: node scripts/customer-portal-smoke.mjs
       - uses: actions/upload-artifact@v6
         with:
           name: customer-portal-static

@@ -3428,7 +3428,7 @@ export default function App() {
           return true;
         });
 
-        const sellSlice=boundedPage(filteredProds,sellPage,60);
+        const sellSlice=boundedPage<Product>(filteredProds,sellPage,60);
         return (
           <>
           <RetailHero kind="sell" title="New sale" subtitle="Search, scan, add items and create a customer invoice." detail={`${filteredProds.length} available items · ${cart.reduce((n,i)=>n+i.qty,0)} in cart`} onPrimary={()=>setIsCameraScannerOpen(true)} primaryLabel="Scan item"/>
@@ -4013,7 +4013,7 @@ export default function App() {
           (inventoryStock==="all"||(inventoryStock==="available"&&stockOf(p)>0)||(inventoryStock==="low"&&stockOf(p)>0&&stockOf(p)<=p.minStock)||(inventoryStock==="out"&&stockOf(p)<=0))&&
           (!query||[p.name,p.brand,p.category,p.sku,p.barcode,...(p.compatibleModels||[]),...(p.units||[]).map(u=>u.imei1)].some(value=>naturalMatch(value||"",query))))
           .sort((x,y)=>inventorySort==="priceLow"?x.sellingPrice-y.sellingPrice:inventorySort==="priceHigh"?y.sellingPrice-x.sellingPrice:inventorySort==="stock"?stockOf(y)-stockOf(x):x.name.localeCompare(y.name));
-        const inventorySlice=boundedPage(shown,inventoryPage,48);
+        const inventorySlice=boundedPage<Product>(shown,inventoryPage,48);
         return (
           <div>
             <RetailHero kind="products" title="Discover your inventory" subtitle="Browse product photos, prices and current stock. Open any item for full details." detail={`${catalogProducts.length} products`} onPrimary={ownerMode?()=>setIsAddProductOpen(true):undefined} primaryLabel="Add product"/>
@@ -4204,7 +4204,7 @@ export default function App() {
       }
 
       case "invoices": {
-        const invoiceSlice=boundedPage(visibleSales.slice().reverse(),invoicePage,80);
+        const invoiceSlice=boundedPage<Sale>(visibleSales.slice().reverse(),invoicePage,80);
         return (
           <div className="section">
             <div className="section-head">

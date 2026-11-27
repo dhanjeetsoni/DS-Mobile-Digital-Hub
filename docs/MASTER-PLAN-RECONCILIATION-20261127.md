@@ -157,3 +157,6 @@ Tauri frontendDist embeds web assets into the native library (https://v2.tauri.a
 
 ## Owner-reviewed opening balances
 Migration 20261127111817 creates a unique opening journal before all posted activity, explicit evidence reference, balanced allowlisted accounts and cutoff preventing older/same-day ordinary postings. Idempotent replay and anonymous denial tested in rollback, no shop balances entered. UI allows reviewed source amounts and exact paise validation; summary includes opening equity. Statutory balance sheet completeness still requires real reconciled records and review of unclassified gross purchases.
+
+## Android emulator acceptance
+Added an independent Android emulator job, using a pinned emulator-runner action. Installs the exact verified universal APK, launches app and requires the native accessibility tree to show both login options before release. Saves screenshot, UI XML and runtime logs; no real identity or data is used. Release waits for this test. Emulator is not physical hardware acceptance.

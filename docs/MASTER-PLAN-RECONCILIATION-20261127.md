@@ -119,3 +119,6 @@ Migration 20261127092603 adds owner-only explicit close date, monotonically incr
 
 ## Selected point 6 — real provider readiness
 Adds owner-authenticated, rate-limited synthetic text provider self-test via actual existing failover pipeline. Verifies exact marker, reports elapsed time, never emits raw key/provider exceptions or sends business/customer data. UI removes unconditional uptime claim. Actual authenticated owner-provider test, vision/OCR/voice and real data calibration remain separate. Source based on deployed gateway v22; no test quota used without owner action.
+
+## Selected point 11 — verified staff session access
+Migration 20261127092757 requires an unexpired matching Supabase auth session for guarded staff/manager requests (even unregistered sessions); owner path unchanged. Adds owner-only bulk revocation of existing registered sessions for an installation. Rollback verified missing session denial, valid registration of two sessions and denial after revocation. No real staff logout or policy change. Installation identifier is not tamper-resistant hardware identity; new login still possible, offline devices cannot be revoked instantly.

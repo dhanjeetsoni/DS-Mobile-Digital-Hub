@@ -21,6 +21,8 @@ import { RetailCommandBar, RetailQuickRail } from "./components/RetailCommandBar
 import {findWorkspaceRecords,type RecordHit} from "./utils/workspaceSearch";
 import BottomTabBar from "./components/BottomTabBar";
 import { RetailHero } from "./components/RetailHero";
+import {RetailPageNav} from "./components/RetailPageNav";
+import {boundedPage} from "./utils/boundedPage";
 import { PersonalizedMetrics } from "./components/PersonalizedMetrics";
 import {paymentAllocationValid,saleReceipts,suggestCompatibleAccessories} from "./utils/retailIntegrity";
 import {restoreCancelledSaleStock} from "./utils/saleCancellation";
@@ -428,6 +430,8 @@ export default function App() {
   const [inventoryCategory,setInventoryCategory]=useState("");
   const [inventoryStock,setInventoryStock]=useState("all");
   const [inventorySort,setInventorySort]=useState("name");
+  const [inventoryPage,setInventoryPage]=useState(1),[invoicePage,setInvoicePage]=useState(1),[sellPage,setSellPage]=useState(1);
+  useEffect(()=>setInventoryPage(1),[inventoryQuery,inventoryCategory,inventoryStock,inventorySort]);
   // Phase 7: dedicated product detail page — set to a product id to show
   // a full-page takeover (App.tsx renders ProductDetailView instead of the
   // normal page body while this is set) instead of a modal, matching how
@@ -990,6 +994,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sellSearchQuery]);
   const [sellCategoryFilter, setSellCategoryFilter] = useState<string>("ALL");
+  useEffect(()=>setSellPage(1),[sellSearchQuery,sellCategoryFilter]);
   // Step 4.2: the old flat, unconstrained "Discount (₹)" cart field has been
   // removed entirely — there is no manual discount override anywhere in the
   // app anymore. Whatever final price staff/owner types into a cart line IS
@@ -3423,6 +3428,7 @@ export default function App() {
           return true;
         });
 
+        const sellSlice=boundedPage(filteredProds,sellPage,60);
         return (
           <>
           <RetailHero kind="sell" title="New sale" subtitle="Search, scan, add items and create a customer invoice." detail={`${filteredProds.length} available items · ${cart.reduce((n,i)=>n+i.qty,0)} in cart`} onPrimary={()=>setIsCameraScannerOpen(true)} primaryLabel="Scan item"/>
@@ -3478,11 +3484,12 @@ export default function App() {
                 />
               </div>
 
+              <RetailPageNav page={sellSlice} onChange={setSellPage} label="POS catalog"/>
               <div style={{ maxHeight: "420px", overflowY: "auto" }}>
                 {filteredProds.length === 0 ? (
                   <div className="empty">No in-stock products found matching query.</div>
                 ) : (
-                  filteredProds.map((p) => {
+                  sellSlice.rows.map((p) => {
                     // Phase 8: only badge products the AI layer found that
                     // plain keyword matching alone would have missed --
                     // keeps the badge meaningful (not shown on every result
@@ -4006,6 +4013,7 @@ export default function App() {
           (inventoryStock==="all"||(inventoryStock==="available"&&stockOf(p)>0)||(inventoryStock==="low"&&stockOf(p)>0&&stockOf(p)<=p.minStock)||(inventoryStock==="out"&&stockOf(p)<=0))&&
           (!query||[p.name,p.brand,p.category,p.sku,p.barcode,...(p.compatibleModels||[]),...(p.units||[]).map(u=>u.imei1)].some(value=>naturalMatch(value||"",query))))
           .sort((x,y)=>inventorySort==="priceLow"?x.sellingPrice-y.sellingPrice:inventorySort==="priceHigh"?y.sellingPrice-x.sellingPrice:inventorySort==="stock"?stockOf(y)-stockOf(x):x.name.localeCompare(y.name));
+        const inventorySlice=boundedPage(shown,inventoryPage,48);
         return (
           <div>
             <RetailHero kind="products" title="Discover your inventory" subtitle="Browse product photos, prices and current stock. Open any item for full details." detail={`${catalogProducts.length} products`} onPrimary={ownerMode?()=>setIsAddProductOpen(true):undefined} primaryLabel="Add product"/>
@@ -4051,6 +4059,7 @@ export default function App() {
                 <label>Sort<select aria-label="Inventory sort" value={inventorySort} onChange={e=>setInventorySort(e.target.value)}><option value="name">Name A–Z</option><option value="priceLow">Price: low to high</option><option value="priceHigh">Price: high to low</option><option value="stock">Stock: highest first</option></select></label>
               </div>
               <div className="retail-catalog-count" role="status">{shown.length} of {catalogProducts.length} products <button className="btn sm" onClick={()=>{setInventoryQuery("");setInventoryCategory("");setInventoryStock("all");setInventorySort("name");}}>Reset filters</button></div>
+              <RetailPageNav page={inventorySlice} onChange={setInventoryPage} label="Inventory"/>
               {/* Phase 7 — Amazon/Flipkart-style photo-forward card grid,
                   now the DEFAULT product-list experience (not just a
                   mobile fallback like Phase 4's original .product-mobile-list
@@ -4063,7 +4072,7 @@ export default function App() {
                   900px regardless of this toggle (a 13-column table has no
                   usable form on a phone screen either way). */}
               <div className={`product-card-grid ${productViewMode === "table" ? "product-card-grid-hidden-for-table" : ""}`}>
-                {shown.map((p) => {
+                {inventorySlice.rows.map((p) => {
                   const pct = p.category !== "Cyber Cafe" ? computeDiscountPercent(p.mrp, p.sellingPrice) : null;
                   const low = stockOf(p) <= p.minStock;
                   const out = stockOf(p) <= 0;
@@ -4139,7 +4148,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {shown.map((p) => (
+                    {inventorySlice.rows.map((p) => (
                       <tr key={p.id}>
                         <td><ProductThumb photo={p.photo} photos={p.photos} name={p.name} /></td>
                         <td><b>{p.name}</b></td>
@@ -4194,12 +4203,13 @@ export default function App() {
         );
       }
 
-      case "invoices":
+      case "invoices": {
+        const invoiceSlice=boundedPage(visibleSales.slice().reverse(),invoicePage,80);
         return (
           <div className="section">
             <div className="section-head">
               <h2>All Invoices ({visibleSales.length})</h2>
-            </div>
+            </div><RetailPageNav page={invoiceSlice} onChange={setInvoicePage} label="Invoice history"/>
             <div className="table-wrap">
               {visibleSales.length === 0 ? (
                 <div className="empty">No invoices recorded yet.</div>
@@ -4218,7 +4228,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleSales.slice().reverse().map((s) => (
+                    {invoiceSlice.rows.map((s) => (
                       <tr key={s.id}>
                         <td><b>{s.invoiceNo}</b></td>
                         <td>{s.date}</td>
@@ -4273,6 +4283,7 @@ export default function App() {
           </div>
         );
 
+      }
       case "khata":
         return (
           <div className="section">

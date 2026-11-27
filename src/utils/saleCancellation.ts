@@ -11,7 +11,7 @@ export function restoreCancelledSaleStock(db:Database,sale:Sale,date:string):voi
   if(item.isService)continue;
   const product=db.products.find(p=>p.id===item.productId);
   if(!product||!Number.isFinite(item.qty)||item.qty<=0||!Number.isFinite(product.stock)||product.stock<0)throw Error("Original stock record is missing or invalid.");
-  const lots=item.batchConsumption?.length?item.batchConsumption:[{qty:item.qty,purchasePrice:item.purchasePrice}];
+  const lots:{qty:number;purchasePrice:number}[]=item.batchConsumption?.length?item.batchConsumption:[{qty:item.qty,purchasePrice:item.purchasePrice}];
   const qty=lots.reduce((sum,b)=>sum+b.qty,0);
   if(lots.some(b=>!Number.isFinite(b.qty)||b.qty<=0||!Number.isFinite(b.purchasePrice)||b.purchasePrice<0)||round2(qty)!==round2(item.qty)||!Number.isFinite(item.cost)||round2(fifoCostTotal(lots.map(b=>({batchId:null,...b}))))!==round2(item.cost))throw Error("Original FIFO cost cannot be reconciled. Review invoice before cancelling.");
   const identifiers=item.selectedImeis||[];

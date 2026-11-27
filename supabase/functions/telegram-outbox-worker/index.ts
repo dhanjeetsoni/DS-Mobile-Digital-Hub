@@ -1,3 +1,4 @@
+import {formatOriginalPosBill} from "./pos-bill.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import {createClient} from "npm:@supabase/supabase-js@2";
 const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type, x-cron-secret","Access-Control-Allow-Methods":"POST, OPTIONS"};
@@ -29,7 +30,8 @@ Deno.serve(async(req)=>{
  if(!ownerChat){waiting++;const hold=await admin.from("telegram_outbox").update({status:"pending",claimed_at:null,last_error:"OWNER_TELEGRAM_NOT_CONNECTED",next_attempt_at:new Date(Date.now()+120000).toISOString()}).eq("id",row.id);if(hold.error)throw Error("Queue checkpoint failed");continue;}
  if((textId||documentId)&&chat!==ownerChat)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: owner connection changed during delivery",0,true);
  chat=ownerChat;const route=await admin.from("telegram_outbox").update({chat_id:chat}).eq("id",row.id);if(route.error)throw Error("Queue route update failed");
- if(row.sale_id){
+ if(row.sale_id&&row.bill_payload?.schema==="pos-v1"){const frozen=formatOriginalPosBill(row.bill_payload,clean);if(!frozen)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: invalid original POS snapshot",0,true);reference=frozen.reference;lines=frozen.lines;
+ }else if(row.sale_id){
  const {data:s,error:se}=await admin.from("sales").select("invoice_no,customer_name,customer_phone,payment_method,total,subtotal,discount,tax,amount_paid,due_amount,created_at,created_by,status,finance_loan_amount,finance_net_receivable").eq("id",row.sale_id).eq("store_id",row.store_id).maybeSingle();if(se||!s)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: sale source missing",0,true);
  const {data:items,error:ie}=await admin.from("sale_items").select("quantity,unit_price,service_name,is_gift,products(model,brand)").eq("sale_id",row.sale_id).order("id").limit(1001);if(ie||!items||!items.length||items.length>1000)throw new DeliveryError("DELIVERY_REVIEW_REQUIRED: incomplete or oversized invoice items",0,true);
  const {data:actor}=s.created_by?await admin.from("profiles").select("full_name,staff_name").eq("id",s.created_by).eq("store_id",row.store_id).maybeSingle():{data:null};reference=clean(s.invoice_no);

@@ -117,6 +117,31 @@ try{
  assert.equal(cyber.xeroxEntries.filter(e=>e.serviceType==="Xerox B&W"&&e.totalAmount===2).length,1);
  assert.equal(cyber.sales.filter(s=>s.items.some(i=>i.name==="CI test service")).length,1);
  console.log("PASS actual local-only one-tap cybercafe recording; separate POS and service sources");
+ // Local-only native-style operation after a real browser network disconnect.
+ // This validates persistence and isolation, NOT authenticated cloud replay.
+ await owner.getByRole("textbox",{name:"Search tools"}).fill("sell");
+ await owner.locator('[data-tool-key="sell"]').click();
+ await owner.locator('#page[data-current-page="sell"]').waitFor();
+ await owner.context().setOffline(true);
+ try{
+  assert.equal(await owner.evaluate(()=>navigator.onLine),false);
+  await owner.getByRole("button",{name:"+ Custom Service"}).click();
+  await owner.getByPlaceholder("e.g. SIM Cutting, Mobile Polish, Data Backup").fill("CI offline service");
+  await owner.getByPlaceholder("e.g. 50",{exact:true}).fill("75");
+  await owner.getByRole("button",{name:/Add to Cart/}).click();
+  await owner.getByRole("button",{name:/Complete Checkout & Print Bill/}).click();
+  await owner.getByRole("button",{name:"Generate & Print Invoice"}).click();
+  await owner.waitForFunction(()=>{try{return JSON.parse(localStorage.getItem("dsmdh_cache_v4")||localStorage.getItem("dsmdh_db_v2")).sales.some(s=>s.items.some(i=>i.name==="CI offline service")&&s.amountPaid===75);}catch{return false;}});
+  await owner.getByRole("button",{name:"Close invoice",exact:true}).click();
+ }finally{await owner.context().setOffline(false);}
+ await owner.reload({waitUntil:"domcontentloaded"});
+ await owner.getByText("Owner Confidential Area",{exact:true}).first().click();
+ await owner.getByPlaceholder("Enter Owner Device PIN").fill("5826");
+ await owner.getByRole("button",{name:"Unlock",exact:true}).click();
+ await owner.getByText("All Products",{exact:true}).first().waitFor({timeout:30000});
+ assert.equal(await owner.evaluate(()=>JSON.parse(localStorage.getItem("dsmdh_cache_v4")||localStorage.getItem("dsmdh_db_v2")).sales.filter(s=>s.items.some(i=>i.name==="CI offline service")).length),1);
+ console.log("PASS disconnected local checkout, reconnect/reload persistence without duplicate");
+
 
  // Exercise every registered module in a fresh local owner context.
  const directory=await browser.newPage({viewport:{width:1440,height:900}});
@@ -124,6 +149,8 @@ try{
  await directory.goto(url,{waitUntil:"domcontentloaded"});
  await directory.getByText("Owner Confidential Area",{exact:true}).first().click();
  await setupLocalOwner(directory);
+ assert.equal(await directory.evaluate(()=>{try{return JSON.parse(localStorage.getItem("dsmdh_cache_v4")||localStorage.getItem("dsmdh_db_v2"))?.sales?.some(s=>s.items.some(i=>i.name==="CI offline service"))||false;}catch{return false;}}),false);
+ console.log("PASS separate browser device context cannot read other local-only sales");
  const navSource=readFileSync("src/components/Sidebar.tsx","utf8");
  const modules=[...navSource.matchAll(/\{\s*key:\s*"([^"]+)",\s*label:\s*"([^"]+)"/g)].map(m=>({key:m[1],label:m[2]}));
  assert(modules.length>=52,"Feature registry unexpectedly shrank");

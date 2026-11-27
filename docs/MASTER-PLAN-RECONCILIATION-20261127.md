@@ -89,3 +89,6 @@ Migration 20261127054642 adds deferred exchange/return bill triggers (after all 
 
 ## Return/exchange posted accounting (live)
 Migration 20261127085748 adds explicit source kinds for ordinary fully paid, untaxed and undiscounted returns/exchanges. Post the original invoice first, then each return line or exchange. Revenue reversals, verified original cost, replacement FIFO cost and net settlement form balanced append-only entries; repeated posts are unchanged. Corrections to an original posted invoice with subsequent adjustments require review. Live rollback tested original invoice posting after a return exists, return and exchange posting, net cash, duplicate prevention, source discovery and invalid refund rejection. Complex tax/finance/credit allocation remains manual review; recorded refund channel does not independently prove cash transfer.
+
+## Offline browser acceptance and bank file workflow
+Added actual browser disconnection during local-only synthetic service checkout, reconnect/reload duplicate check and isolated context data check. Does not establish authenticated cross-device cloud replay. Bank comparison now accepts a bounded normalized CSV file directly, displays unmatched credits and exports matched/exception rows with formula-safe CSV. No bank file is uploaded or automatically posted. CI required.

@@ -2,7 +2,15 @@
   "productName": "DS Mobile",
   "identifier": "com.dsmobile.digitalhub",
   "app": {
-    "windows": []
+    "windows": [
+      {
+        "label": "main",
+        "title": "DS Mobile",
+        "url": "index.html",
+        "create": true,
+        "visible": true
+      }
+    ]
   },
   "bundle": {
     "android": {

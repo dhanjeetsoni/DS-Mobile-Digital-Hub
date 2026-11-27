@@ -18,6 +18,7 @@ walk(root);
 
 const text = sourceFiles.map(p => fs.readFileSync(p,"utf8")).join("\n");
 const checks = [
+  ["Android creates exactly one visible main WebView", (()=>{const c=JSON.parse(fs.readFileSync(path.join(root,"src-tauri/tauri.mobile-android.conf.json"),"utf8"));const w=c.app?.windows;return Array.isArray(w)&&w.length===1&&w[0].label==="main"&&w[0].create===true&&w[0].visible===true&&w[0].url==="index.html"&&!w[0].minWidth&&!w[0].minHeight;})()],
   ["No Telegram bot token literal in client source", !/\b\d{8,12}:[A-Za-z0-9_-]{20,}\b/.test(text)],
   ["No Devanagari source text", !/[\u0900-\u097F]/.test(text)],
   ["No fake barcode image-data-as-SKU path", !/onScan\(result\)\s*;/.test(fs.readFileSync(path.join(root,"src/components/CameraScannerModal.tsx"),"utf8"))],

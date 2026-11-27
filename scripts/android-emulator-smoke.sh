@@ -11,7 +11,10 @@ adb shell input keyevent 82 || true
 adb install -r "$apk" | tee "$out/install.txt"
 grep -q 'Success' "$out/install.txt"
 adb logcat -c
-adb shell monkey -p "$package" -c android.intent.category.LAUNCHER 1 | tee "$out/launch.txt"
+activity="$(adb shell cmd package resolve-activity --brief "$package" | tr -d '\r' | tail -n1)"
+if [[ "$activity" != "$package/"* ]]; then echo "Launcher activity not resolved: $activity"; exit 1; fi
+adb shell am start -W -n "$activity" | tee "$out/launch.txt"
+grep -q 'Status: ok' "$out/launch.txt"
 passed=false
 for attempt in $(seq 1 24); do
   if adb shell uiautomator dump /sdcard/dsmdh-ui.xml >/dev/null 2>&1 && adb pull /sdcard/dsmdh-ui.xml "$out/window.xml" >/dev/null 2>&1; then
@@ -27,5 +30,9 @@ PY
 done
 adb shell screencap -p /sdcard/dsmdh-screen.png && adb pull /sdcard/dsmdh-screen.png "$out/screen.png" || true
 adb logcat -d -s AndroidRuntime chromium Tauri > "$out/runtime.txt" || true
+adb shell dumpsys activity activities > "$out/activities.txt" || true
+adb shell dumpsys webviewupdate > "$out/webview-provider.txt" || true
+pid="$(adb shell pidof "$package" | tr -d '\r' | awk '{print $1}')"
+if [[ -n "$pid" ]]; then adb logcat -d --pid="$pid" > "$out/app-process.txt" || true; fi
 if [ "$passed" != true ]; then echo "Android app did not render expected login screen"; exit 1; fi
 echo '{"installed":true,"loginScreenVerified":true,"scope":"Android emulator, no real account or physical hardware"}' > "$out/boot-verification.json"

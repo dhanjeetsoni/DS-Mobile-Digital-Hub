@@ -80,3 +80,6 @@ Migration 20261127054102 validates the original active reservation, one physical
 
 ## Signed update publishing and safe release withdrawal
 Migration 20261127054345 fixes live RPC platform mismatch (mobile-android), validates stable version, scoped artifact path and required Windows signature, serializes activation and prevents rollback to lower build even after withdrawal. Owner release withdrawal stops offering the update without downgrading installed devices. Live SQL rollback passed stage/activation/withdrawal/lower-build rejection/unsigned Windows rejection. CI stamps the same version into native config and frontend plus monotonically increasing Android versionCode (1,000,000 + workflow run number to stay above previous default 1.0.0). Physical signed upgrade and roll-forward, R2 upload and manifest delivery still require installed devices and actual artifacts. No live version activated.
+
+## CI runner reliability
+Verified-return hardening workflow passed, but its duplicate release validation runner encountered HTTP 403 fetching the unrelated Microsoft apt package feed. CI now disables only the stock Microsoft prod source on ephemeral Linux runners if present; Ubuntu signature verification, Chromium installation and browser smoke remain mandatory. No test bypass.

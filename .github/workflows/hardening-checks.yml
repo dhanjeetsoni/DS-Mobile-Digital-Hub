@@ -27,7 +27,19 @@ jobs:
       - run: npm run build
       - name: Install browser smoke runner
         run: npm install --no-save --package-lock=false playwright@1.56.1
-      - run: npx playwright install --with-deps chromium
+      - name: Install Chromium and required libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The unrelated Microsoft package feed occasionally denies hosted runners.
+          # Disable only the stock Microsoft prod feed on this ephemeral Linux runner;
+          # Ubuntu package signature checks and actual browser execution remain mandatory.
+          for file in /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources; do
+            if [ -f "$file" ] && grep -q 'packages.microsoft.com/ubuntu/' "$file"; then
+              sudo mv "$file" "$file.disabled"
+            fi
+          done
+          npx playwright install --with-deps chromium
       - name: Run built application in Chromium
         run: node scripts/browser-smoke.mjs
       - name: Upload actual UI screenshots

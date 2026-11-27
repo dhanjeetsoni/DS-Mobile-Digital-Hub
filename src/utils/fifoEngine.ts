@@ -107,6 +107,7 @@ export function consumeFIFO(
   for(const b of getBatchesForProduct(db,productId)){
     if(remaining<=0.0001)break;
     if(!Number.isFinite(b.remainingQty)||b.remainingQty<0||Math.abs(b.remainingQty-round2(b.remainingQty))>1e-8)throw new Error("Invalid stock batch quantity.");
+    if(!Number.isFinite(b.purchasePrice)||b.purchasePrice<0)throw new Error("Invalid stock batch purchase cost.");
     const take=round2(Math.min(b.remainingQty,remaining));
     planned.push({batch:b,take});
     consumed.push({batchId:b.id,qty:take,purchasePrice:b.purchasePrice});
@@ -121,7 +122,13 @@ export function consumeFIFO(
 export function fifoCostTotal(
   consumed?: { batchId: string | null; qty: number; purchasePrice: number }[]
 ): number {
-  return round2((consumed || []).reduce((a, c) => a + (c.purchasePrice || 0) * c.qty, 0));
+  let total = 0;
+  for (const c of consumed || []) {
+    if (!Number.isFinite(c.purchasePrice) || c.purchasePrice < 0 || !Number.isFinite(c.qty) || c.qty <= 0) throw new Error("Invalid FIFO cost or quantity.");
+    total += c.purchasePrice * c.qty;
+    if (!Number.isFinite(total)) throw new Error("FIFO cost overflow.");
+  }
+  return round2(total);
 }
 
 // ---------------------------------------------------------------------------

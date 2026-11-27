@@ -44,3 +44,6 @@ Re-fetched every listed document at e5ca5ba. Checkbox counts (not unique tasks):
 
 ## Staff cybercafe receipt protection (live)
 Migration 20261127041031: existing cybercafe revenue immutable through staff snapshot writes; new receipt values validated, old owner-removed billed IDs not resurrected by stale staff caches. Actual scoped snapshot RPC under simulated owner/staff claims, rollback: owner record + private cost preserved despite staff omission, private cost absent in staff projection, staff new receipt persisted, one owner-routed outbox row for each, stale version conflict rejected. No persistent fixtures. Operator/owner correction and offline native acceptance still need testing. This migration-only follow-up branch avoids cancellation of the running client build; consolidate after CI.
+
+## Follow-up FIFO cost audit (2026-11-27)
+Source review found invalid batch purchase cost could survive allocation and historical NaN could become zero in fifoCostTotal. Reject non-finite/negative costs before mutating batches; validate cost aggregation and preserve legitimate zero-cost batches. Regression tests added. New commit requires CI verification; no physical-device or production DB acceptance claimed.

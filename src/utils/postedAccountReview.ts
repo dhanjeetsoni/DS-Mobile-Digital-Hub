@@ -33,7 +33,7 @@ export function postedBalanceSheetLines(report:ReturnType<typeof reviewPostedAcc
  const s=report.statement;
  const lines:(string|number)[][]=[];
  for(const group of ["Assets","Liabilities","Equity"]){for(const a of s.accounts.filter(x=>x.group===group))lines.push([group,a.account,group==="Assets"?a.closing_net:-a.closing_net]);}
- lines.push(["Equity","Cumulative posted result",s.cumulativeResult],["Equity","Less owner drawings",-s.drawings],["Total","Recorded assets",s.assets],["Total","Recorded liabilities and equity",s.liabilities+s.openingEquity+s.cumulativeResult-s.drawings],["Review","Unallocated residual",s.residual]);
+ lines.push(["Equity","Cumulative posted result",s.cumulativeResult],["Equity","Less owner drawings",-s.drawings],["Total","Recorded assets",s.assets],["Total","Recorded liabilities and equity",(Math.round((s.liabilities+s.openingEquity+s.cumulativeResult-s.drawings)*100)||0)/100],["Review","Unallocated residual",s.residual]);
  for(const a of s.unclassified)lines.push(["Unclassified / review",a.account,a.closing_net]);
  return lines;
 }

@@ -497,7 +497,7 @@ async function processOperation(row: any, storeId: string) {
         p_min_stock: item.minStock ?? 0,
       });
       if (resolveError) throw resolveError;
-      return { product_id: realId, quantity: item.qty, unit_price: item.price, is_gift: item.isGift ?? false, warranty_enabled: item.warrantyEnabled ?? false, warranty_months: item.warrantyMonths ?? null, warranty_start: item.warrantyStart ?? null, warranty_end: item.warrantyEnd ?? null };
+      return { product_id: realId, quantity: item.qty, unit_price: item.price, ...(Array.isArray(item.selectedImeis)?{selected_imeis:item.selectedImeis}:{}), is_gift: item.isGift ?? false, warranty_enabled: item.warrantyEnabled ?? false, warranty_months: item.warrantyMonths ?? null, warranty_start: item.warrantyStart ?? null, warranty_end: item.warrantyEnd ?? null };
     }));
 
     const hasPaymentDetails = typeof sale.amountPaid === "number" && Number.isFinite(sale.amountPaid) && typeof sale.dueAmount === "number" && Number.isFinite(sale.dueAmount);

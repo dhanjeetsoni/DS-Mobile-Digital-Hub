@@ -2456,7 +2456,7 @@ export default function App() {
             p_min_stock: i.minStock,
           });
           if (resolveError) throw resolveError;
-          return { product_id: realId, quantity: i.qty, unit_price: i.price, is_gift: i.isGift ?? false, warranty_enabled: i.warrantyEnabled, warranty_months: i.warrantyMonths, warranty_start: i.warrantyStart ?? null, warranty_end: i.warrantyEnd ?? null };
+          return { product_id: realId, quantity: i.qty, unit_price: i.price, selected_imeis:i.selectedImeis??[], is_gift: i.isGift ?? false, warranty_enabled: i.warrantyEnabled, warranty_months: i.warrantyMonths, warranty_start: i.warrantyStart ?? null, warranty_end: i.warrantyEnd ?? null };
         }));
 
         const { data: atomicSaleId, error: atomicError } = await supabase.rpc("atomic_complete_sale_v2", {
@@ -2478,7 +2478,7 @@ export default function App() {
         if (atomicSaleId) showToast("Cloud transaction committed atomically", "green");
       } catch (e: any) {
         const msg = String(e?.message || e || "");
-        const businessFailure = /insufficient|inventory mismatch|selling price|not authorized|invoice number already exists|invalid quantity|invalid payment amount|hardening_nonnegative_stock/i.test(msg);
+        const businessFailure = /insufficient|inventory mismatch|selling price|not authorized|invoice number already exists|invalid quantity|invalid payment amount|hardening_nonnegative_stock|IMEI reservation/i.test(msg);
         if (businessFailure) {
           showToast(msg || "Sale rejected by server.", "red");
           return;

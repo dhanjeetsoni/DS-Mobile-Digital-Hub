@@ -1,0 +1,11 @@
+/* Responsive retail polish, preserving the existing 22 palettes and navigation. */
+#page .section{border-radius:18px;box-shadow:0 5px 24px color-mix(in srgb,var(--ink) 5%,transparent)}
+#page .section-head{gap:12px;flex-wrap:wrap}
+#page .card{border-radius:16px;transition:box-shadow .18s ease,transform .18s ease}
+#page .btn{transition:background .16s ease,box-shadow .16s ease,transform .16s ease}
+#page .btn:focus-visible,#sidebar button:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+#page .table-wrap{border-radius:12px;overscroll-behavior-inline:contain;scrollbar-width:thin}
+#page .table-wrap th{font-weight:700;white-space:nowrap}
+@media(hover:hover) and (pointer:fine){#page .card:hover{box-shadow:0 8px 24px color-mix(in srgb,var(--ink) 9%,transparent)}#page .btn:not(:disabled):active{transform:translateY(1px)}}
+@media(max-width:600px){#page .section{border-radius:14px}#page .section-head{align-items:flex-start}#page .btn{min-height:44px}#page input:not([type=checkbox]):not([type=radio]),#page select{min-height:44px}#page .table-wrap{max-width:100%}}
+@media(prefers-reduced-motion:reduce){#page .card,#page .btn{transition:none!important;transform:none!important}}

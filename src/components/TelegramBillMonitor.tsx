@@ -1,7 +1,8 @@
 import React,{useEffect,useRef,useState} from "react";
 import {isCloudConfigured,supabase} from "../services/supabaseClient";
 type Bill={id:string;reference:string;status:string;attempts:number;created_at:string;sent_at:string|null;last_error:string|null;text_sent:boolean;pdf_sent:boolean};
-type Status={connected:boolean;pending:number;failed:number;missingSales:number;missingCyber:number;bills:Bill[]};
+type Coverage={kind:string;records:number;queued:number;delivered:number;missing:number};
+type Status={coverage?:Coverage[];connected:boolean;pending:number;failed:number;missingSales:number;missingCyber:number;bills:Bill[]};
 export function TelegramBillMonitor({profileId,storeId}:{profileId?:string;storeId?:string}){
  const scope=String(profileId||"")+":"+String(storeId||"");
  const [snapshot,setSnapshot]=useState<{scope:string;data:Status}|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState("");const seq=useRef(0),pending=useRef(false);
@@ -14,7 +15,8 @@ export function TelegramBillMonitor({profileId,storeId}:{profileId?:string;store
  if(action==="retry"){const {data,error}=await supabase.rpc("retry_telegram_bill",{p_id:id});if(error||data!==true)throw Error("This bill cannot be retried automatically. Check recovery/delivery review.");}
  if(action!=="refresh"){const {error}=await supabase.functions.invoke("telegram-outbox-worker",{body:{trigger:"owner-bill-monitor"}});if(error&&n===seq.current)setMessage("Delivery worker could not be reached; queued records remain saved.");}
  const {data,error}=await supabase.rpc("get_telegram_bill_status");if(error||!data||!Array.isArray(data.bills))throw Error("Cannot verify bill queue. Check owner session and internet.");
- if(n===seq.current)setSnapshot({scope,data});
+ const {data:coverage,error:coverageError}=await supabase.rpc("read_telegram_coverage");
+ if(n===seq.current){setSnapshot({scope,data:{...data,coverage:coverageError?undefined:coverage?.sources}});if(coverageError)setMessage("Detailed source coverage unavailable; queue totals are still shown.");}
  }catch(e){if(n===seq.current){setSnapshot(null);setMessage(e instanceof Error?e.message:"Bill monitor unavailable.");}}finally{if(n===seq.current){pending.current=false;setBusy(false);}}
  };
  const d=snapshot?.scope===scope?snapshot.data:null;const online=!!profileId&&!!storeId&&isCloudConfigured;
@@ -24,6 +26,7 @@ export function TelegramBillMonitor({profileId,storeId}:{profileId?:string;store
  {!online&&<p className="hint">Cloud owner sign-in required. Local-only data cannot reach Telegram.</p>}{message&&<p className="hint" role="status">{message}</p>}
  {d&&<><p className="hint">Owner bot: {d.connected?"Connected":"Not connected — bills stay queued"}. Latest 100 bill records. TEST references are delivery checks, not sales.</p><div className="grid cols-3"><div className="card"><h3>Pending / sending</h3><div className="big">{d.pending}</div></div><div className="card"><h3>Needs review</h3><div className="big">{d.failed}</div></div><div className="card"><h3>Missing queue entries</h3><div className="big">{d.missingSales+d.missingCyber}</div><p className="hint">POS {d.missingSales} · Cybercafe {d.missingCyber}</p></div></div>
  {!!(d.missingSales+d.missingCyber)&&<p className="alert red">Some source records have no bill queue entry. Request an operator reconciliation; do not re-enter the sale.</p>}
+ {d.coverage&&<div className="table-wrap"><table><thead><tr><th>Receipt source</th><th>Recorded</th><th>Queued</th><th>Text + PDF delivered</th><th>Missing</th></tr></thead><tbody>{d.coverage.map(c=><tr key={c.kind}><td>{c.kind}</td><td>{c.records}</td><td>{c.queued}</td><td>{c.delivered}</td><td>{c.missing}</td></tr>)}</tbody></table>{d.coverage.length===0&&<p className="hint">No synchronized source records yet.</p>}<p className="hint">Coverage excludes unsynchronized devices and historical correction events. Missing entries require reconciliation, not duplicate sales.</p></div>}
  <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",margin:"12px 0"}}><label>Find bill <input aria-label="Search Telegram bill reference" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Invoice / correction reference"/></label><label>Status <select aria-label="Filter Telegram bill status" value={filter} onChange={e=>setFilter(e.target.value)}>{["all","pending","sending","sent","failed"].map(s=><option key={s} value={s}>{s==="all"?"All statuses":s}</option>)}</select></label><span className="hint">{visible.length} of {d.bills.length} recent records</span></div>
  {visible.length===0&&<p className="hint" role="status">No matching bill records.</p>}
  <div className="table-wrap"><table><thead><tr><th>Reference</th><th>Status</th><th>Text</th><th>PDF</th><th>Attempts</th><th>Delivery / issue</th><th>Action</th></tr></thead><tbody>{visible.map(b=><tr key={b.id}><td>{b.reference}</td><td>{b.status}</td><td>{b.text_sent?"Acknowledged":"Waiting"}</td><td>{b.pdf_sent?"Acknowledged":"Waiting"}</td><td>{b.attempts}</td><td>{b.sent_at?new Date(b.sent_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"}):b.last_error||"Queued"}</td><td>{b.status==="failed"&&!b.last_error?.startsWith("RESTORE_REVIEW_REQUIRED:")&&<button className="btn sm" disabled={busy} onClick={()=>void run("retry",b.id)}>Review &amp; retry</button>}</td></tr>)}</tbody></table></div></>}

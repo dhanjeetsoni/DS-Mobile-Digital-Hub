@@ -101,3 +101,6 @@ Migration 20261127091456 records synchronized owner-confirmed UTR/date/amount on
 
 ## Native build dependency alignment
 A native Android run failed after Maven HTTP 429 because the retry discovered newer Rust plugin versions than the locked JS packages. Pin Rust plugins to the corresponding existing JS lockfile versions: {"shell":"2.3.6","process":"2.3.1","biometric":"2.3.3","updater":"2.11.0"}. Resolve Cargo dependencies before packaging; cache Gradle dependency downloads. This preserves version mismatch checks and existing bounded retry. Native validation pending.
+
+## Selected scope (2, 5–16)
+Explicitly defer GST, additional finance and serialized exchange development (1,3,4). Owner Telegram coverage RPC reports synchronized records, queued and fully acknowledged text/PDF per source. Shape/anon-denial rollback passed. Posted trial balance and classified financial review show unallocated accounts rather than fabricate a complete balance sheet. Responsive retail polish retains themes and features. No physical hardware or provider acceptance implied. CI required.

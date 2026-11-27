@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { RotateCcw, Search, CheckCircle2, ArrowRight, Printer, AlertTriangle, RefreshCw, ShieldCheck, Clock } from "lucide-react";
 import { Database, Sale, ReturnRecord, ExchangeRecord, ReturnItem, WarrantyClaim, Product } from "../types";
 import { inr } from "../utils/indianCurrency";
+import {returnSelectionIssue} from "../utils/returnIntegrity";
 import { todayStr, nowTimeStr, uid, addStockBatch, consumeFIFO } from "../utils/fifoEngine";
 import { supabase, isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, resolveTransactionRefs } from "../services/repository";
@@ -33,7 +34,7 @@ interface ReturnsExchangesViewProps {
 // offline queue forever. Only network/availability errors get queued for
 // the background worker. Same rule as StockAdjustView.
 function isBusinessRejection(message: string): boolean {
-  return /invalid quantity|not authorized|unknown product|insufficient inventory|over.return|invalid sale|staff return requires|invalid warranty/i.test(message);
+  return /invalid quantity|not authorized|unknown product|insufficient inventory|over.return|invalid sale|staff return requires|invalid warranty|invalid payment amount|IMEI reservation|refund amount|already returned|constraint/i.test(message);
 }
 
 // Local ids (sale.id / customerId) are only real cloud UUIDs once that
@@ -242,6 +243,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
   const handleProcessReturn = async () => {
     if (!foundSale || isSavingReturn) return;
     if(foundSale.status==="Cancelled"){toast("Cancelled invoices cannot be returned.","red");return;}
+    const issue=returnSelectionIssue(db,foundSale,selectedReturnItems);if(issue){toast(issue,"red");return;}
     const totalRefund = calculateReturnRefund();
     if (!Number.isFinite(totalRefund)||totalRefund <= 0) {
       toast("Return karne ke liye kam se kam 1 item chunein", "red");
@@ -369,7 +371,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
                 idempotencyKey
               );
             } catch {
-              toast("Saved locally, but couldn't queue for background sync.", "amber");
+              toast("Unable to durably queue transaction. No local completion recorded; retry after reconnecting.", "red");return;
             }
           }
         }
@@ -452,6 +454,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
       return;
     }
 
+    const issue=returnSelectionIssue(db,foundSale,exchangeReturnItems,{id:replacementProd.id,qty:exchangeReplacementQty});if(issue){toast(issue,"red");return;}
     // Phase 1: compute without mutating db state yet.
     const returnedItemsList: any[] = [];
     let returnedVal = 0;
@@ -554,7 +557,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
                 idempotencyKey
               );
             } catch {
-              toast("Saved locally, but couldn't queue for background sync.", "amber");
+              toast("Unable to durably queue transaction. No local completion recorded; retry after reconnecting.", "red");return;
             }
           }
         }
@@ -578,11 +581,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
       });
 
       // Deduct replacement stock via FIFO too, mirroring how a normal sale consumes it.
-      try {
-        consumeFIFO(db, replacementProd.id, exchangeReplacementQty);
-      } catch {
-        // Pre-existing batch/stock desync — the flat decrement below still applies.
-      }
+      consumeFIFO(db, replacementProd.id, exchangeReplacementQty);
       replacementProd.stock -= exchangeReplacementQty;
 
       const excRecord: ExchangeRecord = {
@@ -676,7 +675,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
                 idempotencyKey
               );
             } catch {
-              toast("Saved locally, but couldn't queue for background sync.", "amber");
+              toast("Unable to durably queue transaction. No local completion recorded; retry after reconnecting.", "red");return;
             }
           }
         }
@@ -730,6 +729,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
         if (error) throw error;
       } catch (err: any) {
         const msg = String(err?.message || err || "");
+        if (isBusinessRejection(msg)){toast(msg||"Warranty update rejected.","red");return;}
         if (!isBusinessRejection(msg)) {
           try {
             await queueOfflineOperation(
@@ -739,7 +739,7 @@ export const ReturnsExchangesView: React.FC<ReturnsExchangesViewProps> = ({
               crypto.randomUUID()
             );
           } catch {
-            /* best-effort — local status still updates below */
+            toast("Could not queue warranty status update.","red");return;
           }
         }
       }

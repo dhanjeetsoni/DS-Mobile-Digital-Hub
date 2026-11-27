@@ -116,3 +116,6 @@ Adds an explicit owner-only encrypted database checkpoint upload, isolated neste
 
 ## Selected point 2 — owner journal close
 Migration 20261127092603 adds owner-only explicit close date, monotonically increasing lock, blocks backdated journal insertions, protects closed history from reset or incompatible restore and records an audit event. Rollback tested close, later date acceptance, backdate rejection and shortening rejection. No real period closed. UI requires two confirmations. This is a posted-journal close, not statutory closing or complete opening balances. Selected-scope native builds now trigger automatically.
+
+## Selected point 6 — real provider readiness
+Adds owner-authenticated, rate-limited synthetic text provider self-test via actual existing failover pipeline. Verifies exact marker, reports elapsed time, never emits raw key/provider exceptions or sends business/customer data. UI removes unconditional uptime claim. Actual authenticated owner-provider test, vision/OCR/voice and real data calibration remain separate. Source based on deployed gateway v22; no test quota used without owner action.

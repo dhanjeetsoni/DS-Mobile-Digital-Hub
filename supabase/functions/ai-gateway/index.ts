@@ -1272,6 +1272,20 @@ Deno.serve(async (req: Request) => {
 
   try {
     switch (route) {
+      case "provider-self-test": {
+        const ctx=await requireUserAndStore(req);
+        if(!ctx)return json({success:false,error:"Authentication required."},401);
+        const {data:profile,error}=await supabaseAdmin!.from("profiles").select("role,store_id").eq("id",ctx.userId).maybeSingle();
+        if(error||profile?.role!=="owner"||profile.store_id!==ctx.storeId)return json({success:false,error:"Owner access required."},403);
+        if(!checkRateLimit("provider-test:"+ctx.userId,60000,2))return json({success:false,error:"Please wait before testing again."},429);
+        const started=Date.now();
+        try{
+          const response=await runWithGeminiFailover(ctx.storeId,ai=>ai.models.generateContent({model:GEMINI_MODEL_TEXT,contents:{parts:[{text:"Connectivity test. Reply with exactly DSMDH_TEST_OK and no other text."}]},config:TEXT_MODE_CONFIG}));
+          if(!/^DSMDH_TEST_OK[.!]?$/.test(String(response.text||"").trim()))return json({success:false,error:"Provider replied but the synthetic verification marker did not match.",elapsedMs:Date.now()-started},502);
+          return json({success:true,verified:"text",elapsedMs:Date.now()-started});
+        }catch{return json({success:false,error:"No configured text provider completed the synthetic request. Check key status, quota and model availability."},503);}
+      }
+
       case "ocr-phone": {
         const ctx = await requireUserAndStore(req);
         if (!ctx) return json({ success: false, error: "Authentication required." }, 401);

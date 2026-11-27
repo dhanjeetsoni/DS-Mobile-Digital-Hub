@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { KeyRound, RefreshCw, CheckCircle2, XCircle, Clock, Sparkles, Cpu, Layers, Tag } from "lucide-react";
 import { getGeminiKeyStatus, saveGeminiKey, GeminiKeySlotStatus, AiProvider } from "../services/geminiKeys";
 import { detectProviderFromKey } from "../services/aiProviderAdapters";
+import {supabase,SUPABASE_URL,isCloudConfigured} from "../services/supabaseClient";
 
 const PROVIDER_OPTIONS: { id: AiProvider; name: string; placeholder: string; badgeColor: string; bg: string }[] = [
   { id: "gemini", name: "Google Gemini", placeholder: "Paste Gemini API key (AIzaSy...)", badgeColor: "#0284c7", bg: "rgba(2, 132, 199, 0.1)" },
@@ -20,6 +21,8 @@ export const AiKeyPoolPanel: React.FC = () => {
   const [labels, setLabels] = useState<Record<number, string>>({});
   const [savingSlot, setSavingSlot] = useState<number | null>(null);
   const [toast, setToast] = useState("");
+  const [testBusy,setTestBusy]=useState(false),[testResult,setTestResult]=useState("");
+  const testProvider=async()=>{if(testBusy||!isCloudConfigured||!window.confirm("Run one synthetic AI text connectivity test? It uses configured provider quota and no customer or business data."))return;setTestBusy(true);setTestResult("");try{const {data,error}=await supabase.auth.getSession();if(error||!data.session?.access_token)throw Error("Owner cloud login required.");const response=await fetch(SUPABASE_URL.replace(/\/$/,"")+"/functions/v1/ai-gateway/provider-self-test",{method:"POST",headers:{Authorization:"Bearer "+data.session.access_token,"Content-Type":"application/json"},body:"{}"});const result=await response.json();if(!response.ok||result.success!==true||result.verified!=="text")throw Error(result.error||"Provider test failed");setTestResult("Actual synthetic text response verified in "+Math.round(Number(result.elapsedMs))+" ms. OCR, vision and voice are separate tests.");await refresh();}catch(e){setTestResult(e instanceof Error?e.message:"AI test unavailable.");}finally{setTestBusy(false);}};
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -132,9 +135,10 @@ export const AiKeyPoolPanel: React.FC = () => {
       <p className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
         Apne store mein kisi bhi AI provider (<strong>Google Gemini, OpenAI ChatGPT, Anthropic Claude, Groq, OpenRouter</strong>)
         ki API keys daal sakte ho. Ek key ki limit khatam hone par system khud agli available key aur provider par switch kar lega —
-        shop ka koi bhi OCR, glass search, ya product page feature nahi rukega.
+        Failover attempts eligible keys; provider capability, quota and outages can still interrupt features.
       </p>
 
+      <div className="card" style={{marginBottom:12}}><h3>Live provider connectivity</h3><p className="hint">Synthetic text-only test. No customer data. A configured key is not proof of a working provider.</p><button type="button" className="btn sm" disabled={testBusy||!isCloudConfigured} onClick={()=>void testProvider()}>{testBusy?"Testing configured provider…":"Test AI text provider"}</button>{testResult&&<p role="status" className="hint">{testResult}</p>}</div>
       {loadError && (
         <div className="notice" style={{ marginBottom: 12 }}>
           {loadError}

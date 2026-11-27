@@ -160,3 +160,6 @@ Migration 20261127111817 creates a unique opening journal before all posted acti
 
 ## Android emulator acceptance
 Added an independent Android emulator job, using a pinned emulator-runner action. Installs the exact verified universal APK, launches app and requires the native accessibility tree to show both login options before release. Saves screenshot, UI XML and runtime logs; no real identity or data is used. Release waits for this test. Emulator is not physical hardware acceptance.
+
+## Rich customer catalog
+Migration 20261127112046 adds separate opt-in rich catalog link kinds. Existing text and receipt/repair links unchanged. POST bearer-token API returns only public name, category, brand, optional price and allowlisted same-store uploaded product photo; excludes pending or out-of-stock records and private KYC, arbitrary URLs, costs and customer data. Static mobile storefront supports search, category, sort and pagination. Link token travels in URL fragment then request body; no token in API query string. Static artifact workflow added; public hosting is not connected and must be enabled before using a rich URL. Supabase default shared domain rewrites HTML as text; do not bypass this restriction.

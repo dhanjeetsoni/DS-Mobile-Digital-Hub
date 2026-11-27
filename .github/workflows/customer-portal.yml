@@ -1,0 +1,19 @@
+name: Build public customer storefront
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'hardening/selected-scope-*']
+    paths: ['customer-portal/**','.github/workflows/customer-portal.yml']
+permissions:
+  contents: read
+jobs:
+  storefront:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - run: node --check customer-portal/catalog.js
+      - uses: actions/upload-artifact@v6
+        with:
+          name: customer-portal-static
+          path: customer-portal/
+          if-no-files-found: error

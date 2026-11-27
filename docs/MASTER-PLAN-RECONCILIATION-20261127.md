@@ -134,3 +134,6 @@ Corrected performance candidate passed native and hardening CI; merged to main. 
 
 ## Selected point 13 — immutable original POS receipt
 Migration 20261127094850 captures original finalized POS bill in the deferred sale trigger (after payment hydration and sale items), including actor, payment, amounts and item names. Existing pending row is enriched only if never delivered and snapshot absent. Rollback verifies original Cash receipt remains unchanged after UPI correction and a separate correction notice exists. Worker prioritizes frozen snapshot for both text and PDF; existing legacy rows retain fallback. No synthetic message sent externally or historical data reconstructed.
+
+## Selected point 2 — posted general ledger account drilldown
+Migration 20261127094947 supports account-filtered opening, running, closing balances and 100-event cursor pages with snapshot max-ID anchoring. Rollback test inserts 101 synthetic events, confirms first and next pages and same closing balance, and anon denial. No synthetic entries retained. Account detail UI includes navigation and page CSV. Full statutory financial statements still require independently reconciled opening balances and unposted sources.

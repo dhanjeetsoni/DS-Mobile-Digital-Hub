@@ -1,7 +1,8 @@
 import { supabase, getCurrentProfile } from "./supabaseClient";
 import type { Database } from "../types";
 import {collectCatalogRows,stockMapFromRows} from "../utils/liveCatalogPagination";
-import { sqliteEnqueue, sqliteList, sqliteRemove, sqliteReplace } from "./localSqlite";
+import { sqliteEnqueue, sqliteList, sqliteRemove, sqliteReplace,sqliteTransaction } from "./localSqlite";
+import {sameState} from "./syncMerge";
 
 const LOCAL_KEY = "dsmdh_cache_v4";
 const DEVICE_ID_KEY = "dsmdh_device_id";
@@ -401,8 +402,12 @@ export async function clearSnapshotRecovery(profileId:string,storeId:string) {
   await sqliteRemove(recoveryId(profileId,storeId));
 }
 export async function archiveSnapshotRecovery(recovery:SnapshotRecovery) {
-  await sqliteEnqueue("snapshot_conflict","store_state",recovery);
-  await clearSnapshotRecovery(recovery.scope.profileId,recovery.scope.storeId);
+  const id=recoveryId(recovery.scope.profileId,recovery.scope.storeId);
+  await sqliteTransaction(db=>{
+    db.run("INSERT INTO offline_queue (id,operation,entity,payload,created_at) VALUES (?,?,?,?,?)",[crypto.randomUUID(),"snapshot_conflict","store_state",JSON.stringify(recovery),new Date().toISOString()]);
+    const row=db.exec("SELECT payload FROM offline_queue WHERE id=?",[id])[0]?.values[0];
+    if(row){const current=JSON.parse(String(row[0])) as SnapshotRecovery;if(current.scope?.profileId===recovery.scope.profileId&&current.scope?.storeId===recovery.scope.storeId&&current.version===recovery.version&&sameState(current.base,recovery.base)&&sameState(current.local,recovery.local))db.run("DELETE FROM offline_queue WHERE id=?",[id]);}
+  });
 }
 
 // Only bind pending operations to a previously verified account/shop pair.

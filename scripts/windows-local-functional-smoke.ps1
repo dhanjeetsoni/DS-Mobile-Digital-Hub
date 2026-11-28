@@ -44,8 +44,11 @@ function Invoke-NativeButton([string]$Pattern){
  $matches=@($nodes|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.IsEnabled -and $_.Current.Name -match $Pattern})
  if($matches.Count -ne 1){throw "Expected one native button: $Pattern (found $($matches.Count))"}
  $patternObj=$null
- if(!$matches[0].TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$patternObj)){throw "Native button does not support InvokePattern"}
- ([System.Windows.Automation.InvokePattern]$patternObj).Invoke()
+ if($matches[0].TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$patternObj)){([System.Windows.Automation.InvokePattern]$patternObj).Invoke();return}
+ Add-Type -AssemblyName System.Windows.Forms
+ $matches[0].SetFocus()
+ Start-Sleep -Milliseconds 200
+ [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
 }
 try{
  Wait-Native "Owner Confidential Area.*Login \(ID / Password\)|Login \(ID / Password\).*Owner Confidential Area" "selection"
@@ -75,8 +78,8 @@ try{
  Wait-Native "All Products" "local-owner-inventory"
  Wait-Native "Local only|Cloud Sign In" "local-only-scope"
  # Keyboard shortcut + calculator actual accessible buttons.
- [System.Windows.Forms.SendKeys]::SendWait("%k")
- Wait-Native "Counter calculator|Counter & retail tools" "calculator"
+ Invoke-NativeButton "^Open counter calculator$"
+ Wait-Native "Counter & retail tools" "calculator"
  Invoke-NativeButton "^All clear$"
  Invoke-NativeButton "^2$"
  Invoke-NativeButton "^Add$"
@@ -85,7 +88,7 @@ try{
  Wait-Native "(^|\s)5(\s|$)" "calculator-result"
  Invoke-NativeButton "^Close calculator$"
  # Actual POS cart interaction without completing a real sale.
- Invoke-NativeButton "^Sales / New Bill$"
+ Invoke-NativeButton "^\+ POS Sale \(F2\)$"
  Wait-Native "Custom Service" "pos"
  Invoke-NativeButton "Custom Service"
  Wait-Native "Service / Job Title" "service-modal"

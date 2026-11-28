@@ -91,6 +91,19 @@ try{
      assert.equal(await line.locator(".qtyval").innerText(),"2");
      await line.getByRole("button",{name:"Decrease quantity of CI platform service"}).click();
      assert.equal(await line.locator(".qtyval").innerText(),"1");
+
+     await p.locator("#pos-cart-section select").first().selectOption("Credit / Udhaar");
+     await p.getByRole("button",{name:"Hold Cart (F4)",exact:true}).click();
+     await line.waitFor({state:"detached"});
+     await p.getByRole("button",{name:"Held (1)",exact:true}).click();
+     const held=p.getByRole("dialog",{name:"Draft / Parked Carts (Hold Ledger)"});
+     await held.getByText("CI platform service",{exact:false}).first().waitFor();
+     await held.getByRole("button",{name:"Resume & Bill (Restore)",exact:true}).click();
+     await line.waitFor();
+     assert.equal(await p.locator("#pos-cart-section select").first().inputValue(),"Cash");
+     assert.equal(await line.locator(".qtyval").innerText(),"1");
+     assert.equal(await line.getByRole("spinbutton",{name:"Unit price for CI platform service"}).inputValue(),"49.75");
+     await p.getByRole("button",{name:"Held (0)",exact:true}).waitFor();
      await line.getByRole("button",{name:"Remove CI platform service from cart"}).click();
      await line.waitFor({state:"detached"});
      results.push({platform,role,feature:"service cart with paise, increment/decrement and removal",status:"functional"});

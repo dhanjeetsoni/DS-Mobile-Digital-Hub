@@ -1,43 +1,50 @@
 import React, { useState, useEffect } from "react";
 import { Clock, Trash2, ArrowRight, PauseCircle, ShoppingBag, X, User, Phone, FileText } from "lucide-react";
-import { ParkedCart, getParkedCarts, deleteParkedCart, parkCart } from "../services/parkedCartsService";
+import { ParkedCart, getParkedCarts, deleteParkedCart, parkCart, legacyRecoveryAvailable, recoverStandaloneLegacyCarts } from "../services/parkedCartsService";
 import { CartItem } from "../types";
 import { playHoldTone } from "../utils/counterAudio";
 
 interface ParkedCartsModalProps {
+  scope:string;
   isOpen: boolean;
   onClose: () => void;
   currentCart: CartItem[];
   currentDiscount: number;
   currentCustomerName: string;
   currentCustomerPhone: string;
+  currentCustomerAddress:string;
   onRestoreCart: (cart: ParkedCart) => void;
+  onCountChanged:()=>void;
   onClearCurrentCart: () => void;
   showToast: (msg: string, kind?: string) => void;
 }
 
 export const ParkedCartsModal: React.FC<ParkedCartsModalProps> = ({
+  scope,
   isOpen,
   onClose,
   currentCart,
   currentDiscount,
   currentCustomerName,
   currentCustomerPhone,
+  currentCustomerAddress,
   onRestoreCart,
+  onCountChanged,
   onClearCurrentCart,
   showToast,
 }) => {
+  const [storageError,setStorageError]=useState("");
   const [parkedCarts, setParkedCarts] = useState<ParkedCart[]>([]);
   const [parkNote, setParkNote] = useState("");
   const [showParkInput, setShowParkInput] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      setParkedCarts(getParkedCarts());
+      try{setParkedCarts(getParkedCarts(scope));setStorageError("");}catch{setParkedCarts([]);setStorageError("Held carts cannot be read. Original records retained.");}
       setShowParkInput(false);
       setParkNote("");
     }
-  }, [isOpen]);
+  }, [isOpen,scope]);
 
   if (!isOpen) return null;
 
@@ -46,18 +53,21 @@ export const ParkedCartsModal: React.FC<ParkedCartsModalProps> = ({
       showToast("Current cart is empty. Kuch items cart me dalein.", "amber");
       return;
     }
-    const saved = parkCart({
+    try{
+    const saved = parkCart(scope,{
       items: currentCart,
       customerName: currentCustomerName,
       customerPhone: currentCustomerPhone,
+      customerAddress:currentCustomerAddress,
       note: parkNote,
       discount: currentDiscount,
     });
     playHoldTone();
     onClearCurrentCart();
-    setParkedCarts(getParkedCarts());
+    setParkedCarts(getParkedCarts(scope));onCountChanged();
     setShowParkInput(false);
     showToast(`Cart #${saved.id.slice(-4)} Parked successfully! Current counter free ho gaya.`, "green");
+    }catch{showToast("Could not save held cart; active cart retained.","red");}
   };
 
   const handleRestore = (cart: ParkedCart) => {
@@ -67,17 +77,16 @@ export const ParkedCartsModal: React.FC<ParkedCartsModalProps> = ({
       );
       if (!confirmOverride) return;
     }
-    onRestoreCart(cart);
-    deleteParkedCart(cart.id);
+    try{deleteParkedCart(scope,cart.id);}catch{showToast("Could not transfer held cart; saved draft retained.","red");return;}
+    onRestoreCart(cart);onCountChanged();
     playHoldTone();
     showToast(`Cart restore ho gaya (₹${cart.total.toLocaleString("en-IN")})`, "green");
     onClose();
   };
 
   const handleDelete = (id: string) => {
-    const updated = deleteParkedCart(id);
-    setParkedCarts(updated);
-    showToast("Parked cart deleted", "amber");
+    if(!window.confirm("Discard this saved draft?"))return;
+    try{setParkedCarts(deleteParkedCart(scope,id));onCountChanged();showToast("Parked cart deleted","amber");}catch{showToast("Draft was not deleted.","red");}
   };
 
   const formatElapsed = (timestamp: number) => {
@@ -92,7 +101,7 @@ export const ParkedCartsModal: React.FC<ParkedCartsModalProps> = ({
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal-content"
+        className="modal-content ds-held-carts" role="dialog" aria-modal="true" aria-label="Draft / Parked Carts (Hold Ledger)"
         style={{ maxWidth: "620px", width: "95%", borderRadius: "14px", overflow: "hidden" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -119,7 +128,7 @@ export const ParkedCartsModal: React.FC<ParkedCartsModalProps> = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            type="button" aria-label="Close held carts" onClick={onClose}
             style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", padding: "4px" }}
           >
             <X size={20} />
@@ -127,6 +136,8 @@ export const ParkedCartsModal: React.FC<ParkedCartsModalProps> = ({
         </div>
 
         <div style={{ padding: "18px 20px", maxHeight: "70vh", overflowY: "auto" }}>
+          {storageError&&<div role="alert" className="alert amber">{storageError}</div>}
+          {legacyRecoveryAvailable(scope)&&<button type="button" className="btn" onClick={()=>{if(!window.confirm("Recover old unassigned drafts into this standalone owner account?"))return;try{setParkedCarts(recoverStandaloneLegacyCarts(scope));onCountChanged();}catch{showToast("Recovery failed; original archive retained.","red");}}}>Recover old local drafts</button>}
           {/* Action to park current cart */}
           {currentCart.length > 0 && (
             <div

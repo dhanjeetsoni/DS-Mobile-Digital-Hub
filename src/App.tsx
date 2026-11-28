@@ -104,7 +104,7 @@ import { ParkedCartsModal } from "./components/ParkedCartsModal";
 import { QuickServiceModal } from "./components/QuickServiceModal";
 import { CounterCalculatorModal } from "./components/CounterCalculatorModal";
 import { FunMotionOverlay, AnimationType } from "./components/FunMotionOverlay";
-import { getParkedCarts, parkCart, ParkedCart } from "./services/parkedCartsService";
+import { getParkedCarts, parkCart, ParkedCart, heldCartScope } from "./services/parkedCartsService";
 import { playScanPip, playPaymentChime, playHoldTone } from "./utils/counterAudio";
 import { PettyCashExpenseModal } from "./components/PettyCashExpenseModal";
 import { staffSignIn, isAccessWindowExpired, isOutsideDailyWindow, cacheStaffSession, readCachedStaffSession, clearCachedStaffSession } from "./services/staffAuth";
@@ -883,120 +883,6 @@ export default function App() {
     }
   };
 
-  // Global Windows Counter Keyboard Shortcuts (F2-F9 & Escape)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in a textarea or text input unless it's an F-key or Escape
-      const isInput = ["INPUT", "TEXTAREA", "SELECT"].includes(
-        (document.activeElement?.tagName || "")
-      );
-
-      if (e.key === "Escape") {
-        setIsCameraScannerOpen(false);
-        setIsKycModalOpen(false);
-        setIsGallaModalOpen(false);
-        setIsInvoiceViewerOpen(false);
-        setIsOwnerLoginOpen(false);
-        setOwnerLoginPurpose("ownerMode");
-        setIsWindowsModalOpen(false);
-        setIsJobModalOpen(false);
-        setIsCalculatorOpen(false);
-        setJobAiDiagnosis({ loading: false, text: "", error: "" });
-        return;
-      }
-
-      if ((e.altKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
-        e.preventDefault();
-        setIsCalculatorOpen((prev) => !prev);
-        return;
-      }
-
-      if ((e.altKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
-        e.preventDefault();
-        setPrivacyMode((prev) => {
-          const next = !prev;
-          showToast(next ? "🛡️ Privacy Shield Active (Cost Prices Hidden)" : "Privacy Shield Inactive", "green");
-          return next;
-        });
-        return;
-      }
-
-      if ((e.altKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
-        e.preventDefault();
-        setSunlightMode((prev) => {
-          const next = !prev;
-          showToast(next ? "☀️ Sunlight Mode ON" : "Sunlight Mode OFF", "amber");
-          return next;
-        });
-        return;
-      }
-
-      if ((e.altKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
-        e.preventDefault();
-        setIsQuickServiceOpen(true);
-        return;
-      }
-
-      if (e.key === "F2") {
-        e.preventDefault();
-        setCurrentPage("sell");
-        showToast("Keyboard Shortcut: F2 -> New Bill (POS)", "green");
-      } else if (e.key === "F3") {
-        e.preventDefault();
-        setCurrentPage("modelsearch");
-        showToast("Keyboard Shortcut: F3 -> Glass & Cover Finder", "green");
-      } else if (e.key === "F4") {
-        e.preventDefault();
-        if (cart.length > 0) {
-          parkCart({
-            customerName: checkoutCustomer.name || "Counter Customer",
-            customerPhone: checkoutCustomer.phone || "",
-            items: cart,
-            discount: customBillDiscount,
-            note: "Quick F4 Hold",
-          });
-          playHoldTone();
-          setCart([]);
-          refreshParkedCount();
-          showToast("Cart Held & Parked (F4)! Bill resumed slot open.", "amber");
-        } else {
-          setIsCameraScannerOpen(true);
-          showToast("Keyboard Shortcut: F4 -> Quick Barcode/Box Scan", "green");
-        }
-      } else if (e.key === "F5") {
-        e.preventDefault();
-        setIsParkedCartsOpen(true);
-        showToast("Keyboard Shortcut: F5 -> Held / Parked Carts Ledger", "green");
-      } else if (e.key === "F6") {
-        e.preventDefault();
-        setCurrentPage("xeroxGrid");
-        showToast("Keyboard Shortcut: F6 -> 1-Tap Xerox / Cyber", "green");
-      } else if (e.key === "F7") {
-        e.preventDefault();
-        requireOwner(() => {
-          setViewingKyc(null);
-          setIsKycModalOpen(true);
-        });
-        showToast("Keyboard Shortcut: F7 -> 2nd-Hand Buyback KYC", "green");
-      } else if (e.key === "F8") {
-        e.preventDefault();
-        setIsJobModalOpen(true);
-        showToast("Keyboard Shortcut: F8 -> Repair Service Ticket", "green");
-      } else if (e.key === "F9") {
-        e.preventDefault();
-        setIsGallaModalOpen(true);
-        showToast("Keyboard Shortcut: F9 -> Daily Galla Closing", "green");
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-    // ownerMode is a dependency here too: this listener closes over
-    // requireOwner(), which reads ownerMode — without re-binding on every
-    // ownerMode change, F7 would keep judging owner status from whatever it
-    // was when the app first mounted (always "false"), even after login.
-  }, [ownerMode]);
-
   // New Sale POS states
   const [sellSearchQuery, setSellSearchQuery] = useState("");
   // Phase 8 — AI-powered search, additive on top of the instant keyword
@@ -1087,15 +973,12 @@ export default function App() {
     } catch {}
   }, [sunlightMode]);
 
-  const refreshParkedCount = () => {
-    try {
-      setParkedCartsCount(getParkedCarts().length);
-    } catch {}
-  };
+  const parkedScope=gateUnlocked&&cloudReady?heldCartScope(cloudProfile,ownerMode,Boolean(localStorage.getItem("dsmdh_cloud_identity_seen"))):"";
+  const refreshParkedCount=()=>{try{setParkedCartsCount(parkedScope?getParkedCarts(parkedScope).length:0);}catch{setParkedCartsCount(0);}};
 
   useEffect(() => {
     refreshParkedCount();
-  }, [isParkedCartsOpen]);
+  }, [isParkedCartsOpen,parkedScope]);
 
   // Split Payment Matrix State
   const [isSplitPayment, setIsSplitPayment] = useState(false);
@@ -1143,7 +1026,7 @@ export default function App() {
     // Existing durable recovery is retained. Remove sensitive in-memory
     // state and invalidate all callbacks captured by the revoked session.
     cloudBaseRef.current=null;offlineBootstrapRef.current=false;snapshotReviewRef.current=false;
-    const empty=defaultDB();dbRef.current=empty;setDb(empty);setCart([]);
+    const empty=defaultDB();dbRef.current=empty;setDb(empty);resetCounterDraft();setIsParkedCartsOpen(false);
     setLiveStock({});setLiveCatalogByClientId({});setLiveCatalogBySku({});
   };
   const normalizeCloudState=(state:Database):Database=>{
@@ -2588,15 +2471,7 @@ export default function App() {
     }
     workingDb.sales.push(saleRecord);
     saveState({ ...workingDb });
-    setCart([]);
-    setPaymentMode("Cash");
-    setIsFinanceMode(false);
-    setIsSplitPayment(false);
-    setSplitCash("");
-    setSplitUpi("");
-    setSplitCard("");
-    setSplitCredit("");
-    setCustomBillDiscount(0);
+    resetCounterDraft();
 
     // Counter Audio Chime & Fun Visual Celebration
     playPaymentChime(total);
@@ -2672,6 +2547,127 @@ export default function App() {
   // suggestion is tapped or the field is cleared.
   const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
   useEffect(()=>{setAutoSendWhatsApp(false);setOfficialWhatsApp(false);},[checkoutCustomer.phone]);
+  const resetCounterDraft=()=>{
+    setCart([]);setCustomBillDiscount(0);setPaymentMode("Cash");
+    setIsFinanceMode(false);setIsSplitPayment(false);
+    setSplitCash("");setSplitUpi("");setSplitCard("");setSplitCredit("");
+    setFinanceForm({company:"Bajaj Finserv",loanAccountNo:"",downPayment:0,loanAmount:0,processingFee:0,dbdAmount:0});
+    setCheckoutCustomer({name:"",phone:"",address:""});
+    setAutoSendWhatsApp(false);setOfficialWhatsApp(false);setShowCustomerSuggestions(false);
+  };
+  const holdCurrentCart=(note:string)=>{
+    if(!cart.length||checkoutBusy||!parkedScope)return;
+    try{
+      parkCart(parkedScope,{items:cart,customerName:checkoutCustomer.name,customerPhone:checkoutCustomer.phone,customerAddress:checkoutCustomer.address,discount:customBillDiscount,note});
+      resetCounterDraft();refreshParkedCount();playHoldTone();showToast("Cart held. Ready for next customer.","green");
+    }catch{showToast("Could not save held cart; active cart retained.","red");}
+  };
+  // Global Windows Counter Keyboard Shortcuts (F2-F9 & Escape)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if(!gateUnlocked||!cloudReady||checkoutBusy||e.repeat)return;
+      // Don't trigger if user is typing in a textarea or text input unless it's an F-key or Escape
+      const isInput = ["INPUT", "TEXTAREA", "SELECT"].includes(
+        (document.activeElement?.tagName || "")
+      );
+
+      if (e.key === "Escape") {
+        setIsCameraScannerOpen(false);
+        setIsKycModalOpen(false);
+        setIsGallaModalOpen(false);
+        setIsInvoiceViewerOpen(false);
+        setIsOwnerLoginOpen(false);
+        setOwnerLoginPurpose("ownerMode");
+        setIsWindowsModalOpen(false);
+        setIsJobModalOpen(false);
+        setIsCalculatorOpen(false);setIsParkedCartsOpen(false);setIsQuickServiceOpen(false);
+        setJobAiDiagnosis({ loading: false, text: "", error: "" });
+        return;
+      }
+
+      if ((e.altKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setIsCalculatorOpen((prev) => !prev);
+        return;
+      }
+
+      if ((e.altKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
+        e.preventDefault();
+        setPrivacyMode((prev) => {
+          const next = !prev;
+          showToast(next ? "🛡️ Privacy Shield Active (Cost Prices Hidden)" : "Privacy Shield Inactive", "green");
+          return next;
+        });
+        return;
+      }
+
+      if ((e.altKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        setSunlightMode((prev) => {
+          const next = !prev;
+          showToast(next ? "☀️ Sunlight Mode ON" : "Sunlight Mode OFF", "amber");
+          return next;
+        });
+        return;
+      }
+
+      if ((e.altKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+        e.preventDefault();
+        setIsQuickServiceOpen(true);
+        return;
+      }
+
+      if (e.key === "F2") {
+        e.preventDefault();
+        setCurrentPage("sell");
+        showToast("Keyboard Shortcut: F2 -> New Bill (POS)", "green");
+      } else if (e.key === "F3") {
+        e.preventDefault();
+        setCurrentPage("modelsearch");
+        showToast("Keyboard Shortcut: F3 -> Glass & Cover Finder", "green");
+      } else if (e.key === "F4") {
+        e.preventDefault();
+        if (cart.length > 0) {
+          holdCurrentCart("Quick F4 Hold");
+        } else {
+          setIsCameraScannerOpen(true);
+          showToast("Keyboard Shortcut: F4 -> Quick Barcode/Box Scan", "green");
+        }
+      } else if (e.key === "F5") {
+        e.preventDefault();
+        setIsParkedCartsOpen(true);
+        showToast("Keyboard Shortcut: F5 -> Held / Parked Carts Ledger", "green");
+      } else if (e.key === "F6") {
+        e.preventDefault();
+        setCurrentPage("xeroxGrid");
+        showToast("Keyboard Shortcut: F6 -> 1-Tap Xerox / Cyber", "green");
+      } else if (e.key === "F7") {
+        e.preventDefault();
+        requireOwner(() => {
+          setViewingKyc(null);
+          setIsKycModalOpen(true);
+        });
+        showToast("Keyboard Shortcut: F7 -> 2nd-Hand Buyback KYC", "green");
+      } else if (e.key === "F8") {
+        e.preventDefault();
+        setIsJobModalOpen(true);
+        showToast("Keyboard Shortcut: F8 -> Repair Service Ticket", "green");
+      } else if (e.key === "F9") {
+        e.preventDefault();
+        setIsGallaModalOpen(true);
+        showToast("Keyboard Shortcut: F9 -> Daily Galla Closing", "green");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+    // ownerMode is a dependency here too: this listener closes over
+    // requireOwner(), which reads ownerMode — without re-binding on every
+    // ownerMode change, F7 would keep judging owner status from whatever it
+    // was when the app first mounted (always "false"), even after login.
+  }, [ownerMode,gateUnlocked,cloudReady,checkoutBusy,cart,checkoutCustomer,customBillDiscount,parkedScope,cloudProfile?.id,ownerMobileMode]);
+
+
 
   const handleStartCheckout = () => {
     if (cart.length === 0) {
@@ -3613,17 +3609,7 @@ export default function App() {
                     <button
                       className="btn sm"
                       onClick={() => {
-                        parkCart({
-                          customerName: checkoutCustomer.name || "Counter Customer",
-                          customerPhone: checkoutCustomer.phone || "",
-                          items: cart,
-                          discount: cartDiscount,
-                          note: "Quick Parked",
-                        });
-                        playHoldTone();
-                        setCart([]);
-                        refreshParkedCount();
-                        showToast("Bill parked to Hold Ledger! Click 'Held Carts' to resume.", "amber");
+                        holdCurrentCart("Quick Parked");
                       }}
                       title="Hold current cart to attend another customer (F4)"
                       style={{ background: "var(--amber-light)", color: "var(--amber)", border: "1px solid var(--amber-border)", fontWeight: 700 }}
@@ -3645,7 +3631,7 @@ export default function App() {
                     </button>
                   )}
                   {cart.length > 0 && (
-                    <button className="btn sm ghost" onClick={() => setCart([])}>
+                    <button className="btn sm ghost" onClick={resetCounterDraft}>
                       Clear
                     </button>
                   )}
@@ -6942,25 +6928,18 @@ export default function App() {
       {/* Parked / Held Carts Modal */}
       {isParkedCartsOpen && (
         <ParkedCartsModal
-          isOpen={isParkedCartsOpen}
+          key={parkedScope} scope={parkedScope}
+          isOpen={isParkedCartsOpen&&!!parkedScope}
+          currentCart={cart} currentDiscount={cartDiscount} currentCustomerName={checkoutCustomer.name} currentCustomerPhone={checkoutCustomer.phone} currentCustomerAddress={checkoutCustomer.address}
+          onClearCurrentCart={resetCounterDraft} showToast={showToast}
           onClose={() => {
             setIsParkedCartsOpen(false);
             refreshParkedCount();
           }}
-          onResumeCart={(parkedCart) => {
-            setCart(parkedCart.items);
-            if (parkedCart.customerName || parkedCart.customerPhone) {
-              setCheckoutCustomer({
-                name: parkedCart.customerName || "",
-                phone: parkedCart.customerPhone || "",
-                address: "",
-              });
-            }
-            // Legacy flat discounts cannot bypass line price protection.
-            setCustomBillDiscount(0);
-            showToast(`Cart resumed (${parkedCart.items.length} items restored)!`, "green");
-            playPaymentChime(parkedCart.items.reduce((s, i) => s + i.price * i.qty, 0));
-            refreshParkedCount();
+          onRestoreCart={(parkedCart)=>{
+            resetCounterDraft();setCart(parkedCart.items);
+            setCheckoutCustomer({name:parkedCart.customerName||"",phone:parkedCart.customerPhone||"",address:parkedCart.customerAddress||""});
+            setCurrentPage("sell");
           }}
           onCountChanged={refreshParkedCount}
         />

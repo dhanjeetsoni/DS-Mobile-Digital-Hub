@@ -34,6 +34,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 //          allowed to mark a build "live" for everyone, this Edge Function
 //          only gates who can write bytes to this path).
 
+import {probeStorage} from "./storage-probe.ts";
+
 const CF_ACCOUNT_ID = Deno.env.get("CF_ACCOUNT_ID") || "";
 const CF_ACCESS_KEY_ID = Deno.env.get("CF_R2_ACCESS_KEY_ID") || "";
 const CF_SECRET_ACCESS_KEY = Deno.env.get("CF_R2_SECRET_ACCESS_KEY") || "";
@@ -46,7 +48,7 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.g
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
 };
 
 const PRIVATE_KINDS = new Set(["kyc"]);
@@ -84,7 +86,7 @@ function amzDateNow(): { amzDate: string; dateStamp: string } {
 }
 
 /** Signs + sends a request straight to R2's S3-compatible endpoint. Body is streamed through unread (UNSIGNED-PAYLOAD) so uploads never get buffered in memory here. */
-async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: string, opts: { body?: BodyInit | null; contentType?: string; createOnly?: boolean; match?: string } = {}): Promise<Response> {
+async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: string, opts: { body?: BodyInit | null; contentType?: string; createOnly?: boolean; match?: string; signal?: AbortSignal } = {}): Promise<Response> {
   const host = `${CF_ACCOUNT_ID}.r2.cloudflarestorage.com`;
   const region = "auto";
   const service = "s3";
@@ -127,7 +129,7 @@ async function r2Fetch(method: "PUT" | "GET" | "DELETE", bucket: string, key: st
   if (method === "PUT" && opts.createOnly) fetchHeaders["if-none-match"] = "*";
   if (method === "GET" && opts.match) fetchHeaders["if-match"]=opts.match;
 
-  return fetch(`https://${host}${canonicalUri}`, { method, headers: fetchHeaders, body: opts.body ?? undefined });
+  return fetch(`https://${host}${canonicalUri}`, { method, headers: fetchHeaders, body: opts.body ?? undefined,signal:opts.signal });
 }
 
 /** Lists objects under `${storeId}/` in a bucket via R2's S3-compatible ListObjectsV2, paging through all continuation tokens, and returns total byte count + object count. Used only by the Step 7.3 usage route — never exposed to clients directly (they only see the summed totals). */
@@ -276,6 +278,26 @@ Deno.serve(async (req: Request) => {
   const trimmed = url.pathname.replace(/^\/+/, "").replace(/^r2-storage\/?/, "").replace(/^functions\/v1\/r2-storage\/?/, "");
   const [kind, ...restParts] = trimmed.split("/");
   const rest = restParts.join("/");
+
+  // No customer or business objects are used. The cron-authenticated
+  // system probe is intentionally restricted to the isolated diagnostic
+  // namespace; it cannot read, write or delete a user-specified key.
+  if(kind==="diagnostic"){
+    const headers={...CORS_HEADERS,"Cache-Control":"no-store"};
+    if(req.method!=="POST")return Response.json({error:"Method not allowed"},{status:405,headers});
+    const cronSecret=Deno.env.get("CRON_SECRET")||"",provided=req.headers.get("x-cron-secret")||"";
+    const isSystem=rest==="system"&&!!cronSecret&&provided===cronSecret;
+    if(!isSystem){
+      const caller=await getCallerStoreAndRole(req);
+      if(!caller||caller.role!=="owner"||caller.storeId!==rest)return Response.json({error:"Owner access required"},{status:403,headers});
+    }
+    const started=Date.now(),probeId=crypto.randomUUID();
+    const key="__dsmdh_diagnostics/"+probeId+"/synthetic.txt";
+    const marker="DSMDH SYNTHETIC STORAGE PROBE "+probeId;
+    const run=(bucket:string)=>probeStorage((method,body)=>r2Fetch(method,bucket,key,{body,contentType:method==="PUT"?"text/plain":undefined,createOnly:method==="PUT",signal:AbortSignal.timeout(10000)}),marker);
+    const [publicBucket,privateBucket]=await Promise.all([run(CF_BUCKET_PUBLIC),run(CF_BUCKET_PRIVATE)]);
+    return Response.json({ok:publicBucket.ok&&privateBucket.ok,publicBucket,privateBucket,probeId,elapsedMs:Date.now()-started,scope:"Synthetic bytes only; no business objects or backup restored"},{headers});
+  }
 
   // Step 7.3 — Storage Usage Meter: GET /usage/<storeId> (Owner/Manager only).
   if (kind === "usage") {

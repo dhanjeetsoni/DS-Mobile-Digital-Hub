@@ -1,0 +1,32 @@
+name: Windows and Android variant acceptance
+on:
+  push:
+    branches: ['hardening/platform-acceptance-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-variant-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save --package-lock=false playwright@1.56.1
+      - name: Install Chromium
+        run: |
+          for file in /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources; do
+            if [ -f "$file" ] && grep -q 'packages.microsoft.com/ubuntu/' "$file"; then sudo mv "$file" "$file.disabled"; fi
+          done
+          npx playwright install --with-deps chromium
+      - run: node scripts/platform-acceptance.mjs
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: platform-acceptance-evidence
+          path: visual-review/platforms/
+          if-no-files-found: warn

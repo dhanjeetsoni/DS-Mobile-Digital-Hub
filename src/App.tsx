@@ -303,7 +303,7 @@ export default function App() {
     // owner passcode has necessarily been entered this session — the
     // existing owner-only-page guard a little further down only kicks in
     // for pages that actually need it.
-    return page || "products";
+    return page || ((import.meta as any).env?.VITE_APP_VARIANT==="mobile"?"sell":"products");
   })();
   const [currentPage, setCurrentPage] = useState(initialRoutePage);
   useEffect(()=>{const page=document.getElementById("page");if(page){page.scrollTop=0;page.scrollLeft=0;}},[currentPage]);
@@ -505,20 +505,24 @@ export default function App() {
   // pattern — plain localStorage, never synced, and never read/used at all
   // on any other build variant (Windows, `staff`, `owner`), so this cannot
   // change behaviour there.
-  const MOBILE_OWNER_MODE_KEY = "dsmdh_mobile_owner_mode_v1";
-  const [ownerMobileMode, setOwnerMobileModeState] = useState<"lite" | "pro">(() => {
-    try {
-      return localStorage.getItem(MOBILE_OWNER_MODE_KEY) === "pro" ? "pro" : "lite";
-    } catch {
-      return "lite";
-    }
-  });
-  const persistOwnerMobileMode = (mode: "lite" | "pro") => {
-    setOwnerMobileModeState(mode);
-    try {
-      localStorage.setItem(MOBILE_OWNER_MODE_KEY, mode);
-    } catch {}
+  const MOBILE_OWNER_MODE_KEY = "dsmdh_mobile_owner_mode_v2_";
+  const [ownerMobilePreference,setOwnerMobilePreference]=useState<{profileId:string;mode:"lite"|"pro"}|null>(null);
+  const ownerMobileMode=ownerMobilePreference?.profileId===cloudProfile?.id?ownerMobilePreference?.mode||"lite":"lite";
+  useEffect(()=>{
+    if(APP_VARIANT!=="mobile"||!cloudProfile?.id){setOwnerMobilePreference(null);return;}
+    const profileId=cloudProfile.id;let mode:"lite"|"pro"="lite";
+    try{if(localStorage.getItem(MOBILE_OWNER_MODE_KEY+profileId)==="pro")mode="pro";}catch{}
+    setOwnerMobilePreference({profileId,mode});
+  },[cloudProfile?.id,APP_VARIANT]);
+  const persistOwnerMobileMode=(mode:"lite"|"pro")=>{
+    if(!cloudProfile?.id)return;
+    setOwnerMobilePreference({profileId:cloudProfile.id,mode});
+    try{localStorage.setItem(MOBILE_OWNER_MODE_KEY+cloudProfile.id,mode);}catch{}
+    if(mode==="lite"){setViewingProductId(null);setCurrentPage("sell");}
   };
+  const [proPinSetup,setProPinSetup]=useState(false);
+  const [proPinBusy,setProPinBusy]=useState(false);
+  const proPinFlight=useRef(false);
   const [gatePassInput, setGatePassInput] = useState("");
   const [gatePinConfirm, setGatePinConfirm] = useState("");
   const [gatePinError, setGatePinError] = useState("");
@@ -662,6 +666,7 @@ export default function App() {
 
   const handleGateOwnerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if(proPinFlight.current)return;
     if (gateAttempts.lockUntil > Date.now()) return;
 
     setGatePinError("");
@@ -675,7 +680,18 @@ export default function App() {
       return;
     }
     let correct = false;
-    if (cloudProfile?.id && (!wantsOwnerAccessSpecifically || isOwnerOrManager)) {
+    if(ownerLoginPurpose==="proMode"&&proPinSetup){
+      if(!cloudProfile?.id||!isOwnerOrManager||!navigator.onLine){setGatePinError("Connect to create your personal PIN.");return;}
+      if(!/^\d{4}$/.test(gatePassInput)||/^(1234|0000|1111|2222|3333|4444|5555|6666|7777|8888|9999)$/.test(gatePassInput)||gatePassInput!==gatePinConfirm){setGatePinError("Choose a private 4-digit PIN and confirm it.");return;}
+      const scope=cloudBaseRef.current;if(!scope||scope.profileId!==cloudProfile.id)return;
+      proPinFlight.current=true;setProPinBusy(true);
+      try{
+        const result=await setMyPin(scope.profileId,gatePassInput);
+        if(!scopeMatches(cloudBaseRef.current,scope))return;
+        if(!result.ok){setGatePinError(result.message);return;}
+        setProPinSetup(false);correct=true;
+      }finally{proPinFlight.current=false;setProPinBusy(false);}
+    }else if (cloudProfile?.id && (!wantsOwnerAccessSpecifically || isOwnerOrManager)) {
       correct = await verifyPin(cloudProfile.id, gatePassInput);
     } else {
       if (!cloudReady) { setGatePinError("Finishing device setup. Please try again."); return; }
@@ -1726,10 +1742,11 @@ export default function App() {
       if(isOwnerOnlyPage||!allowed.includes(currentPage)){const fallback=allowed.find(key=>!SECONDARY_NAV_ITEMS.some(item=>item.key===key&&item.ownerOnly))||"sell";if(currentPage!==fallback)setCurrentPage(fallback);}
       return;
     }
+    if(APP_VARIANT==="mobile"&&ownerMode&&cloudProfile?.role!=="staff"&&ownerMobileMode==="lite"&&currentPage!=="sell"){setViewingProductId(null);setCurrentPage("sell");return;}
     if (isOwnerOnlyPage && !ownerMode) {
       setCurrentPage("dashboard");
     }
-  }, [currentPage, ownerMode, cloudProfile]);
+  }, [currentPage, ownerMode, cloudProfile,ownerMobileMode]);
 
   // Automatic reconnect/background sync. Non-essential polling is paused while the tab is hidden.
   useEffect(() => {
@@ -2007,13 +2024,21 @@ export default function App() {
   // handleGateOwnerSubmit/handleBiometricUnlock success path as every other
   // owner re-auth in this app, just tagged so those handlers know to flip
   // ownerMobileMode instead of (a no-op re-set of) ownerMode.
-  const requestSwitchToProMode = () => {
-    setOwnerLoginPurpose("proMode");
-    setIsOwnerLoginOpen(true);
+  const requestSwitchToProMode=async()=>{
+    if(proPinFlight.current||!cloudProfile?.id)return;
+    const scope=cloudBaseRef.current;if(!scope||scope.profileId!==cloudProfile.id)return;
+    proPinFlight.current=true;setProPinBusy(true);
+    try{
+      const requiresPin=await syncPinFromServer(scope.profileId);
+      if(!scopeMatches(cloudBaseRef.current,scope))return;
+      setProPinSetup(!requiresPin&&navigator.onLine);
+      setGatePassInput("");setGatePinConfirm("");setGatePinError("");
+      setIsMobileNavOpen(false);setOwnerLoginPurpose("proMode");setIsOwnerLoginOpen(true);
+    }finally{proPinFlight.current=false;setProPinBusy(false);}
   };
   // Switching BACK to Lite is always free/immediate, no prompt — going to
   // the more-restrictive state never needs re-auth (§4.3's second rule).
-  const switchToLiteMode = () => persistOwnerMobileMode("lite");
+  const switchToLiteMode = () => {setIsMobileNavOpen(false);persistOwnerMobileMode("lite");};
 
   const handleTextScaleChange = (scale: "sm" | "md" | "lg" | "xl") => {
     saveState({ ...db, settings: { ...db.settings, textScale: scale } });
@@ -6842,7 +6867,7 @@ export default function App() {
                 <ShieldAlert size={18} color="#ef4444" />
                 {ownerLoginPurpose === "proMode" ? "Switch to Pro Mode" : "Owner Confidential Access"}
               </h3>
-              <button onClick={() => { setIsOwnerLoginOpen(false); setGatePassInput(""); setOwnerLoginPurpose("ownerMode"); }}>&times;</button>
+              <button onClick={() => { if(proPinBusy)return;setIsOwnerLoginOpen(false); setGatePassInput("");setGatePinConfirm("");setProPinSetup(false);setGatePinError(""); setOwnerLoginPurpose("ownerMode"); }}>&times;</button>
             </div>
             <div className="gate-warning-strip" style={{ marginBottom: 14, marginTop: -6 }}>
               <Lock size={12} /> {ownerLoginPurpose === "proMode" ? "Confirm it's you" : "Restricted & Monitored"}
@@ -6859,24 +6884,27 @@ export default function App() {
                 }}
               >
                 <div className="field">
-                  <label>{ownerLoginPurpose === "proMode" ? "Enter your PIN/Password" : "Enter Owner Passcode"}</label>
+                  <label>{ownerLoginPurpose==="proMode"&&proPinSetup?"Create personal PIN":ownerLoginPurpose === "proMode" ? "Enter your PIN" : "Enter Owner Passcode"}</label>
                   <input
                     type="password"
                     placeholder="Owner authentication required"
+                    disabled={proPinBusy}
                     autoFocus
                     value={gatePassInput}
                     onChange={(e) => setGatePassInput(e.target.value)}
                   />
                 </div>
+                {ownerLoginPurpose==="proMode"&&proPinSetup&&<label className="field">Confirm personal PIN<input type="password" inputMode="numeric" maxLength={4} value={gatePinConfirm} disabled={proPinBusy} onChange={e=>setGatePinConfirm(e.target.value)}/></label>}
+                {gatePinError&&<p role="alert" className="gate-pin-error">{gatePinError}</p>}
                 <div className="gate-attempts-row" style={{ justifyContent: "flex-start" }}>
                   {[0, 1, 2].map((i) => (
                     <span key={i} className={`gate-attempt-dot ${i < gateAttempts.count ? "used" : ""}`} />
                   ))}
                 </div>
                 <div className="modal-actions" style={{ marginTop: "16px" }}>
-                  <button type="button" className="btn" onClick={() => { setIsOwnerLoginOpen(false); setGatePassInput(""); setOwnerLoginPurpose("ownerMode"); }}>Cancel</button>
-                  <button type="submit" className="btn primary" style={{ background: "#dc2626" }} disabled={gateBusy}>
-                    {gateBusy ? "Sending alert…" : ownerLoginPurpose === "proMode" ? "Switch to Pro" : "Unlock Owner Access"}
+                  <button type="button" className="btn" onClick={() => { if(proPinBusy)return;setIsOwnerLoginOpen(false); setGatePassInput("");setGatePinConfirm("");setProPinSetup(false);setGatePinError(""); setOwnerLoginPurpose("ownerMode"); }}>Cancel</button>
+                  <button type="submit" className="btn primary" style={{ background: "#dc2626" }} disabled={gateBusy||proPinBusy}>
+                    {proPinBusy?"Checking PIN…":gateBusy ? "Sending alert…" : ownerLoginPurpose === "proMode" ? "Switch to Pro" : "Unlock Owner Access"}
                   </button>
                 </div>
                 {biometricAvailable && (

@@ -10,6 +10,8 @@ on:
         description: "Exact source commit SHA of the existing APK"
         required: true
         type: string
+  push:
+    branches: ['hardening/native-deepcheck-*']
 permissions:
   contents: read
   actions: read
@@ -22,8 +24,8 @@ jobs:
       - name: Validate artifact provenance
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ inputs.run_id }}
-          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RUN_ID: ${{ inputs.run_id || '46126012280' }}
+          EXPECTED_SHA: ${{ inputs.expected_sha || 'd21e3eeab94fef291907387c36ac63737001bbfe' }}
         run: |
           set -euo pipefail
           [[ "$RUN_ID" =~ ^[0-9]+$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -33,7 +35,7 @@ jobs:
         with:
           name: mobile-android-apk
           path: emulator-apk
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ inputs.run_id || '46126012280' }}
           github-token: ${{ github.token }}
       - name: Enable KVM
         run: |

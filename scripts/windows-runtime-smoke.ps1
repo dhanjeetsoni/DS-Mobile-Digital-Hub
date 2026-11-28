@@ -20,23 +20,44 @@ $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--force-renderer-accessibility"
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $proc=Start-Process $exe[0].FullName -PassThru
-try{
- $found=$false
+function Get-NativeNodes {
+ $proc.Refresh()
+ if($proc.HasExited){throw "Installed application exited"}
+ if($proc.MainWindowHandle -eq 0){return @()}
+ try{
+  $root=[System.Windows.Automation.AutomationElement]::FromHandle($proc.MainWindowHandle)
+  return @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition))
+ }catch{return @()}
+}
+function Wait-Native([string]$Pattern,[string]$Phase) {
  for($i=0;$i -lt 40;$i++){
-  Start-Sleep -Seconds 3
-  $proc.Refresh()
-  if($proc.HasExited){throw "Installed application exited before login"}
-  if($proc.MainWindowHandle -eq 0){continue}
-  try{
-   $element=[System.Windows.Automation.AutomationElement]::FromHandle($proc.MainWindowHandle)
-   $nodes=$element.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-   $names=@(foreach($n in $nodes){$n.Current.Name})
-   $names | Set-Content (Join-Path $OutputDirectory "ui-accessibility.txt")
-   $joined=$names -join " "
-   if($joined -match "Owner Confidential Area" -and $joined -match "Login \(ID / Password\)"){$found=$true;break}
-  }catch{Write-Host "Waiting for the native accessibility tree"}
+  $nodes=@(Get-NativeNodes)
+  $names=@(foreach($node in $nodes){$node.Current.Name})
+  $names | Set-Content (Join-Path $OutputDirectory "$Phase-accessibility.txt")
+  if(($names -join " ") -match $Pattern){return}
+  Start-Sleep -Seconds 2
  }
- if(!$found){throw "Windows login selection did not render in the native accessibility tree"}
- @{installed=$true;loginScreenVerified=$true;source=$expected[0].source;version=$expected[0].version;scope="Hosted Windows runner, no real account or hardware"} | ConvertTo-Json | Set-Content (Join-Path $OutputDirectory "windows-runtime.json")
- Write-Host "PASS installed Windows application and rendered login selection"
+ throw "Native accessibility contract failed: $Phase"
+}
+function Invoke-NativeButton([string]$Pattern){
+ $nodes=@(Get-NativeNodes)
+ $matches=@($nodes|Where-Object{$_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.IsEnabled -and $_.Current.Name -match $Pattern})
+ if($matches.Count -ne 1){throw "Expected one native button: $Pattern (found $($matches.Count))"}
+ $patternObj=$null
+ if(!$matches[0].TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$patternObj)){throw "Native button does not support InvokePattern"}
+ ([System.Windows.Automation.InvokePattern]$patternObj).Invoke()
+}
+try{
+ Wait-Native "Owner Confidential Area.*Login \(ID / Password\)|Login \(ID / Password\).*Owner Confidential Area" "selection"
+ Invoke-NativeButton "^Login \(ID / Password\)"
+ Wait-Native "Android Access Area.*Login ID.*Password" "credentials"
+ Invoke-NativeButton "^Login$"
+ Wait-Native "Login ID aur Password dono bharo" "empty-credential-validation"
+ Invoke-NativeButton "Back to selection"
+ Wait-Native "Owner Confidential Area" "selection-return"
+ Invoke-NativeButton "^Owner Confidential Area"
+ Wait-Native "Create a private device PIN|Enter Owner Device PIN|Authorized personnel only" "owner-pin"
+ # No production credentials, no real transactions. Check owner PIN gate and return.
+ @{installed=$true;loginScreenVerified=$true;emptyCredentialRejectionVerified=$true;backNavigationVerified=$true;ownerPinGateVerified=$true;source=$expected[0].source;version=$expected[0].version;scope="Hosted Windows runner, no real account or hardware"} | ConvertTo-Json | Set-Content (Join-Path $OutputDirectory "windows-runtime.json")
+ Write-Host "PASS installed Windows app login selection, credential validation, back navigation and owner PIN gate"
 }finally{if(!$proc.HasExited){Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue}}

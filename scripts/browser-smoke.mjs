@@ -1,7 +1,8 @@
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
+import { buildSync } from "esbuild";
 import assert from "node:assert/strict";
-import {readFileSync,mkdirSync,writeFileSync} from "node:fs";
+import {readFileSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
 const port=4179;
 const server=spawn(process.execPath,["node_modules/vite/bin/vite.js","preview","--host","127.0.0.1","--port",String(port),"--strictPort"],{stdio:"inherit",env:process.env});
 let browser;
@@ -27,6 +28,34 @@ try{
  }
  console.log("PASS production API health and all registered anonymous AI endpoint denials");
  browser=await chromium.launch({headless:true});
+ // Exercise the actual IndexedDB implementation in a separate browser context.
+ // Temporary CI-only file in the preview output; removed before test exit.
+ const snapshotModule=buildSync({entryPoints:["src/services/scopedSnapshotCache.ts"],bundle:true,format:"esm",platform:"browser",write:false}).outputFiles[0].text;
+ writeFileSync("dist/__ci_scoped_snapshot.mjs",snapshotModule);
+ const recoveryContext=await browser.newContext({serviceWorkers:"block"});
+ const moduleResponse=await fetch(url+"/__ci_scoped_snapshot.mjs");
+ assert(moduleResponse.ok&&(moduleResponse.headers.get("content-type")||"").includes("javascript"),"CI snapshot module was not served as JavaScript");
+ const recoveryPage=await recoveryContext.newPage();
+ await recoveryPage.goto(url,{waitUntil:"domcontentloaded"});
+ const recoveryInfo=await recoveryPage.evaluate(async()=>{
+   const api=await import("/__ci_scoped_snapshot.mjs");
+   const base={products:Array.from({length:10000},(_,i)=>({id:"ci-cloud-"+i,notes:"x".repeat(400)})),settings:{}};
+   const local=structuredClone(base);local.products[9999].notes="latest unsynced change";
+   await api.writeScopedSnapshot({profileId:"synthetic-owner",storeId:"synthetic-shop",version:4,state:base},local);
+   return {localStorageFallback:localStorage.getItem("dsmdh_scoped_state_v1_synthetic-owner")!==null,serializedBytes:new TextEncoder().encode(JSON.stringify({base,local})).length};
+ });
+ assert(recoveryInfo.serializedBytes>5*1024*1024,"Large cache fixture did not exercise storage quota");
+ assert.equal(recoveryInfo.localStorageFallback,false,"Large cache unexpectedly fit localStorage");
+ await recoveryPage.reload({waitUntil:"domcontentloaded"});
+ const recovered=await recoveryPage.evaluate(async()=>{
+   const api=await import("/__ci_scoped_snapshot.mjs");
+   const record=await api.readScopedSnapshot("synthetic-owner","synthetic-shop");
+   const other=await api.readScopedSnapshot("synthetic-staff","synthetic-shop");
+   return {length:record?.local.products.length,last:record?.local.products[9999]?.notes,version:record?.version,other};
+ });
+ assert.deepEqual(recovered,{length:10000,last:"latest unsynced change",version:4,other:null});
+ await recoveryContext.close();
+ console.log("PASS IndexedDB durable scoped 10,000-product cache recovery after reload and cross-account isolation");
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  const errors=[];page.on("pageerror",e=>errors.push(e.message));
  const setupLocalOwner=async p=>{
@@ -385,4 +414,4 @@ try{
  writeFileSync("visual-review/summary.json",JSON.stringify({moduleCount:modules.length,paletteCount:ids.length*2,mobileViewport:"390x844",desktopViewport:"1440x900",note:"Synthetic local data; native hardware not tested."},null,2));
  assert.deepEqual(errors,[],"Uncaught browser errors");
  console.log("PASS production UI boot, local-mode entry, local owner/staff entry and inventory/POS navigation");
-}finally{await browser?.close();apiServer?.kill();server.kill();}
+}finally{rmSync("dist/__ci_scoped_snapshot.mjs",{force:true});await browser?.close();apiServer?.kill();server.kill();}

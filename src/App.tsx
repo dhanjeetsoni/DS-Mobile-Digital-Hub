@@ -115,6 +115,7 @@ import { supabase, getCurrentProfile, isCloudConfigured } from "./services/supab
 import { deviceId, loadCloudState, saveCloudState, queueOfflineOperation, flushOfflineQueue, persistLocalState, startConnectivitySync, fetchLiveStock, subscribeToLiveStock, fetchLiveCatalog, subscribeToLiveCatalog, fetchFullBackup, type LiveCatalogEntry } from "./services/repository";
 import { backfillLegacyProductPhotos, deleteProductPhotoByUrl, cleanupStaleOutOfStockPhotos } from "./services/photoStorage";
 import {applyProductPhotoMigration,clearConfirmedDeletedPhotos} from "./utils/productPhotoIntegrity";
+import {readScopedSnapshot,writeScopedSnapshot} from "./services/scopedSnapshotCache";
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { sqliteList } from "./services/localSqlite";
 import { mergeStoreState, sameState } from "./services/syncMerge";
@@ -1107,12 +1108,11 @@ export default function App() {
   // Never restore a different account's aggregate shop cache. A cached
   // identity is only usable offline with the same persisted Auth session.
   const profileCacheKey=(id:string)=>"dsmdh_verified_profile_v1_"+id;
-  const stateCacheKey=(id:string)=>"dsmdh_scoped_state_v1_"+id;
   const cacheCloudIdentity=(profile:any)=>{
     try{localStorage.setItem("dsmdh_cloud_identity_seen","1");localStorage.setItem(profileCacheKey(profile.id),JSON.stringify(profile));}catch(error){console.warn("Profile cache unavailable",error);}
   };
-  const cacheCloudSnapshot=(base:{state:Database;version:number;profileId:string;storeId:string},local:Database)=>{
-    try{localStorage.setItem(stateCacheKey(base.profileId),JSON.stringify({storeId:base.storeId,version:base.version,base:base.state,local}));}catch(error){console.warn("Scoped cache unavailable",error);}
+  const cacheCloudSnapshot=async(base:{state:Database;version:number;profileId:string;storeId:string},local:Database)=>{
+    try{await writeScopedSnapshot(base,local);return true;}catch(error){console.warn("Scoped cache unavailable",error);setCloudStatus("sync-error");return false;}
   };
   const normalizeCloudState=(state:Database):Database=>{
     const defaults=defaultDB();
@@ -1126,7 +1126,7 @@ export default function App() {
       let pending=await readSnapshotRecovery(profileId,storeId);
       // A synchronous saveState cache may be newer than the debounced
       // SQLite recovery record (e.g. app closed immediately after editing).
-      const cached=JSON.parse(localStorage.getItem(stateCacheKey(profileId))||"null");
+      const cached=await readScopedSnapshot(profileId,storeId);
       if(cached?.storeId===storeId&&cached.base&&cached.local&&!sameState(cached.base,cached.local)){
         pending={scope:{profileId,storeId},base:cached.base,local:cached.local,version:Number(cached.version),conflicts:[]};
       }
@@ -1137,9 +1137,9 @@ export default function App() {
           setCloudStatus("sync-error");
         } else next=result.state;
       }
-    } catch(error){console.warn("Recovery read failed",error);setCloudStatus("sync-error");}
+    } catch(error){console.warn("Recovery read failed",error);throw Error("Local recovery could not be verified; no previous cache overwritten");}
     dbRef.current=next;setDb(next);setCloudVersion(version);
-    cacheCloudSnapshot(cloudBaseRef.current!,next);
+    await cacheCloudSnapshot(cloudBaseRef.current!,next);
   };
   const acceptRemoteState=async(state:Database,version:number,profileId:string,storeId:string)=>{
     const base=cloudBaseRef.current;
@@ -1152,7 +1152,7 @@ export default function App() {
     }
     cloudBaseRef.current={...base,state:structuredClone(remote),version};
     dbRef.current=merged.state;setDb(merged.state);setCloudVersion(version);
-    cacheCloudSnapshot(cloudBaseRef.current!,merged.state);
+    await cacheCloudSnapshot(cloudBaseRef.current!,merged.state);
   };
 
   // Supabase bootstrap, realtime sync, offline queue replay, and Telegram retry pump.
@@ -1170,7 +1170,7 @@ export default function App() {
           const sessionUser=sessionData.session?.user;
           if(sessionUser){
             const profile=JSON.parse(localStorage.getItem(profileCacheKey(sessionUser.id))||"null");
-            const cached=JSON.parse(localStorage.getItem(stateCacheKey(sessionUser.id))||"null");
+            const cached=profile?.store_id?await readScopedSnapshot(sessionUser.id,profile.store_id):null;
             if(!profile||profile.id!==sessionUser.id||!cached?.base||!cached?.local||cached.storeId!==profile.store_id)throw new Error("Reconnect to verify account and load its offline data");
             if(profile.role!=="owner"&&(!profile.access_enabled||isAccessWindowExpired(profile)))throw new Error("Account disabled or expired");
             if(profile.role==="staff"){
@@ -1368,7 +1368,7 @@ export default function App() {
       } catch (e) { console.warn("Cloud bootstrap failed", e); setGateUnlocked(false);setOwnerMode(false);setCloudStatus("error"); setCloudReady(true); }
     };
     bootstrap();
-    const reconnect=()=>{if(offlineBootstrapRef.current){const base=cloudBaseRef.current;if(base)cacheCloudSnapshot(base,dbRef.current);window.location.reload();}};
+    const reconnect=async()=>{if(offlineBootstrapRef.current){const base=cloudBaseRef.current;if(!base||await cacheCloudSnapshot(base,dbRef.current))window.location.reload();else showToast("Local recovery cache unavailable; reconnect reload paused to protect unsynced records.","red");}};
     window.addEventListener("online",reconnect);
     return () => { window.removeEventListener("online",reconnect); active = false; if(staffStatePoll!==undefined)window.clearInterval(staffStatePoll); if (channel) supabase.removeChannel(channel); if (stockChannel) supabase.removeChannel(stockChannel); if (catalogChannel) supabase.removeChannel(catalogChannel); };
   }, []);
@@ -1410,12 +1410,12 @@ export default function App() {
         }
         cloudBaseRef.current={...base,state:structuredClone(savedState),version};
         dbRef.current=after.state;
-        cacheCloudSnapshot(cloudBaseRef.current!,after.state);
+        const cacheSaved=await cacheCloudSnapshot(cloudBaseRef.current!,after.state);
         if(!sameState(latest,after.state))setDb(after.state);
         setCloudVersion(version);
         if(sameState(after.state,savedState)) await clearSnapshotRecovery(base.profileId,base.storeId);
         else await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:savedState,local:after.state,version,conflicts:[]});
-        setCloudStatus("online");
+        setCloudStatus(cacheSaved?"online":"sync-error");
       } catch(error){console.warn("Cloud snapshot save failed; local recovery retained",error);setCloudStatus("sync-error");}
       finally{savingCloudRef.current=false;}
     };
@@ -1841,7 +1841,7 @@ export default function App() {
     dbRef.current=updated;setDb(updated);
     try {
       const base=cloudBaseRef.current;
-      if(base)cacheCloudSnapshot(base,updated);
+      if(base)void cacheCloudSnapshot(base,updated);
       else if(!localStorage.getItem("dsmdh_cloud_identity_seen"))persistLocalState(updated);
     } catch (e) {
       console.error("Local cache save error", e);
@@ -2800,10 +2800,10 @@ export default function App() {
       cloudBaseRef.current={...base,state:structuredClone(updated),version};
       const next=merged.conflicts.length?updated:merged.state;
       if(merged.conflicts.length)await archiveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:before,local:latest,version:base.version,conflicts:merged.conflicts});
-      dbRef.current=next;setDb(next);setCloudVersion(version);cacheCloudSnapshot(cloudBaseRef.current,next);
+      dbRef.current=next;setDb(next);setCloudVersion(version);const cacheSaved=await cacheCloudSnapshot(cloudBaseRef.current,next);
       if(sameState(next,updated))await clearSnapshotRecovery(base.profileId,base.storeId);
       else await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:updated,local:next,version,conflicts:[]});
-      setCloudStatus(merged.conflicts.length?"sync-error":"online");
+      setCloudStatus(merged.conflicts.length||!cacheSaved?"sync-error":"online");
       return true;
     }catch(error:any){showToast(error?.message||"Correction was not confirmed. Refresh invoice before retrying.","red");return false;}
     finally{savingCloudRef.current=false;}

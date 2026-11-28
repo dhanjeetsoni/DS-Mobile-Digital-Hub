@@ -1,7 +1,8 @@
 name: Windows and Android variant acceptance
 on:
   push:
-    branches: ['hardening/platform-acceptance-*']
+    branches: ['main','hardening/platform-acceptance-*']
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read

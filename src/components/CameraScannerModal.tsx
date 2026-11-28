@@ -2,6 +2,7 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 import React, { useEffect, useRef, useState } from "react";
 import { Camera, X, RefreshCw, Upload, CheckCircle2 } from "lucide-react";
 import { useAnimatedClose } from "../hooks/useAnimatedClose";
+import {ScanLifecycle} from "../utils/scanLifecycle";
 
 interface CameraScannerModalProps {
   isOpen: boolean;
@@ -54,187 +55,107 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
   const [manualInput, setManualInput] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string>("");
   const streamRef = useRef<MediaStream | null>(null);
-  const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const zxingReaderRef = useRef<BrowserMultiFormatReader | null>(null);
+  const scanTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const lifecycle=useRef(new ScanLifecycle());
+  const callbacks=useRef({onScan,onClose});
+  callbacks.current={onScan,onClose};
   const { closing, requestClose, runClosing } = useAnimatedClose(onClose);
 
-  useEffect(() => {
-    if (!isOpen) {
-      stopCamera();
-      return;
-    }
-
-    navigator.mediaDevices
-      ?.enumerateDevices()
-      .then((devices) => {
-        const videoDevices = devices.filter((d) => d.kind === "videoinput");
-        setCameras(videoDevices);
-        if (videoDevices.length > 0) {
-          // Prefer back/environment camera on phones
-          const backCam = videoDevices.find((d) =>
-            d.label.toLowerCase().includes("back") || d.label.toLowerCase().includes("rear")
-          );
-          setSelectedCameraId(backCam ? backCam.deviceId : videoDevices[0].deviceId);
-        }
-      })
-      .catch((err) => console.warn("Could not list video devices", err));
-
-    startCamera();
-
-    return () => {
-      stopCamera();
-    };
-  }, [isOpen]);
-
-  const startCamera = async (deviceId?: string) => {
-    stopCamera();
-    setErrorMsg("");
-    try {
-      const constraints: MediaStreamConstraints = {
-        video: deviceId
-          ? { deviceId: { exact: deviceId } }
-          : { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setCameraActive(true);
-        startScanningLoop();
-      }
-    } catch (err: any) {
-      console.warn("Camera start failed:", err);
-      setErrorMsg("Camera access denied or unavailable. You can enter the barcode/IMEI manually or upload a photo.");
-      setCameraActive(false);
-    }
+  const releaseCamera=()=>{
+    if(scanTimer.current!==null){clearTimeout(scanTimer.current);scanTimer.current=null;}
+    const stream=streamRef.current;streamRef.current=null;
+    stream?.getTracks().forEach(track=>track.stop());
+    if(videoRef.current){videoRef.current.pause();videoRef.current.srcObject=null;}
   };
-
-  const stopCamera = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    setCameraActive(false);
-    try { zxingReaderRef.current?.reset(); } catch {}
-    zxingReaderRef.current = null;
+  const complete=(token:number,raw:string,feedback=false)=>{
+    const clean=raw.trim();if(!clean||!lifecycle.current.finish(token))return;
+    releaseCamera();setCameraActive(false);
+    if(feedback)playScanSuccessFeedback();
+    callbacks.current.onScan(clean);
+    runClosing(()=>callbacks.current.onClose());
   };
-
-  const startScanningLoop = () => {
-    if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
-
-    // If native BarcodeDetector is available
-    if ("BarcodeDetector" in window) {
-      try {
-        // @ts-ignore
-        const barcodeDetector = new (window as any).BarcodeDetector({
-          formats: ["code_128", "code_39", "ean_13", "ean_8", "qr_code", "upc_a", "upc_e"],
-        });
-
-        scanIntervalRef.current = setInterval(async () => {
-          if (videoRef.current && videoRef.current.readyState >= 2) {
-            try {
-              const barcodes = await barcodeDetector.detect(videoRef.current);
-              if (barcodes && barcodes.length > 0) {
-                const raw = barcodes[0].rawValue;
-                if (raw) {
-                  playScanSuccessFeedback();
-                  onScan(raw);
-                  stopCamera();
-                  runClosing();
-                }
-              }
-            } catch (e) {
-              // Ignore single frame detection errors
+  const startCamera=async(deviceId?:string)=>{
+    const token=lifecycle.current.begin();
+    releaseCamera();setCameraActive(false);setErrorMsg("");
+    try{
+      if(!navigator.mediaDevices?.getUserMedia)throw Error("Camera unavailable");
+      const constraints:MediaStreamConstraints={video:deviceId?{deviceId:{exact:deviceId}}:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}}};
+      const stream=await navigator.mediaDevices.getUserMedia(constraints);
+      if(!lifecycle.current.isCurrent(token)||!videoRef.current){stream.getTracks().forEach(track=>track.stop());return;}
+      streamRef.current=stream;videoRef.current.srcObject=stream;
+      await videoRef.current.play();
+      if(!lifecycle.current.isCurrent(token))return;
+      setCameraActive(true);
+      let native:any=null;
+      try{if("BarcodeDetector" in window)native=new (window as any).BarcodeDetector({formats:["code_128","code_39","ean_13","ean_8","qr_code","upc_a","upc_e"]});}catch{}
+      const decoder=new BrowserMultiFormatReader(),canvas=document.createElement("canvas");
+      const loop=async()=>{
+        if(!lifecycle.current.isCurrent(token))return;
+        const video=videoRef.current;
+        if(video&&video.readyState>=2&&video.videoWidth&&video.videoHeight){
+          try{
+            let raw="";
+            if(native){const results=await native.detect(video);raw=results?.[0]?.rawValue||"";}
+            else{
+              const ratio=Math.min(1,1280/Math.max(video.videoWidth,video.videoHeight));
+              canvas.width=Math.max(1,Math.round(video.videoWidth*ratio));canvas.height=Math.max(1,Math.round(video.videoHeight*ratio));
+              const ctx=canvas.getContext("2d",{willReadFrequently:true});if(ctx){ctx.drawImage(video,0,0,canvas.width,canvas.height);raw=decoder.decodeFromCanvas(canvas)?.getText()||"";}
             }
-          }
-        }, 300);
-        return;
-      } catch (e) {
-        console.warn("BarcodeDetector init error", e);
-      }
-    }
-
-    // Real ZXing fallback for browsers without native BarcodeDetector.
-    try {
-      const reader = new BrowserMultiFormatReader();
-      zxingReaderRef.current = reader;
-      scanIntervalRef.current = setInterval(async () => {
-        if (!videoRef.current || videoRef.current.readyState < 2) return;
-        try {
-          const result = await reader.decodeOnceFromVideoElement(videoRef.current);
-          const raw = result?.getText?.();
-          if (raw) {
-            playScanSuccessFeedback();
-            onScan(raw);
-            stopCamera();
-            runClosing();
-          }
-        } catch {
-          // No code in this frame is expected; keep scanning.
+            if(raw)complete(token,raw,true);
+          }catch{/* No readable code in this frame. */}
         }
-      }, 250);
-    } catch (e) {
-      console.error("Barcode decoder fallback unavailable", e);
+        if(lifecycle.current.isCurrent(token))scanTimer.current=setTimeout(loop,300);
+      };
+      scanTimer.current=setTimeout(loop,300);
+    }catch{
+      if(!lifecycle.current.isCurrent(token))return;
+      releaseCamera();setCameraActive(false);setErrorMsg("Camera access denied or unavailable. Enter the barcode/IMEI manually or upload a photo.");
     }
   };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const result = reader.result as string;
-      try {
-        const decoder = zxingReaderRef.current || new BrowserMultiFormatReader();
-        zxingReaderRef.current = decoder;
-        const decoded = await decoder.decodeFromImageUrl(result);
-        const raw = decoded?.getText?.();
-        if (!raw) throw new Error("No barcode detected");
-        playScanSuccessFeedback();
-        onScan(raw);
-        runClosing();
-      } catch {
-        setErrorMsg("No readable barcode found in this image. Upload a clearer barcode photo.");
-      }
-    };
-    reader.readAsDataURL(file);
+  useEffect(()=>{
+    if(!isOpen)return;
+    let active=true;setManualInput("");
+    void navigator.mediaDevices?.enumerateDevices().then(devices=>{
+      if(!active)return;const video=devices.filter(d=>d.kind==="videoinput");setCameras(video);
+      const preferred=video.find(d=>/back|rear/i.test(d.label))||video[0];setSelectedCameraId(preferred?.deviceId||"");
+    }).catch(()=>{});
+    void startCamera();
+    return()=>{active=false;lifecycle.current.cancel();releaseCamera();};
+  },[isOpen]);
+  const handleFileUpload=async(e:React.ChangeEvent<HTMLInputElement>)=>{
+    const file=e.target.files?.[0];e.target.value="";if(!file)return;
+    if(!file.type.startsWith("image/")||file.size>12*1024*1024){setErrorMsg("Choose an image up to 12 MB.");return;}
+    const token=lifecycle.current.begin();releaseCamera();setCameraActive(false);
+    const url=URL.createObjectURL(file);
+    try{
+      const decoded=await new BrowserMultiFormatReader().decodeFromImageUrl(url);
+      const raw=decoded?.getText();if(!raw)throw Error("No barcode");
+      complete(token,raw,true);
+    }catch{if(lifecycle.current.isCurrent(token))setErrorMsg("No readable barcode found. Upload a clearer photo or enter the code manually.");}
+    finally{URL.revokeObjectURL(url);}
   };
 
   if (!isOpen) return null;
 
-  // Manual close (X / Close button) — stop the camera stream immediately
-  // rather than waiting for the delayed unmount, then play the exit
-  // animation. Scan-success paths above already call stopCamera() of their
-  // own accord before runClosing(), so this only matters for the "give up"
-  // path.
-  const handleManualClose = () => {
-    stopCamera();
-    requestClose();
-  };
+  const handleManualClose=()=>{lifecycle.current.cancel();releaseCamera();setCameraActive(false);requestClose();};
 
   return (
     <div className={`overlay show ${closing ? "closing" : ""}`}>
-      <div className={`modal ${closing ? "closing" : ""}`} style={{ maxWidth: "580px" }}>
+      <div role="dialog" aria-modal="true" aria-label={title} className={`modal ${closing ? "closing" : ""}`} style={{ maxWidth: "580px" }}>
         <div className="modal-head">
           <h3>
             <Camera size={18} style={{ display: "inline", verticalAlign: "middle", marginRight: "6px" }} />
             {title}
           </h3>
-          <button onClick={handleManualClose}>&times;</button>
+          <button type="button" aria-label="Close scanner" onClick={handleManualClose}>&times;</button>
         </div>
 
-        {errorMsg ? (
-          <div className="alert amber">{errorMsg}</div>
-        ) : (
+        {errorMsg && <div role="alert" className="alert amber">{errorMsg}</div>}
+        {(
           <div
             style={{
               position: "relative",
+              display: errorMsg ? "none" : "block",
               width: "100%",
               aspectRatio: "4/3",
               background: "#000",
@@ -309,9 +230,8 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                 onChange={(e) => setManualInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && manualInput.trim()) {
-                    onScan(manualInput.trim());
-                    stopCamera();
-                    runClosing();
+                    e.preventDefault();
+                    complete(lifecycle.current.token,manualInput);
                   }
                 }}
               />
@@ -319,9 +239,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                 className="btn primary sm"
                 onClick={() => {
                   if (manualInput.trim()) {
-                    onScan(manualInput.trim());
-                    stopCamera();
-                    runClosing();
+                    complete(lifecycle.current.token,manualInput);
                   }
                 }}
               >
@@ -340,13 +258,13 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
           <button className="btn" onClick={handleManualClose}>
             Close
           </button>
-          {cameraActive && (
+          {!closing && (
             <button
               className="btn"
-              onClick={() => startCamera(selectedCameraId)}
+              onClick={() => void startCamera(selectedCameraId || undefined)}
               title="Restart video feed"
             >
-              <RefreshCw size={14} /> Refresh
+              <RefreshCw size={14} /> {cameraActive?"Refresh":"Retry camera"}
             </button>
           )}
         </div>

@@ -5500,8 +5500,11 @@ export default function App() {
 
             <form onSubmit={handleStaffLoginSubmit}>
               <div className="field">
-                <label>Login ID</label>
+                <label htmlFor="staff-gate-login-id">Login ID</label>
                 <input
+                  id="staff-gate-login-id"
+                  autoComplete="username"
+                  autoCapitalize="none"
                   autoFocus={!staffLoginId}
                   value={staffLoginId}
                   onChange={(e) => setStaffLoginId(e.target.value)}
@@ -5509,8 +5512,10 @@ export default function App() {
                 />
               </div>
               <div className="field" style={{ marginTop: 10 }}>
-                <label>Password</label>
+                <label htmlFor="staff-gate-password">Password</label>
                 <input
+                  id="staff-gate-password"
+                  autoComplete="current-password"
                   type="password"
                   autoFocus={!!staffLoginId}
                   value={staffLoginPassword}
@@ -5519,7 +5524,7 @@ export default function App() {
                 />
               </div>
               {staffLoginError && (
-                <div className="notice" style={{ marginTop: 10, color: "var(--red)" }}>{staffLoginError}</div>
+                <div role="alert" className="notice" style={{ marginTop: 10, color: "var(--red)" }}>{staffLoginError}</div>
               )}
               <div className="modal-actions" style={{ marginTop: 18 }}>
                 <button type="submit" className="btn primary" style={{ width: "100%", justifyContent: "center" }} disabled={staffLoginBusy}>
@@ -5537,7 +5542,7 @@ export default function App() {
                 setStaffLoginError("");
               }}
             >
-              ← Back to selection
+              {APP_VARIANT === "mobile" || APP_VARIANT === "staff" ? "Clear login" : "← Back to selection"}
             </button>
 
             {APP_VARIANT === "mobile" && (

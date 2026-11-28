@@ -92,10 +92,10 @@ try{
  Wait-Native "Custom Service" "pos"
  Invoke-NativeButton "Custom Service"
  Wait-Native "Service / Job Title" "service-modal"
+ Invoke-NativeButton "UV Glass Curing & Clean"
  Set-NativeEdit "SIM Cutting|Service / Job Title" "CI Native Test Service"
- Set-NativeEdit "e.g. 50|Customer Charge" "50"
  Invoke-NativeButton "Add to Cart"
- Wait-Native "CI Native Test Service" "cart-result"
+ Wait-Native "Current Bill Cart \(1 Items\).*CI Native Test Service" "cart-result"
 
  @{installed=$true;loginScreenVerified=$true;emptyCredentialRejectionVerified=$true;backNavigationVerified=$true;ownerPinGateVerified=$true;localOwnerUnlockVerified=$true;calculatorVerified=$true;serviceCartVerified=$true;source=$expected[0].source;version=$expected[0].version;scope="Hosted Windows runner, no real account or hardware"} | ConvertTo-Json | Set-Content (Join-Path $OutputDirectory "windows-runtime.json")
  Write-Host "PASS actual Windows installed app login, owner local PIN, calculator and synthetic POS service cart"

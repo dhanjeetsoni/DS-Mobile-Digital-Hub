@@ -119,6 +119,7 @@ import {readScopedSnapshot,writeScopedSnapshot} from "./services/scopedSnapshotC
 import { syncOutOfStockTimestamps } from "./utils/outOfStockTracker";
 import { sqliteList } from "./services/localSqlite";
 import { mergeStoreState, sameState } from "./services/syncMerge";
+import {scopedQueueRows, scopeMatches, chooseSnapshotRecovery} from "./services/scopedRecovery";
 import { saveSnapshotRecovery, readSnapshotRecovery, clearSnapshotRecovery, archiveSnapshotRecovery } from "./services/repository";
 import {EncryptedBackupPanel} from "./components/EncryptedBackupPanel";
 import {TelegramBillMonitor} from "./components/TelegramBillMonitor";
@@ -289,6 +290,7 @@ export default function App() {
   const cloudBaseRef = useRef<{state:Database;version:number;profileId:string;storeId:string}|null>(null);
   const savingCloudRef = useRef(false);
   const offlineBootstrapRef = useRef(false);
+  const snapshotReviewRef = useRef(false);
 
   const [ownerMode, setOwnerMode] = useState(false);
   const initialRoutePage = (() => {
@@ -1112,7 +1114,14 @@ export default function App() {
     try{localStorage.setItem("dsmdh_cloud_identity_seen","1");localStorage.setItem(profileCacheKey(profile.id),JSON.stringify(profile));}catch(error){console.warn("Profile cache unavailable",error);}
   };
   const cacheCloudSnapshot=async(base:{state:Database;version:number;profileId:string;storeId:string},local:Database)=>{
-    try{await writeScopedSnapshot(base,local);return true;}catch(error){console.warn("Scoped cache unavailable",error);setCloudStatus("sync-error");return false;}
+    try{await writeScopedSnapshot(base,local);return true;}catch(error){console.warn("Scoped cache unavailable",error);if(scopeMatches(cloudBaseRef.current,base))setCloudStatus("sync-error");return false;}
+  };
+  const discardCloudView=()=>{
+    // Existing durable recovery is retained. Remove sensitive in-memory
+    // state and invalidate all callbacks captured by the revoked session.
+    cloudBaseRef.current=null;offlineBootstrapRef.current=false;snapshotReviewRef.current=false;
+    const empty=defaultDB();dbRef.current=empty;setDb(empty);setCart([]);
+    setLiveStock({});setLiveCatalogByClientId({});setLiveCatalogBySku({});
   };
   const normalizeCloudState=(state:Database):Database=>{
     const defaults=defaultDB();
@@ -1127,19 +1136,20 @@ export default function App() {
       // A synchronous saveState cache may be newer than the debounced
       // SQLite recovery record (e.g. app closed immediately after editing).
       const cached=await readScopedSnapshot(profileId,storeId);
-      if(cached?.storeId===storeId&&cached.base&&cached.local&&!sameState(cached.base,cached.local)){
-        pending={scope:{profileId,storeId},base:cached.base,local:cached.local,version:Number(cached.version),conflicts:[]};
-      }
+      const chosen=chooseSnapshotRecovery(pending,cached,{profileId,storeId});
+      for(const candidate of chosen.review){await archiveSnapshotRecovery(candidate);snapshotReviewRef.current=true;}
+      pending=chosen.active;
       if(pending){
         const result=mergeStoreState(pending.base,pending.local,remote);
         if(result.conflicts.length){
           await archiveSnapshotRecovery({...pending,conflicts:result.conflicts});
-          setCloudStatus("sync-error");
+          snapshotReviewRef.current=true;setCloudStatus("sync-error");
         } else next=result.state;
       }
     } catch(error){console.warn("Recovery read failed",error);throw Error("Local recovery could not be verified; no previous cache overwritten");}
     dbRef.current=next;setDb(next);setCloudVersion(version);
-    await cacheCloudSnapshot(cloudBaseRef.current!,next);
+    const cacheSaved=await cacheCloudSnapshot(cloudBaseRef.current!,next);
+    return cacheSaved&&!snapshotReviewRef.current;
   };
   const acceptRemoteState=async(state:Database,version:number,profileId:string,storeId:string)=>{
     const base=cloudBaseRef.current;
@@ -1287,18 +1297,22 @@ export default function App() {
         if (!profile?.store_id) { setCloudStatus("offline"); setCloudReady(true); return; }
         const remote = await loadCloudState();
         if (!remote?.state) throw new Error("Cloud state unavailable; autosave disabled");
-        await initializeCloudState(remote.state,remote.version,profile.id,profile.store_id);
+        const initialSnapshotClean=await initializeCloudState(remote.state,remote.version,profile.id,profile.store_id);
+        if(!active||!scopeMatches(cloudBaseRef.current,{profileId:profile.id,storeId:profile.store_id}))return;
+        const stillCurrent=()=>active&&scopeMatches(cloudBaseRef.current,{profileId:profile.id,storeId:profile.store_id});
         cacheCloudIdentity(profile);
         // Phase 1 (data architecture fix): seed the live-stock map once,
         // then keep it current via realtime — independent of the (slower,
         // conflict-prone) store_state blob save/load cycle above.
         try {
-          setLiveStock(await fetchLiveStock(profile.store_id));
+          const stock=await fetchLiveStock(profile.store_id);
+          if(stillCurrent())setLiveStock(stock);
         } catch (e) {
           console.warn("Live stock initial fetch failed; falling back to blob stock until realtime catches up", e);
         }
+        if(!stillCurrent())return;
         stockChannel = subscribeToLiveStock(profile.store_id, (productId, stockQty) => {
-          setLiveStock(prev => ({ ...prev, [productId]: stockQty }));
+          if(stillCurrent())setLiveStock(prev => ({ ...prev, [productId]: stockQty }));
         });
         // Phase 1 completion (2026-09-06): same pattern as liveStock above,
         // but for the rest of the catalog (photo, MRP, warranty, notes,
@@ -1309,16 +1323,17 @@ export default function App() {
         // already-verified stock-sync behaviour.
         try {
           const { byClientId, bySku } = await fetchLiveCatalog(profile.store_id);
-          setLiveCatalogByClientId(byClientId);
-          setLiveCatalogBySku(bySku);
+          if(stillCurrent()){setLiveCatalogByClientId(byClientId);setLiveCatalogBySku(bySku);}
         } catch (e) {
           console.warn("Live catalog initial fetch failed; falling back to blob catalog fields until realtime catches up", e);
         }
+        if(!stillCurrent())return;
         catalogChannel = subscribeToLiveCatalog(profile.store_id, (clientId, sku, entry) => {
+          if(!stillCurrent())return;
           if (clientId) setLiveCatalogByClientId(prev => ({ ...prev, [clientId]: entry }));
           else if (sku) setLiveCatalogBySku(prev => ({ ...prev, [sku]: entry }));
         });
-        setCloudStatus("online");
+        setCloudStatus(initialSnapshotClean?"online":"sync-error");
         setCloudReady(true);
         // 2026-09-05 fix: a valid cloud session (real owner Cloud Sign In,
         // or a "manager" full-access Login ID/Password from the Android
@@ -1355,10 +1370,10 @@ export default function App() {
           // Poll the account-scoped state instead; live product stock retains
           // its separate redacted catalog subscription.
           const refreshStaffState=async()=>{
-            if(!active||!navigator.onLine||savingCloudRef.current)return;
+            if(!stillCurrent()||!navigator.onLine||savingCloudRef.current)return;
             try{
               const fresh=await loadCloudState();
-              if(active&&fresh?.storeId===profile.store_id)await acceptRemoteState(fresh.state,fresh.version,profile.id,profile.store_id);
+              if(stillCurrent()&&fresh?.storeId===profile.store_id)await acceptRemoteState(fresh.state,fresh.version,profile.id,profile.store_id);
             }catch(error){console.warn("Scoped staff state refresh unavailable",error);}
           };
           staffStatePoll=window.setInterval(()=>void refreshStaffState(),5000);
@@ -1401,7 +1416,7 @@ export default function App() {
           savedState=merged.state;expectedVersion=remote.version;
           version=await saveCloudState(savedState,expectedVersion,base);
         }
-        if(!active||cloudBaseRef.current?.profileId!==base.profileId)return;
+        if(!active||!scopeMatches(cloudBaseRef.current,base))return;
         const latest=structuredClone(dbRef.current);
         const after=mergeStoreState(local,latest,savedState);
         if(after.conflicts.length){
@@ -1409,14 +1424,18 @@ export default function App() {
           setCloudStatus("sync-error");return;
         }
         cloudBaseRef.current={...base,state:structuredClone(savedState),version};
+        // Publish the reconciled view before awaiting persistence. A later
+        // user edit must never be overwritten when the cache write resolves.
         dbRef.current=after.state;
-        const cacheSaved=await cacheCloudSnapshot(cloudBaseRef.current!,after.state);
         if(!sameState(latest,after.state))setDb(after.state);
         setCloudVersion(version);
-        if(sameState(after.state,savedState)) await clearSnapshotRecovery(base.profileId,base.storeId);
-        else await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:savedState,local:after.state,version,conflicts:[]});
-        setCloudStatus(cacheSaved?"online":"sync-error");
-      } catch(error){console.warn("Cloud snapshot save failed; local recovery retained",error);setCloudStatus("sync-error");}
+        const cacheSaved=await cacheCloudSnapshot(cloudBaseRef.current!,after.state);
+        if(!active||!scopeMatches(cloudBaseRef.current,base))return;
+        const currentLocal=structuredClone(dbRef.current);
+        if(cacheSaved&&sameState(currentLocal,savedState)) await clearSnapshotRecovery(base.profileId,base.storeId);
+        else await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:savedState,local:currentLocal,version,conflicts:[]});
+        if(active&&scopeMatches(cloudBaseRef.current,base))setCloudStatus(cacheSaved&&!snapshotReviewRef.current?"online":"sync-error");
+      } catch(error){console.warn("Cloud snapshot save failed; local recovery retained",error);if(active&&scopeMatches(cloudBaseRef.current,base))setCloudStatus("sync-error");}
       finally{savingCloudRef.current=false;}
     };
     const timer=window.setTimeout(run,650), interval=window.setInterval(run,2000);
@@ -1444,18 +1463,24 @@ export default function App() {
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   useEffect(() => {
     let active = true;
+    const scope=cloudProfile?.id&&cloudProfile?.store_id?{profileId:cloudProfile.id,storeId:cloudProfile.store_id}:null;
+    setPendingSyncCount(0);
     const check = async () => {
+      if(!scope)return;
       try {
-        const rows = await sqliteList();
-        if (active) setPendingSyncCount(rows.length);
+        const rows = scopedQueueRows(await sqliteList(),scope);
+        if (active&&scopeMatches(cloudBaseRef.current,scope)) {
+          setPendingSyncCount(rows.length);
+          if(rows.some(row=>row.operation==="snapshot_conflict")){snapshotReviewRef.current=true;setCloudStatus("sync-error");}
+        }
       } catch {
-        // sql.js not ready yet on first paint — ignore, next tick retries.
+        if(active&&scopeMatches(cloudBaseRef.current,scope))setCloudStatus("sync-error");
       }
     };
     check();
     const t = window.setInterval(check, 4000);
     return () => { active = false; window.clearInterval(t); };
-  }, [db]);
+  }, [cloudProfile?.id,cloudProfile?.store_id]);
 
   // Phase 17.6 (DS Mobile usability suggestion §8.3): "a small persistent
   // last-synced-Xs-ago / offline indicator". Deliberately not a new sync
@@ -1532,7 +1557,7 @@ export default function App() {
     if (!gateUnlocked || !["staff","manager"].includes(cloudProfile?.role)) return;
     let cancelled=false;
     const forceStaffLogout = async (reason: "disabled" | "expired" | "outsideWindow") => {
-      clearCachedStaffSession();
+      discardCloudView();clearCachedStaffSession();
       setGateUnlocked(false);
       setGateStage("staffDenied");
       setStaffDeniedReason(reason);
@@ -1619,7 +1644,7 @@ export default function App() {
     const forceKickDeleted = () => {
       // Step 1.7: Delete must kick an already-open session just as
       // instantly as Pause does — not only block the *next* login attempt.
-      clearCachedStaffSession();
+      discardCloudView();clearCachedStaffSession();
       supabase.auth.signOut().catch(() => {});
       setCloudUser(null);
       setCloudProfile(null);
@@ -1638,7 +1663,7 @@ export default function App() {
           const row = payload.new;
           if (!row) return;
           if (row.force_logout_at && row.force_logout_at !== forceLogoutBaselineRef.current) {
-            clearCachedStaffSession();
+            discardCloudView();clearCachedStaffSession();
             supabase.auth.signOut().catch(() => {});
             setCloudUser(null);
             setCloudProfile(null);
@@ -1650,7 +1675,7 @@ export default function App() {
             return;
           }
           if (!row.access_enabled || isAccessWindowExpired(row)) {
-            clearCachedStaffSession();
+            discardCloudView();clearCachedStaffSession();
             supabase.auth.signOut().catch(() => {});
             setCloudUser(null);
             setCloudProfile(null);
@@ -1704,7 +1729,7 @@ export default function App() {
     if (!cloudUser) return;
     return startConnectivitySync(async (result) => {
       if (result.processed > 0 || result.failed > 0) {
-        setCloudStatus(result.failed ? "sync-error" : "online");
+        setCloudStatus(result.failed||snapshotReviewRef.current ? "sync-error" : "online");
         if (result.processed > 0) {
           try {
             const fresh = await loadCloudState();
@@ -2803,7 +2828,8 @@ export default function App() {
       dbRef.current=next;setDb(next);setCloudVersion(version);const cacheSaved=await cacheCloudSnapshot(cloudBaseRef.current,next);
       if(sameState(next,updated))await clearSnapshotRecovery(base.profileId,base.storeId);
       else await saveSnapshotRecovery({scope:{profileId:base.profileId,storeId:base.storeId},base:updated,local:next,version,conflicts:[]});
-      setCloudStatus(merged.conflicts.length||!cacheSaved?"sync-error":"online");
+      if(merged.conflicts.length)snapshotReviewRef.current=true;
+      if(scopeMatches(cloudBaseRef.current,base))setCloudStatus(snapshotReviewRef.current||!cacheSaved?"sync-error":"online");
       return true;
     }catch(error:any){showToast(error?.message||"Correction was not confirmed. Refresh invoice before retrying.","red");return false;}
     finally{savingCloudRef.current=false;}
@@ -5887,7 +5913,10 @@ export default function App() {
             />
             {cloudProfile?.id && pendingSyncCount>0 && <button className="btn sm" title="Export this account's pending local recovery data" onClick={async()=>{
               try{
-                const rows=(await sqliteList()).map(row=>({id:row[0],operation:row[1],entity:row[2],payload:JSON.parse(String(row[3]))})).filter(row=>row.payload?.scope?.profileId===cloudProfile.id && row.payload?.scope?.storeId===cloudProfile.store_id);
+                const scope={profileId:cloudProfile.id,storeId:cloudProfile.store_id};
+                if(!scopeMatches(cloudBaseRef.current,scope)||!window.confirm("Export private pending recovery data from this account? Keep it secure and do not automatically replay conflicts."))return;
+                const rows=scopedQueueRows(await sqliteList(),scope);
+                if(!scopeMatches(cloudBaseRef.current,scope))return;
                 if(!rows.length){showToast("No account-scoped recovery entries to export.", "amber");return;}
                 const url=URL.createObjectURL(new Blob([JSON.stringify(rows,null,2)],{type:"application/json"}));
                 const link=document.createElement("a");link.href=url;link.download="dsmdh-sync-recovery-"+todayStr()+".json";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);

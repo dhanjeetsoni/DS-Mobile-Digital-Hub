@@ -1,5 +1,7 @@
 name: Recheck existing Android APK
 on:
+  push:
+    branches: ['hardening/recheck-apk-46001006448']
   workflow_dispatch:
     inputs:
       run_id:
@@ -22,8 +24,8 @@ jobs:
       - name: Validate artifact provenance
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ inputs.run_id }}
-          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RUN_ID: ${{ inputs.run_id || '46001006448' }}
+          EXPECTED_SHA: ${{ inputs.expected_sha || '50392a72bc0b2d29d62eae7c7fe95591102e4c2f' }}
         run: |
           set -euo pipefail
           [[ "$RUN_ID" =~ ^[0-9]+$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -33,7 +35,7 @@ jobs:
         with:
           name: mobile-android-apk
           path: emulator-apk
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ inputs.run_id || '46001006448' }}
           github-token: ${{ github.token }}
       - name: Enable KVM
         run: |

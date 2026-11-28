@@ -1,0 +1,62 @@
+name: Windows installed local functional acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Existing Build & Release workflow run ID"
+        required: true
+        type: string
+      expected_sha:
+        description: "Exact source commit SHA"
+        required: true
+        type: string
+  push:
+    branches: ['hardening/windows-local-acceptance']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-acceptance:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Verify artifact source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id || '46126012280' }}
+          EXPECTED_SHA: ${{ inputs.expected_sha || 'd21e3eeab94fef291907387c36ac63737001bbfe' }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" | jq -e --arg sha "$EXPECTED_SHA" '.head_sha == $sha and .name == "Build & Release (Step 12)"'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs" | jq -e 'any(.jobs[]; .name == "windows" and .conclusion == "success")'
+      - uses: actions/download-artifact@v7
+        with:
+          name: windows-installer
+          path: windows-artifact
+          run-id: ${{ inputs.run_id || '46126012280' }}
+          github-token: ${{ github.token }}
+      - name: Verify updater signature
+        shell: pwsh
+        env:
+          REQUIRE_UPDATER_SIGNATURE: "true"
+        run: |
+          $installer=Get-ChildItem windows-artifact -Recurse -Filter "*setup.exe" -File
+          if(@($installer).Count -ne 1){throw "Expected one installer"}
+          node scripts/verify-windows-updater.mjs "$($installer.DirectoryName)"
+      - name: Install and verify actual rendered login
+        shell: powershell
+        run: ./scripts/windows-local-functional-smoke.ps1 -ArtifactRoot windows-artifact -OutputDirectory windows-runtime-review
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: windows-local-functional-evidence
+          path: |
+            windows-runtime-review/
+            windows-artifact/**/updater-signature-verification.json
+          if-no-files-found: warn

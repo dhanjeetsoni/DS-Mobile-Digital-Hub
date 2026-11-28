@@ -95,3 +95,13 @@ const mediaUrl=(kind:string,store:string,scope:MediaScope,name?:string)=>functio
 export async function listRecoveryMedia(store:string,scope:MediaScope,cursor?:string|null):Promise<MediaPage>{const url=new URL(mediaUrl("media-list",store,scope));if(cursor)url.searchParams.set("cursor",cursor);const res=await fetch(url,{headers:await authHeader(),cache:"no-store"});if(!res.ok)throw Error("Owner media inventory unavailable");return res.json();}
 export async function readRecoveryMedia(store:string,scope:MediaScope,name:string,etag?:string):Promise<{bytes:Uint8Array<ArrayBuffer>;type:string}>{const url=new URL(mediaUrl("media-object",store,scope,name));if(etag)url.searchParams.set("etag",etag);const res=await fetch(url,{headers:await authHeader(),cache:"no-store"});if(!res.ok)throw Error("Media read failed ("+res.status+"): "+name);const blob=await res.blob();if(blob.size>24*1024*1024)throw Error("Media exceeds batch limit");return {bytes:new Uint8Array(await blob.arrayBuffer()),type:blob.type.split(";")[0]||"application/octet-stream"};}
 export async function restoreRecoveryMedia(store:string,scope:MediaScope,name:string,bytes:Uint8Array<ArrayBuffer>,type:string):Promise<"restored"|"existing">{const res=await fetch(mediaUrl("media-object",store,scope,name),{method:"PUT",headers:{...(await authHeader()),"Content-Type":type},body:bytes});if(res.status===409)return "existing";if(!res.ok)throw Error("Media restore failed ("+res.status+"): "+name);return "restored";}
+
+export type R2ProbeReport={ok:boolean;publicBucket:{ok:boolean;stage:string;cleanupVerified:boolean};privateBucket:{ok:boolean;stage:string;cleanupVerified:boolean};probeId:string;elapsedMs:number;scope:string};
+export async function runR2SyntheticProbe(storeId:string):Promise<R2ProbeReport>{
+ if(!isCloudConfigured||!storeId)throw Error("Cloud owner sign-in required");
+ const res=await fetch(functionBase()+"/diagnostic/"+encodeURIComponent(storeId),{method:"POST",headers:await authHeader(),cache:"no-store",signal:AbortSignal.timeout(90000)});
+ if(!res.ok)throw Error("R2 probe unavailable ("+res.status+")");
+ const data=await res.json();
+ if(typeof data?.ok!=="boolean"||typeof data?.publicBucket?.ok!=="boolean"||typeof data?.privateBucket?.ok!=="boolean")throw Error("Invalid diagnostic response");
+ return data;
+}

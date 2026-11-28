@@ -6,6 +6,7 @@ import { listStaffAccounts, StaffProfile } from "../services/staffAuth";
 import { getSupabaseUsage, getCloudflareUsage } from "../services/storageUsage";
 import { StorageUsageMeter } from "./StorageUsageMeter";
 import { runSystemSelfTests, SelfTestResult } from "../services/systemSelfTest";
+import {runR2SyntheticProbe,type R2ProbeReport} from "../services/r2Client";
 
 // STEP 9.1 — Full System Status Dashboard (Owner-only).
 // One screen, six services, each with a green/red (sometimes amber) dot —
@@ -309,6 +310,7 @@ export const StatusDashboardView: React.FC<StatusDashboardViewProps> = ({
       />
 
       {/* Phase 14: Automated System Diagnostic & Self-Test Suite */}
+      <StorageAcceptancePanel storeId={storeId}/>
       <DiagnosticSelfTestPanel />
     </div>
   );
@@ -419,3 +421,10 @@ const DiagnosticSelfTestPanel: React.FC = () => {
     </div>
   );
 };
+
+function StorageAcceptancePanel({storeId}:{storeId:string|null|undefined}){
+ const [result,setResult]=useState<R2ProbeReport|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState("");const generation=useRef(0);
+ useEffect(()=>{generation.current++;setResult(null);setBusy(false);setError("");return()=>{generation.current++;};},[storeId]);
+ const run=async()=>{if(!storeId||busy||!window.confirm("Run a small synthetic write/read/no-overwrite/delete check in both R2 buckets? No business files are used."))return;const n=++generation.current;setBusy(true);setError("");setResult(null);try{const report=await runR2SyntheticProbe(storeId);if(n===generation.current)setResult(report);}catch(e){if(n===generation.current)setError(e instanceof Error?e.message:"Storage probe unavailable");}finally{if(n===generation.current)setBusy(false);}};
+ return <div className="card" style={{marginTop:16}}><h3>Cloudflare storage acceptance</h3><p className="hint">Owner-only test: upload synthetic bytes, verify exact readback, reject overwrite, delete and confirm absence in both buckets. Does not restore business backups.</p><button className="btn" type="button" onClick={()=>void run()} disabled={!storeId||busy}>{busy?"Testing storage...":"Run real R2 storage test"}</button>{error&&<p role="alert">{error}</p>}{result&&<div role="status"><p>{result.ok?"Both bucket probes passed":"Storage verification incomplete — review required"} · {result.elapsedMs} ms</p><p>Public: {result.publicBucket.stage} · cleanup {result.publicBucket.cleanupVerified?"verified":"not verified"}</p><p>Private: {result.privateBucket.stage} · cleanup {result.privateBucket.cleanupVerified?"verified":"not verified"}</p>{!result.ok&&<p className="hint">Diagnostic ID: {result.probeId}</p>}</div>}</div>;
+}

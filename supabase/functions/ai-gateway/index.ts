@@ -1273,21 +1273,35 @@ Deno.serve(async (req: Request) => {
 
   try {
     switch (route) {
-      case "provider-self-test": {
-        const ctx=await requireUserAndStore(req);
-        if(!ctx)return json({success:false,error:"Authentication required."},401);
-        const {data:profile,error}=await supabaseAdmin!.from("profiles").select("role,store_id").eq("id",ctx.userId).maybeSingle();
-        if(error||profile?.role!=="owner"||profile.store_id!==ctx.storeId)return json({success:false,error:"Owner access required."},403);
-        if(!checkRateLimit("provider-test:"+ctx.userId,60000,2))return json({success:false,error:"Please wait before testing again."},429);
+      case "provider-self-test":
+      case "provider-self-test-system": {
+        // Trusted maintenance calls can exercise only the fixed synthetic
+        // marker and fixed OCR image, never arbitrary prompts or user data.
+        // No user is impersonated and no caller-supplied shop ID is accepted.
+        let storeId:string|null=null,rateKey="";
+        if(route==="provider-self-test-system"){
+          const cronSecret=Deno.env.get("CRON_SECRET")||"",provided=req.headers.get("x-cron-secret")||"";
+          if(!cronSecret||provided!==cronSecret||!supabaseAdmin)return json({success:false,error:"Access denied."},403);
+          const {data:owners,error}=await supabaseAdmin.from("profiles").select("store_id").eq("role","owner").not("store_id","is",null).limit(2);
+          if(error||owners?.length!==1||!owners[0].store_id)return json({success:false,error:"System probe needs exactly one owner shop."},409);
+          storeId=owners[0].store_id;rateKey="provider-system-test:"+storeId;
+        }else{
+          const ctx=await requireUserAndStore(req);
+          if(!ctx)return json({success:false,error:"Authentication required."},401);
+          const {data:profile,error}=await supabaseAdmin!.from("profiles").select("role,store_id").eq("id",ctx.userId).maybeSingle();
+          if(error||profile?.role!=="owner"||profile.store_id!==ctx.storeId)return json({success:false,error:"Owner access required."},403);
+          storeId=ctx.storeId;rateKey="provider-test:"+ctx.userId;
+        }
+        if(!checkRateLimit(rateKey,60000,2))return json({success:false,error:"Please wait before testing again."},429);
         const request=await req.json().catch(()=>({}));const mode=request.mode==="ocr"?"ocr":"text";
         const started=Date.now();
         try{
           if(mode==="ocr"){
-            const result=await runGeminiPhoneOcr(ctx.storeId,OCR_TEST_PNG,"image/png","box");
+            const result=await runGeminiPhoneOcr(storeId,OCR_TEST_PNG,"image/png","box");
             if(!validSyntheticOcr(result))return json({success:false,error:"OCR responded but did not extract the exact synthetic brand/model or invented an absent identifier/price.",elapsedMs:Date.now()-started},502);
             return json({success:true,verified:"ocr",elapsedMs:Date.now()-started});
           }
-          const response=await runWithGeminiFailover(ctx.storeId,ai=>ai.models.generateContent({model:GEMINI_MODEL_TEXT,contents:{parts:[{text:"Connectivity test. Reply with exactly DSMDH_TEST_OK and no other text."}]},config:TEXT_MODE_CONFIG}));
+          const response=await runWithGeminiFailover(storeId,ai=>ai.models.generateContent({model:GEMINI_MODEL_TEXT,contents:{parts:[{text:"Connectivity test. Reply with exactly DSMDH_TEST_OK and no other text."}]},config:TEXT_MODE_CONFIG}));
           if(!/^DSMDH_TEST_OK[.!]?$/.test(String(response.text||"").trim()))return json({success:false,error:"Provider replied but the synthetic verification marker did not match.",elapsedMs:Date.now()-started},502);
           return json({success:true,verified:"text",elapsedMs:Date.now()-started});
         }catch{return json({success:false,error:"No configured provider completed the requested synthetic test. Check key status, quota and model availability."},503);}

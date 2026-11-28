@@ -8,7 +8,9 @@ if [ -z "$apk" ]; then echo "Universal APK missing for emulator test"; exit 1; f
 package="com.dsmobile.digitalhub"
 collect_diagnostics() {
   adb shell screencap -p /sdcard/dsmdh-screen.png && adb pull /sdcard/dsmdh-screen.png "$out/screen.png" || true
-  adb logcat -d -s AndroidRuntime chromium Tauri > "$out/runtime.txt" || true
+  adb logcat -d -s AndroidRuntime chromium Tauri ActivityTaskManager ActivityManager libc > "$out/runtime.txt" || true
+  adb logcat -d -b crash > "$out/crash.txt" || true
+  adb shell pidof "$package" > "$out/app-pid.txt" || true
   adb shell dumpsys activity activities > "$out/activities.txt" || true
   adb shell dumpsys webviewupdate > "$out/webview-provider.txt" || true
 }
@@ -57,8 +59,13 @@ wait_for_contract cleared >/dev/null
 adb shell input keyevent 3
 adb shell am start -W -n "$activity" | tee "$out/resume.txt"
 wait_for_contract cleared >/dev/null
+cp "$out/cleared.xml" "$out/resumed.xml"
 adb shell am force-stop "$package"
-adb shell am start -W -n "$activity" | tee "$out/relaunch.txt"
+sleep 2
+if adb shell pidof "$package" | grep -q "[0-9]"; then echo "Application was not stopped"; exit 1; fi
+adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$activity" | tee "$out/relaunch.txt"
+grep -q "Status: ok" "$out/relaunch.txt"
 wait_for_contract cleared >/dev/null
+cp "$out/cleared.xml" "$out/relaunched.xml"
 echo '{"installed":true,"loginScreenVerified":true,"emptyCredentialRejectionVerified":true,"resetVerified":true,"typedCredentialMaskingVerified":true,"backgroundResumeVerified":true,"coldRelaunchVerified":true,"scope":"Android emulator unified mobile login; no real account or physical hardware"}' > "$out/boot-verification.json"
 echo "PASS unified mobile APK launch, native login fields, empty credential rejection and reset"

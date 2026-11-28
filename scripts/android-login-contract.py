@@ -23,7 +23,24 @@ def check(path, package, phase):
         m = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", matches[0].get("bounds"))
         return (int(m[1])+int(m[3]))//2, (int(m[2])+int(m[4]))//2
     login = button(lambda value: value == "login")
-    if phase == "validation":
+    def center(n):
+        m = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", n.get("bounds"))
+        return (int(m[1])+int(m[3]))//2, (int(m[2])+int(m[4]))//2
+    username = next(n for n in edits if n.get("password") != "true")
+    password = next(n for n in edits if n.get("password") == "true")
+    if phase == "focus_login":
+        point = center(username)
+    elif phase == "focus_password":
+        assert username.get("text") == "CI-NATIVE-ONLY", "Synthetic login ID was not typed"
+        point = center(password)
+    elif phase == "typed":
+        assert username.get("text") == "CI-NATIVE-ONLY", "Synthetic login ID not retained"
+        assert password.get("text") and "CI-NATIVE-PASSWORD" not in password.get("text"), "Password not masked"
+        point = button(lambda value: "clear login" in value)
+    elif phase == "cleared":
+        assert not username.get("text") and not password.get("text"), "Clear login retained credentials"
+        point = login
+    elif phase == "validation":
         assert "login id aur password dono bharo" in text, "Empty credential submit was not rejected"
         point = button(lambda value: "back to selection" in value or "clear login" in value)
     else:

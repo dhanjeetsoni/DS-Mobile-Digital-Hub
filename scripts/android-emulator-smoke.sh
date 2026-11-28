@@ -43,5 +43,22 @@ adb shell input tap $point
 point="$(wait_for_contract validation)"
 adb shell input tap $point
 wait_for_contract reset >/dev/null
-echo '{"installed":true,"loginScreenVerified":true,"emptyCredentialRejectionVerified":true,"resetVerified":true,"scope":"Android emulator unified mobile login; no real account or physical hardware"}' > "$out/boot-verification.json"
+point="$(wait_for_contract focus_login)"
+adb shell input tap $point
+adb shell input text CI-NATIVE-ONLY
+adb shell input keyevent 4
+point="$(wait_for_contract focus_password)"
+adb shell input tap $point
+adb shell input text CI-NATIVE-PASSWORD
+adb shell input keyevent 4
+point="$(wait_for_contract typed)"
+adb shell input tap $point
+wait_for_contract cleared >/dev/null
+adb shell input keyevent 3
+adb shell am start -W -n "$activity" | tee "$out/resume.txt"
+wait_for_contract cleared >/dev/null
+adb shell am force-stop "$package"
+adb shell am start -W -n "$activity" | tee "$out/relaunch.txt"
+wait_for_contract cleared >/dev/null
+echo '{"installed":true,"loginScreenVerified":true,"emptyCredentialRejectionVerified":true,"resetVerified":true,"typedCredentialMaskingVerified":true,"backgroundResumeVerified":true,"coldRelaunchVerified":true,"scope":"Android emulator unified mobile login; no real account or physical hardware"}' > "$out/boot-verification.json"
 echo "PASS unified mobile APK launch, native login fields, empty credential rejection and reset"

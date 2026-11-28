@@ -107,6 +107,24 @@ try{
  await owner.getByRole("button",{name:"Unlock",exact:true}).click();
  await owner.getByText("All Products",{exact:true}).first().waitFor({timeout:30000});
  console.log("PASS local owner PIN creation and persistent unlock");
+ // A camera permission prompt may resolve after a modal is dismissed.
+ await owner.evaluate(()=>{
+  window.__ciCamera={released:0,pending:null};
+  Object.defineProperty(navigator.mediaDevices,"getUserMedia",{configurable:true,value:()=>new Promise(resolve=>{window.__ciCamera.pending=()=>{const canvas=document.createElement("canvas");canvas.width=320;canvas.height=240;const stream=canvas.captureStream(1);for(const track of stream.getTracks()){const stop=track.stop.bind(track);track.stop=()=>{window.__ciCamera.released++;stop();};}resolve(stream);};})});
+ });
+ await owner.getByRole("button",{name:"Barcode Sale",exact:true}).click();
+ const scanner=owner.getByRole("dialog",{name:"Live Camera Barcode & QR Scanner"});
+ await scanner.waitFor();await owner.waitForFunction(()=>typeof window.__ciCamera.pending==="function");
+ await scanner.getByRole("button",{name:"Close scanner"}).click();await scanner.waitFor({state:"detached"});
+ await owner.evaluate(()=>window.__ciCamera.pending());
+ await owner.waitForFunction(()=>window.__ciCamera.released===1);
+ await owner.getByRole("button",{name:"Barcode Sale",exact:true}).click();
+ await scanner.waitFor();await scanner.getByPlaceholder("Type or paste barcode / IMEI number...").fill("CI-MANUAL-SCAN");
+ await scanner.getByPlaceholder("Type or paste barcode / IMEI number...").press("Enter");
+ await scanner.waitFor({state:"detached"});
+ assert.equal(await owner.getByText("Scanned: CI-MANUAL-SCAN",{exact:true}).count(),1);
+ console.log("PASS rendered camera close releases delayed permission stream; manual scan accepted exactly once");
+
  await testCalculator(owner);
  await owner.getByText("Sales / New Bill",{exact:true}).first().click();
  // Exercise a real checkout in the isolated browser's local-only database.

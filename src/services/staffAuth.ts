@@ -173,8 +173,9 @@ export async function touchStaffOfflineDownload() {
 
 export function isAccessWindowExpired(profile: Pick<StaffProfile, "access_mode" | "access_expires_at">): boolean {
   if (profile.access_mode === "no_restriction") return false;
-  if (!profile.access_expires_at) return false;
-  return new Date(profile.access_expires_at).getTime() <= Date.now();
+  if (!profile.access_expires_at) return true;
+  const expiry=Date.parse(profile.access_expires_at);
+  return !Number.isFinite(expiry)||expiry<=Date.now();
 }
 
 /**
@@ -192,15 +193,16 @@ export function isAccessWindowExpired(profile: Pick<StaffProfile, "access_mode" 
  * impossible/inverted range.
  */
 export function isOutsideDailyWindow(dailyStart: string | null, dailyEnd: string | null, now: Date = new Date()): boolean {
-  if (!dailyStart || !dailyEnd) return false;
+  if (!dailyStart && !dailyEnd) return false;
+  if(!dailyStart||!dailyEnd)return true;
   const toMinutes = (t: string) => {
-    const [h, m] = t.split(":").map((x) => parseInt(x, 10));
-    if (Number.isNaN(h) || Number.isNaN(m)) return null;
+    if(!/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(t))return null;
+    const [h, m] = t.split(":").map(Number);
     return h * 60 + m;
   };
   const startMin = toMinutes(dailyStart);
   const endMin = toMinutes(dailyEnd);
-  if (startMin === null || endMin === null) return false;
+  if (startMin === null || endMin === null) return true;
   const parts = new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(now);
   const hour = Number(parts.find(p=>p.type==="hour")?.value);
   const minute = Number(parts.find(p=>p.type==="minute")?.value);

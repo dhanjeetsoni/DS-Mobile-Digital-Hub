@@ -536,6 +536,7 @@ export default function App() {
   });
   const [staffLoginPassword, setStaffLoginPassword] = useState("");
   const [staffLoginBusy, setStaffLoginBusy] = useState(false);
+  const staffLoginFlight=useRef(false);
   const [staffLoginError, setStaffLoginError] = useState("");
   const [staffDeniedReason, setStaffDeniedReason] = useState<"disabled" | "expired" | "kicked" | "outsideWindow" | null>(null);
   const [gateShakeError, setGateShakeError] = useState(false);
@@ -605,10 +606,12 @@ export default function App() {
 
   const handleStaffLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if(staffLoginFlight.current)return;
     if (!staffLoginId.trim() || !staffLoginPassword) {
       setStaffLoginError("Login ID aur Password dono bharo.");
       return;
     }
+    staffLoginFlight.current=true;
     setStaffLoginBusy(true);
     setStaffLoginError("");
     try {
@@ -648,7 +651,11 @@ export default function App() {
         return;
       }
       setStaffLoginError(result.message);
+    } catch {
+      setStaffLoginError("Login verify nahi ho paya. Internet check karke dobara try karo.");
+      await supabase.auth.signOut({scope:"local"}).catch(()=>{});
     } finally {
+      staffLoginFlight.current=false;
       setStaffLoginBusy(false);
     }
   };
@@ -2025,8 +2032,8 @@ export default function App() {
     const prodBySku = catalogProducts.find(
       (p) =>
         (p.barcode && p.barcode === clean) ||
-        p.sku.toLowerCase() === clean.toLowerCase() ||
-        (p.units || []).some((u) => u.imei1 === clean || u.serialNo === clean)
+        (p.sku || "").toLowerCase() === clean.toLowerCase() ||
+        (p.units || []).some((u) => u.imei1 === clean || u.imei2 === clean || u.serialNo === clean)
     );
 
     if (prodBySku) {
@@ -5529,6 +5536,8 @@ export default function App() {
                 <label htmlFor="staff-gate-login-id">Login ID</label>
                 <input
                   id="staff-gate-login-id"
+                  disabled={staffLoginBusy}
+                  spellCheck={false}
                   autoComplete="username"
                   autoCapitalize="none"
                   autoFocus={!staffLoginId}
@@ -5541,6 +5550,7 @@ export default function App() {
                 <label htmlFor="staff-gate-password">Password</label>
                 <input
                   id="staff-gate-password"
+                  disabled={staffLoginBusy}
                   autoComplete="current-password"
                   type="password"
                   autoFocus={!!staffLoginId}
@@ -5560,6 +5570,8 @@ export default function App() {
             </form>
 
             <button
+              type="button"
+              disabled={staffLoginBusy}
               className="gate-back-link"
               onClick={() => {
                 setGateStage(gateBackStage);

@@ -231,7 +231,7 @@ function wrapText(s: string, width: number): string[] {
 // a printer's plastic shell). Listed as optionalServices so the browser's
 // GATT connection can see them; NOT relied on exclusively — after
 // connecting we scan every advertised service for a writable characteristic
-// so an unlisted model still has a real chance of working.
+// so compatible models can be discovered without relying on device names.
 const KNOWN_PRINTER_SERVICES = [
   "000018f0-0000-1000-8000-00805f9b34fb",
   "0000ff00-0000-1000-8000-00805f9b34fb",
@@ -241,35 +241,58 @@ const KNOWN_PRINTER_SERVICES = [
 
 let cachedBleDevice: any = null;
 let cachedBleChar: any = null;
+let bleBusy = false;
 
 export function isBluetoothPrintSupported(): boolean {
-  return typeof navigator !== "undefined" && "bluetooth" in navigator;
+  return typeof navigator !== "undefined" && typeof (navigator as any).bluetooth?.requestDevice === "function";
 }
 
 async function findWritableCharacteristic(server: any): Promise<any> {
-  const services = await server.getPrimaryServices();
-  for (const service of services) {
-    const chars = await service.getCharacteristics();
-    for (const ch of chars) {
-      if (ch.properties?.write || ch.properties?.writeWithoutResponse) return ch;
-    }
+  // Only known printer services: do not select an arbitrary writable GATT
+  // characteristic on another peripheral.
+  for (const serviceId of KNOWN_PRINTER_SERVICES) {
+    try {
+      const service = await server.getPrimaryService(serviceId);
+      const chars = await service.getCharacteristics();
+      const selected = chars.find((ch: any) => ch.properties?.write && (typeof ch.writeValueWithResponse === "function" || typeof ch.writeValue === "function"))
+        || chars.find((ch: any) => ch.properties?.writeWithoutResponse && typeof ch.writeValueWithoutResponse === "function");
+      if (selected) return selected;
+    } catch { /* this device may expose a different known printer service */ }
   }
   return null;
 }
 
-/** Opens the browser's Bluetooth device picker, connects, and locates a writable characteristic. Must be called from a real user click/tap (browser requirement) — caches the result so a second print in the same session can skip the picker. */
-export async function connectBluetoothPrinter(): Promise<{ deviceName: string }> {
+async function openBluetoothPrinter(): Promise<{ deviceName: string }> {
   if (!isBluetoothPrintSupported()) throw new Error("Is browser/device mein Bluetooth printing support nahi hai.");
+  disconnectBluetoothPrinter();
   const device = await (navigator as any).bluetooth.requestDevice({
     acceptAllDevices: true,
     optionalServices: KNOWN_PRINTER_SERVICES,
   });
-  const server = await device.gatt.connect();
-  const char = await findWritableCharacteristic(server);
-  if (!char) throw new Error("Printer se connect toh hua, lekin koi writable channel nahi mila. Ye printer shayad supported nahi hai.");
-  cachedBleDevice = device;
-  cachedBleChar = char;
-  return { deviceName: device.name || "Printer" };
+  try {
+    if (!device.gatt) throw new Error("Printer has no Bluetooth GATT connection");
+    const server = await device.gatt.connect();
+    const char = await findWritableCharacteristic(server);
+    if (!char) throw new Error("No supported writable printer channel found.");
+    cachedBleDevice = device;
+    cachedBleChar = char;
+    device.addEventListener?.("gattserverdisconnected", () => {
+      if (cachedBleDevice === device && !device.gatt?.connected) {
+        cachedBleDevice = null;
+        cachedBleChar = null;
+      }
+    });
+    return { deviceName: device.name || "Printer" };
+  } catch (error) {
+    try { device.gatt?.disconnect(); } catch {}
+    throw error;
+  }
+}
+
+export async function connectBluetoothPrinter(): Promise<{ deviceName: string }> {
+  if (bleBusy) throw new Error("Bluetooth printer is busy. Wait for the current receipt.");
+  bleBusy = true;
+  try { return await openBluetoothPrinter(); } finally { bleBusy = false; }
 }
 
 export function isBluetoothPrinterConnected(): boolean {
@@ -277,24 +300,34 @@ export function isBluetoothPrinterConnected(): boolean {
 }
 
 export function disconnectBluetoothPrinter() {
-  try { cachedBleDevice?.gatt?.disconnect(); } catch { /* best-effort */ }
+  const device = cachedBleDevice;
   cachedBleDevice = null;
   cachedBleChar = null;
+  try { device?.gatt?.disconnect(); } catch { /* best effort */ }
 }
 
-/** Sends the receipt bytes to the already-connected BLE printer, chunked — flooding a BLE write queue drops bytes on most of these modules. */
+/** Never interleave two receipts or retry an uncertain partial print. */
 export async function printViaBluetooth(bytes: Uint8Array): Promise<void> {
-  if (!cachedBleChar || !cachedBleDevice?.gatt?.connected) {
-    await connectBluetoothPrinter();
-  }
-  const CHUNK = 100;
-  const write = cachedBleChar.properties?.writeWithoutResponse
-    ? (b: Uint8Array) => cachedBleChar.writeValueWithoutResponse(b)
-    : (b: Uint8Array) => cachedBleChar.writeValue(b);
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    await write(bytes.slice(i, i + CHUNK));
-    await new Promise((res) => setTimeout(res, 20));
-  }
+  if (bleBusy) throw new Error("Bluetooth printer is busy. Wait for the current receipt.");
+  bleBusy = true;
+  try {
+    if (!isBluetoothPrinterConnected()) await openBluetoothPrinter();
+    const char = cachedBleChar, device = cachedBleDevice;
+    const write = char.properties?.write && typeof char.writeValueWithResponse === "function"
+      ? (b: Uint8Array) => char.writeValueWithResponse(b)
+      : char.properties?.write && typeof char.writeValue === "function"
+        ? (b: Uint8Array) => char.writeValue(b)
+        : (b: Uint8Array) => char.writeValueWithoutResponse(b);
+    // 20-byte chunks fit the default BLE ATT payload without MTU negotiation.
+    for (let i = 0; i < bytes.length; i += 20) {
+      if (device !== cachedBleDevice || !device.gatt?.connected) throw new Error("Printer disconnected");
+      await write(bytes.slice(i, i + 20));
+      await new Promise(res => setTimeout(res, 20));
+    }
+  } catch {
+    disconnectBluetoothPrinter();
+    throw new Error("Bluetooth print not confirmed. Check the paper before retrying; the receipt may be partially printed.");
+  } finally { bleBusy = false; }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,26 +336,37 @@ export async function printViaBluetooth(bytes: Uint8Array): Promise<void> {
 // that isn't installed as a Windows print driver.
 // ---------------------------------------------------------------------------
 let cachedSerialPort: any = null;
+let serialBusy = false;
 
 export function isSerialPrintSupported(): boolean {
-  return typeof navigator !== "undefined" && "serial" in navigator;
+  return typeof navigator !== "undefined" && typeof (navigator as any).serial?.requestPort === "function";
 }
 
 export async function printViaSerial(bytes: Uint8Array): Promise<void> {
   if (!isSerialPrintSupported()) throw new Error("Ye browser/OS USB serial printing support nahi karta (sirf Windows desktop par).");
-  if (!cachedSerialPort) {
-    cachedSerialPort = await (navigator as any).serial.requestPort();
-    await cachedSerialPort.open({ baudRate: 9600 });
-  }
-  const writer = cachedSerialPort.writable.getWriter();
+  if (serialBusy) throw new Error("USB printer is busy. Wait for the current receipt.");
+  serialBusy = true;
   try {
-    await writer.write(bytes);
-  } finally {
-    writer.releaseLock();
-  }
+    if (!cachedSerialPort) {
+      const port = await (navigator as any).serial.requestPort();
+      try { await port.open({ baudRate: 9600 }); } catch (error) { try { await port.close(); } catch {} throw error; }
+      cachedSerialPort = port;
+    }
+    const port = cachedSerialPort;
+    if (!port.writable) throw new Error("USB printer disconnected");
+    const writer = port.writable.getWriter();
+    try { await writer.write(bytes); } finally { writer.releaseLock(); }
+  } catch {
+    const port = cachedSerialPort;
+    cachedSerialPort = null;
+    try { await port?.close(); } catch {}
+    throw new Error("USB print not confirmed. Check the paper before retrying; the receipt may be partially printed.");
+  } finally { serialBusy = false; }
 }
 
 export function disconnectSerialPrinter() {
-  try { cachedSerialPort?.close(); } catch { /* best-effort */ }
+  if (serialBusy) return; // Do not close a stream while it is locked by a receipt.
+  const port = cachedSerialPort;
   cachedSerialPort = null;
+  if (port) void Promise.resolve().then(() => port.close()).catch(() => {});
 }

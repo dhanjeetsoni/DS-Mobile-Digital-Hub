@@ -25,6 +25,7 @@ jobs:
       - run: npm test
       - run: npm run test:static
       - run: python3 scripts/test-verify-native-apk.py
+      - run: node scripts/test-verify-windows-updater.mjs
       - run: npm run build
       - name: Install browser smoke runner
         run: npm install --no-save --package-lock=false playwright@1.56.1

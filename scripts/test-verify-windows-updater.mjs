@@ -1,0 +1,14 @@
+import {generateKeyPairSync,createHash,sign,randomBytes} from "node:crypto";
+import assert from "node:assert/strict";
+import {verifyUpdaterSignature} from "./verify-windows-updater.mjs";
+const {publicKey,privateKey}=generateKeyPairSync("ed25519"),id=randomBytes(8),raw=publicKey.export({type:"spki",format:"der"}).subarray(-32);
+const b64=x=>Buffer.from(x).toString("base64");
+const pub=b64("untrusted comment: public key\n"+b64(Buffer.concat([Buffer.from("Ed"),id,raw]))+"\n");
+const data=Buffer.from("test installer"),hash=createHash("blake2b512").update(data).digest(),signature=sign(null,hash,privateKey),comment="file:synthetic.exe",global=sign(null,Buffer.concat([signature,Buffer.from(comment)]),privateKey);
+const packet=Buffer.concat([Buffer.from("ED"),id,signature]);
+const file=b64("untrusted comment: signature\n"+b64(packet)+"\ntrusted comment: "+comment+"\n"+b64(global)+"\n");
+assert(verifyUpdaterSignature(pub,file,hash));
+assert.throws(()=>verifyUpdaterSignature(pub,file,createHash("blake2b512").update("tampered").digest()),/signature invalid/);
+assert.throws(()=>verifyUpdaterSignature(pub,b64(Buffer.from(file,"base64").toString().replace(comment,"wrong")),hash),/comment signature invalid/);
+assert.throws(()=>verifyUpdaterSignature(pub,b64(Buffer.from(file,"base64").toString().replace(b64(packet),b64(Buffer.concat([Buffer.from("ED"),randomBytes(8),signature])))),hash),/wrong signing key/);
+console.log("PASS Minisign valid signature, wrong key, altered executable and comment rejection");

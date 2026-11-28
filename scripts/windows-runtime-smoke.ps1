@@ -5,8 +5,11 @@ $installer=@(Get-ChildItem $ArtifactRoot -Recurse -Filter "*setup.exe" -File)
 if($installer.Count -ne 1){throw "Exactly one NSIS installer required"}
 $report=@(Get-ChildItem $ArtifactRoot -Recurse -Filter "windows-verification.json" -File)
 if($report.Count -ne 1){throw "Build report unavailable"}
-$expected=@(Get-Content $report[0].FullName -Raw | ConvertFrom-Json | Where-Object file -eq $installer[0].Name)
-if($expected.Count -ne 1 -or (Get-FileHash $installer[0].FullName -Algorithm SHA256).Hash.ToLower() -ne $expected[0].sha256){throw "Installer SHA-256 mismatch"}
+$entries=ConvertFrom-Json -InputObject (Get-Content $report[0].FullName -Raw)
+$expected=@(foreach($entry in $entries){if($entry.file -eq $installer[0].Name){$entry}})
+if($expected.Count -ne 1){throw "Build report does not identify exactly one matching installer"}
+$actualHash=(Get-FileHash -LiteralPath $installer[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if($actualHash -ne [string]$expected[0].sha256){throw "Installer SHA-256 mismatch: $actualHash versus $($expected[0].sha256)"}
 $install=Start-Process -FilePath $installer[0].FullName -ArgumentList "/S" -Wait -PassThru
 if($install.ExitCode -ne 0){throw "Silent installation failed: $($install.ExitCode)"}
 $roots=@("$env:ProgramFiles\DS Mobile & Digital Hub","${env:ProgramFiles(x86)}\DS Mobile & Digital Hub","$env:LOCALAPPDATA\DS Mobile & Digital Hub")

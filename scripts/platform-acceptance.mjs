@@ -106,6 +106,7 @@ try{
        await p.getByTitle("Switch back to Lite Mode").click();
        await p.locator('#page[data-current-page="sell"]').waitFor();
        assert.equal(await p.getByRole("navigation",{name:"Primary navigation"}).getByRole("button").count(),2);
+       await p.getByRole("button",{name:"Menu kholo"}).click();
        await p.getByTitle("Switch to Pro Mode (needs fingerprint/PIN)").click();
        await p.getByPlaceholder("Owner authentication required").fill("5826");
        await p.getByRole("button",{name:"Switch to Pro",exact:true}).click();await p.getByTitle("Switch back to Lite Mode").waitFor();

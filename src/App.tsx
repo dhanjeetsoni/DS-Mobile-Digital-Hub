@@ -2033,12 +2033,12 @@ export default function App() {
       if(!scopeMatches(cloudBaseRef.current,scope))return;
       setProPinSetup(!requiresPin&&navigator.onLine);
       setGatePassInput("");setGatePinConfirm("");setGatePinError("");
-      setOwnerLoginPurpose("proMode");setIsOwnerLoginOpen(true);
+      setIsMobileNavOpen(false);setOwnerLoginPurpose("proMode");setIsOwnerLoginOpen(true);
     }finally{proPinFlight.current=false;setProPinBusy(false);}
   };
   // Switching BACK to Lite is always free/immediate, no prompt — going to
   // the more-restrictive state never needs re-auth (§4.3's second rule).
-  const switchToLiteMode = () => persistOwnerMobileMode("lite");
+  const switchToLiteMode = () => {setIsMobileNavOpen(false);persistOwnerMobileMode("lite");};
 
   const handleTextScaleChange = (scale: "sm" | "md" | "lg" | "xl") => {
     saveState({ ...db, settings: { ...db.settings, textScale: scale } });

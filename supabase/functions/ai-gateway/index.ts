@@ -1,23 +1,21 @@
 import {OCR_TEST_PNG,validSyntheticOcr} from "./synthetic-ocr.ts";
+import {visionFallbackParams} from "./vision-fallback.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { GoogleGenAI, Type } from "npm:@google/genai@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SECRET_KEY") || "";
-const GEMINI_MODEL_VISION = Deno.env.get("GEMINI_MODEL_VISION") || Deno.env.get("GEMINI_MODEL") || "gemini-3.7-flash";
+// Flash-Lite accepts image input and structured output; it is also the
+// configured text model already accepted by our provider connectivity test.
+// Explicit vision overrides remain primary, but unsupported models/configs
+// can fall back to the documented multimodal model on the same credential.
 const GEMINI_MODEL_TEXT = Deno.env.get("GEMINI_MODEL_TEXT") || "gemini-3.5-flash-lite";
+const GEMINI_MODEL_VISION = Deno.env.get("GEMINI_MODEL_VISION") || Deno.env.get("GEMINI_MODEL") || "gemini-3.5-flash-lite";
+const GEMINI_VISION_FALLBACK = "gemini-3.5-flash-lite";
 const GEMINI_TIMEOUT_MS = Number(Deno.env.get("GEMINI_TIMEOUT_MS")) || 20_000;
-// 2026-09-08 root-cause fix (live-verified against Google's API directly,
-// not just reasoned about): gemini-3.5-flash-lite now hard-rejects a
-// thinkingConfig param with 400 INVALID_ARGUMENT — every text-based AI
-// feature (business insights, staff advice, screen-size lookup, customer
-// reply draft, demand forecast, churn risk, the daily digest) was silently
-// failing on every single call because of this. FAST_MODE_CONFIG (which
-// sets thinkingConfig) stays ONLY on the 4 vision/OCR routes below, which
-// use gemini-3.7-flash and were never affected. Every text route now uses
-// TEXT_MODE_CONFIG (empty) instead.
-const FAST_MODE_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
+// Do not send legacy thinkingBudget to newer Gemini models.
+const FAST_MODE_CONFIG = {};
 const TEXT_MODE_CONFIG = {};
 
 const supabaseAdmin = SUPABASE_URL && SERVICE_ROLE_KEY
@@ -509,7 +507,16 @@ async function runWithGeminiFailover<T>(storeId: string | null, fn: (ai: GoogleG
       try {
         let result: T;
         if (entry.provider === "gemini") {
-          result = await callWithTimeout(fn(clientForKey(entry.apiKey)), GEMINI_TIMEOUT_MS);
+          const client = clientForKey(entry.apiKey);
+          const proxy = { models: { generateContent: async (params: any) => {
+            try { return await client.models.generateContent(params); }
+            catch (error) {
+              const fallback = visionFallbackParams(params, error, GEMINI_VISION_FALLBACK);
+              if (!fallback) throw error;
+              return await client.models.generateContent(fallback);
+            }
+          } } } as unknown as GoogleGenAI;
+          result = await callWithTimeout(fn(proxy), Math.max(1,Math.min(GEMINI_TIMEOUT_MS,FAILOVER_TIME_BUDGET_MS-(Date.now()-startedAt))));
         } else {
           const clientProxy: any = {
             models: {

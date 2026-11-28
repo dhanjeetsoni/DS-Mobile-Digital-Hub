@@ -72,6 +72,30 @@ try{
      await password.fill("CI-synthetic-only");await submit.click();await p.locator("#app").waitFor({timeout:30000});
      assert.equal(signInCount,2);
      assert.equal(await p.locator("#staff-gate-password").count(),0);
+     // Operate the actual POS in each platform/role, with the network
+     // isolated. Verify a paise-valued service, quantity, and removal.
+     await p.getByRole("button",{name:"Open global tool search"}).click();
+     await p.getByRole("textbox",{name:"Find a tool"}).fill("sell");
+     await p.locator('[data-command-key="sell"]').click();
+     await p.locator('#page[data-current-page="sell"]').waitFor();
+     await p.getByRole("button",{name:"+ Custom Service",exact:true}).click();
+     const service=p.getByRole("dialog",{name:"Quick Miscellany & Service Key"});
+     await service.getByRole("textbox",{name:/Service \/ Job Title/}).fill("CI platform service");
+     await service.getByLabel("Customer Charge (₹) *",{exact:true}).fill("49.75");
+     assert.equal(await service.locator("form").evaluate(form=>form.checkValidity()),true);
+     await service.getByRole("button",{name:/Add to Cart/}).click();
+     const line=p.locator(".cart-line").filter({hasText:"CI platform service"});
+     await line.waitFor();
+     assert.equal(await line.getByRole("spinbutton",{name:"Unit price for CI platform service"}).inputValue(),"49.75");
+     await line.getByRole("button",{name:"Increase quantity of CI platform service"}).click();
+     assert.equal(await line.locator(".qtyval").innerText(),"2");
+     await line.getByRole("button",{name:"Decrease quantity of CI platform service"}).click();
+     assert.equal(await line.locator(".qtyval").innerText(),"1");
+     await line.getByRole("button",{name:"Remove CI platform service from cart"}).click();
+     await line.waitFor({state:"detached"});
+     results.push({platform,role,feature:"service cart with paise, increment/decrement and removal",status:"functional"});
+     console.log("PASS actual platform service cart "+platform+"/"+role);
+
      if(role==="staff"){
       await p.waitForFunction(()=>document.querySelector("#page")?.getAttribute("data-current-page")!=="loanTracker");
       if(mobile){
@@ -83,7 +107,7 @@ try{
        }
        await nav.getByRole("button",{name:"Add Stock",exact:true}).click();
        await p.getByText(/Add New Item|Add New Product|Add Product/).first().waitFor({timeout:10000});
-       assert.equal(await p.locator("input").filter({hasText:/purchase cost/i}).count(),0);
+       assert.equal(await p.getByText(/Original \/ Purchase Price|Confidential Price/,{exact:false}).count(),0,"Staff stock form exposed owner price fields");
        await p.screenshot({path:"visual-review/platforms/android-staff-stock.png",animations:"disabled"});
       }else{
        const search=p.getByRole("textbox",{name:"Search tools"});

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Camera, RotateCcw, Loader2, CheckCircle2, Minus, Plus, Sparkles } from "lucide-react";
 import { Database, Product, StockBatch } from "../types";
 import { uid, genSku, genBarcode, todayStr } from "../utils/fifoEngine";
@@ -7,6 +7,7 @@ import { compressImageToDataUrl, compressImageForScan } from "../utils/imageComp
 import { uploadProductPhotoOrFallback } from "../services/photoStorage";
 import { isCloudConfigured } from "../services/supabaseClient";
 import { queueOfflineOperation, upsertProductCatalog } from "../services/repository";
+import {LatestDraft,stockDraftError} from "../utils/counterValidation";
 
 // Improvement #2 — the box sizes actually seen in this shop's accessories
 // (glass/covers/chargers etc. come in these common carton counts). Tapping
@@ -51,7 +52,9 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
   toast,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const photoPathIdRef = useRef<string>(uid("qsa"));
+  const draft=useRef(new LatestDraft());
+  const [photoBusy,setPhotoBusy]=useState(false);
+  useEffect(()=>()=>draft.current.cancel(),[]);
 
   const [photo, setPhoto] = useState("");
   const [photoIsUploaded, setPhotoIsUploaded] = useState(false);
@@ -101,7 +104,7 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
     setPurchasePrice(0);
     setPriceSuggestion(null);
     setPriceSuggestLoading(false);
-    photoPathIdRef.current = uid("qsa");
+    draft.current.cancel();setPhotoBusy(false);if(fileInputRef.current)fileInputRef.current.value="";
   };
 
   const handleDone = () => {
@@ -110,61 +113,43 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
     onClose();
   };
 
-  const handlePhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setScanDone(false);
-    try {
-      const dataUrl = await compressImageToDataUrl(file);
+  const handlePhoto=async(e:React.ChangeEvent<HTMLInputElement>)=>{
+    const file=e.target.files?.[0];e.target.value="";if(!file)return;
+    if(!file.type.startsWith("image/")||file.size>20*1024*1024){toast("Choose an image up to 20 MB.","amber");return;}
+    const token=draft.current.begin(),photoId=uid("qsa");
+    const current=()=>draft.current.current(token);
+    setPhoto("");setPhotoIsUploaded(false);setPhotoBusy(true);setIsScanning(true);setScanDone(false);
+    setAiName("");setAiBrand("");setAiCategory("General");setAiCompatibleModels([]);setPriceSuggestion(null);setPriceSuggestLoading(false);
+    try{
+      const dataUrl=await compressImageToDataUrl(file);if(!current())return;
       setPhoto(dataUrl);
-      const uploadPromise = uploadProductPhotoOrFallback(storeId, photoPathIdRef.current, file)
-        .then(({ url, uploaded }) => {
-          setPhoto(url);
-          setPhotoIsUploaded(uploaded);
-        })
-        .catch(() => {});
-
-      setIsScanning(true);
-      let scannedBrand = "";
-      let scannedCategory = "General";
-      let scannedName = "";
-      try {
-        const scanDataUrl = await compressImageForScan(file).catch(() => dataUrl);
-        const result = await processAccessoryOcr(scanDataUrl);
-        scannedBrand = result.brand || "";
-        scannedCategory = result.category || "General";
-        scannedName = [result.brand, result.productName].filter(Boolean).join(" — ") || "New Item";
-        setAiBrand(scannedBrand);
-        setAiCategory(scannedCategory);
-        setAiName(scannedName);
-        setAiCompatibleModels(result.compatibleModels || []);
-      } catch {
-        // AI scan failing is not fatal here — the owner can still save with
-        // qty+prices, and the Windows review step can re-scan/edit anything
-        // AI missed. This screen's whole point is speed, not blocking on AI.
-        setAiName("New Item");
-        toast("AI photo padh nahi paya — koi baat nahi, Windows par review karke naam/details theek kar lena.", "amber");
-      } finally {
-        setIsScanning(false);
-        setScanDone(true);
-      }
-
-      // Improvement #1 — ask AI for a selling-price ballpark too, right
-      // after the scan, using whatever name/brand/category it just found.
-      // Best-effort: no toast on failure, just no suggestion shown — the
-      // owner types the price manually either way, exactly like today.
-      if (scannedName) {
+      // Keep each upload tied to its own photo; old completions cannot
+      // replace a retaken photo or the next item in a burst.
+      const upload=uploadProductPhotoOrFallback(storeId,photoId,file).then(({url,uploaded})=>{if(current()){setPhoto(url);setPhotoIsUploaded(uploaded);}}).catch(()=>{});
+      let scannedName="",scannedBrand="",scannedCategory="General";
+      try{
+        const scanData=await compressImageForScan(file).catch(()=>dataUrl);
+        if(!current())return;
+        const result=await processAccessoryOcr(scanData);
+        if(!current())return;
+        scannedBrand=result.brand||"";scannedCategory=result.category||"General";
+        scannedName=[result.brand,result.productName].filter(Boolean).join(" — ")||"New Item";
+        setAiBrand(scannedBrand);setAiCategory(scannedCategory);setAiName(scannedName);setAiCompatibleModels(result.compatibleModels||[]);
+      }catch{
+        if(!current())return;setAiName("New Item");
+        toast("AI photo padh nahi paya — Windows par review karein, ya naam abhi edit karein.","amber");
+      }finally{if(current()){setIsScanning(false);setScanDone(true);}}
+      if(scannedName&&current()){
         setPriceSuggestLoading(true);
-        getPriceSuggestion({ brand: scannedBrand, productName: scannedName, category: scannedCategory })
-          .then((s) => setPriceSuggestion(s))
-          .catch(() => setPriceSuggestion(null))
-          .finally(() => setPriceSuggestLoading(false));
+        void getPriceSuggestion({brand:scannedBrand,productName:scannedName,category:scannedCategory})
+          .then(s=>{if(current())setPriceSuggestion(s);})
+          .catch(()=>{if(current())setPriceSuggestion(null);})
+          .finally(()=>{if(current())setPriceSuggestLoading(false);});
       }
-
-      await uploadPromise;
-    } catch (err: any) {
-      toast(err?.message || "Photo process nahi ho payi, dobara try karein", "red");
-    }
+      await upload;
+      if(current())draft.current.markReady(token);
+    }catch(err:any){if(current())toast(err?.message||"Photo process nahi ho payi, dobara try karein","red");}
+    finally{if(current()){setPhotoBusy(false);setIsScanning(false);}}
   };
 
   const handleSave = () => {
@@ -172,18 +157,11 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
       toast("Pehle photo kheecho", "amber");
       return;
     }
-    if (qty <= 0) {
-      toast("Quantity 1 ya usse zyada honi chahiye", "amber");
-      return;
-    }
-    if (sellingPrice <= 0) {
-      toast("Selling Price bharna zaroori hai", "amber");
-      return;
-    }
-    if (confidentialPrice > 0 && sellingPrice < confidentialPrice) {
-      toast("Selling Price, Confidential Price se kam nahi ho sakti", "red");
-      return;
-    }
+    if(photoBusy||isScanning||saving)return;
+    const error=stockDraftError({quantity:qty,minimumQuantity:1,selling:sellingPrice,purchase:purchasePrice,confidential:confidentialPrice,mrp});
+    if(error){toast(error,"red");return;}
+    if(!draft.current.consume())return;
+    if(mrp>0&&mrp<sellingPrice)toast("MRP is below selling price; please verify.","amber");
     setSaving(true);
 
     const category = aiCategory || "General";
@@ -259,10 +237,10 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
 
   return (
     <div className="overlay show">
-      <div className="modal" style={{ maxWidth: "420px" }}>
+      <div className="modal ds-fast-stock" role="dialog" aria-modal="true" aria-label="Fast Stock Add" style={{ maxWidth: "420px" }}>
         <div className="modal-head">
           <h3>⚡ Fast Stock Add{sessionCount > 0 ? ` · ${sessionCount} item${sessionCount > 1 ? "s" : ""} add ho chuke` : ""}</h3>
-          <button onClick={handleDone}>&times;</button>
+          <button type="button" aria-label="Close fast stock" onClick={handleDone}>&times;</button>
         </div>
 
         <div className="hint" style={{ marginBottom: "12px" }}>
@@ -290,6 +268,8 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
             cursor: "pointer",
             marginBottom: "14px",
           }}
+          role="button" tabIndex={0} aria-label="Choose product photo"
+          onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fileInputRef.current?.click();}}}
           onClick={() => fileInputRef.current?.click()}
         >
           {photo ? (
@@ -314,7 +294,7 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
               >
                 <RotateCcw size={13} /> Dobara Photo
               </button>
-              {!photoIsUploaded && <div className="hint" style={{ marginTop: "4px" }}>Photo upload ho rahi hai…</div>}
+              <div className="hint" role="status" style={{ marginTop: "4px" }}>{photoBusy?"Processing photo…":photoIsUploaded?"Photo uploaded":"Photo kept locally; cloud upload can retry later"}</div>
             </div>
           ) : (
             <div style={{ padding: "24px 0" }}>
@@ -324,15 +304,16 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
           )}
         </div>
 
+        {photo&&!isScanning&&<div className="field"><label htmlFor="fast-stock-name">Product name (review before sale)</label><input id="fast-stock-name" value={aiName} onChange={e=>setAiName(e.target.value)} maxLength={160}/></div>}
         <div className="field">
-          <label>Quantity <span className="req">*</span></label>
+          <label htmlFor="fast-stock-qty">Quantity <span className="req">*</span></label>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <button type="button" className="btn" onClick={() => setQty((q) => Math.max(1, q - 1))}>
               <Minus size={16} />
             </button>
             <input
               type="number"
-              min="1"
+              id="fast-stock-qty" min="1" step="1" inputMode="numeric"
               value={qty}
               onChange={(e) => setQty(Math.max(1, Number(e.target.value) || 1))}
               style={{ textAlign: "center", fontSize: "20px", fontWeight: 800, flex: 1 }}
@@ -395,8 +376,8 @@ export const QuickStockAddModal: React.FC<QuickStockAddModalProps> = ({
           <button type="button" className="btn" onClick={handleDone}>
             {sessionCount > 0 ? `Done (${sessionCount})` : "Cancel"}
           </button>
-          <button type="button" className="btn primary" disabled={saving || isScanning} onClick={handleSave}>
-            {saving ? "Saving…" : isScanning ? "AI ka wait karo…" : "Save & Agla Item"}
+          <button type="button" className="btn primary" disabled={saving || isScanning || photoBusy || !photo} onClick={handleSave}>
+            {saving ? "Saving…" : photoBusy ? "Processing photo…" : "Save & Agla Item"}
           </button>
         </div>
       </div>

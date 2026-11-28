@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Wrench, Plus, X, Sparkles, Scissors, HardDrive, Smartphone, ShieldCheck, Zap } from "lucide-react";
 import { CartItem } from "../types";
 import { playScanPip } from "../utils/counterAudio";
+import {validMoney} from "../utils/counterValidation";
 
 interface QuickServiceModalProps {
   isOpen: boolean;
@@ -33,6 +34,7 @@ export const QuickServiceModal: React.FC<QuickServiceModalProps> = ({
   onAddServiceToCart,
   showToast,
 }) => {
+  const submitted=useRef(false);
   const [serviceName, setServiceName] = useState("");
   const [servicePrice, setServicePrice] = useState<number | "">("");
   const [serviceCategory, setServiceCategory] = useState("Counter Services");
@@ -48,16 +50,18 @@ export const QuickServiceModal: React.FC<QuickServiceModalProps> = ({
 
   const handleConfirm = (e: React.FormEvent) => {
     e.preventDefault();
+    if(submitted.current)return;
     if (!serviceName.trim()) {
       showToast("Service ka naam bharein", "amber");
       return;
     }
-    const priceNum = Number(servicePrice) || 0;
-    if (priceNum < 0) {
+    const priceNum = servicePrice;
+    if (!validMoney(priceNum)) {
       showToast("Price valid dalein", "amber");
       return;
     }
 
+    submitted.current=true;
     const cartItem: CartItem = {
       productId: `svc_${crypto.randomUUID()}`,
       isService: true,
@@ -81,8 +85,8 @@ export const QuickServiceModal: React.FC<QuickServiceModalProps> = ({
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal-content"
-        style={{ maxWidth: "540px", width: "95%", borderRadius: "14px", overflow: "hidden" }}
+        className="modal-content ds-quick-service" role="dialog" aria-modal="true" aria-label="Quick Miscellany & Service Key"
+        style={{ maxWidth: "540px", width: "95%", borderRadius: "14px", overflow: "auto", maxHeight: "min(90dvh, 740px)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div
@@ -107,6 +111,7 @@ export const QuickServiceModal: React.FC<QuickServiceModalProps> = ({
             </div>
           </div>
           <button
+            type="button" aria-label="Close service"
             onClick={onClose}
             style={{ background: "none", border: "none", color: "#fff", cursor: "pointer" }}
           >
@@ -153,9 +158,9 @@ export const QuickServiceModal: React.FC<QuickServiceModalProps> = ({
 
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             <div>
-              <label style={{ fontSize: "13px", fontWeight: 700 }}>Service / Job Title *</label>
+              <label htmlFor="service-title" style={{ fontSize: "13px", fontWeight: 700 }}>Service / Job Title *</label>
               <input
-                type="text"
+                id="service-title" type="text" maxLength={160}
                 value={serviceName}
                 onChange={(e) => setServiceName(e.target.value)}
                 placeholder="e.g. SIM Cutting, Mobile Polish, Data Backup"
@@ -167,11 +172,11 @@ export const QuickServiceModal: React.FC<QuickServiceModalProps> = ({
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
               <div>
-                <label style={{ fontSize: "13px", fontWeight: 700 }}>Customer Charge (₹) *</label>
+                <label htmlFor="service-charge" style={{ fontSize: "13px", fontWeight: 700 }}>Customer Charge (₹) *</label>
                 <input
-                  type="number"
+                  id="service-charge" type="number" inputMode="decimal"
                   min="0"
-                  step="1"
+                  step="0.01"
                   value={servicePrice}
                   onChange={(e) => setServicePrice(e.target.value === "" ? "" : Number(e.target.value))}
                   placeholder="e.g. 50"
@@ -181,9 +186,9 @@ export const QuickServiceModal: React.FC<QuickServiceModalProps> = ({
               </div>
 
               <div>
-                <label style={{ fontSize: "13px", fontWeight: 700 }}>Category</label>
+                <label htmlFor="service-category" style={{ fontSize: "13px", fontWeight: 700 }}>Category</label>
                 <input
-                  type="text"
+                  id="service-category" type="text" maxLength={100}
                   value={serviceCategory}
                   onChange={(e) => setServiceCategory(e.target.value)}
                   placeholder="Counter Services"
@@ -193,9 +198,9 @@ export const QuickServiceModal: React.FC<QuickServiceModalProps> = ({
             </div>
 
             <div>
-              <label style={{ fontSize: "12px" }}>Technician / Counter Remark (Optional)</label>
+              <label htmlFor="service-remark" style={{ fontSize: "12px" }}>Technician / Counter Remark (Optional)</label>
               <input
-                type="text"
+                id="service-remark" type="text" maxLength={500}
                 value={technicianNote}
                 onChange={(e) => setTechnicianNote(e.target.value)}
                 placeholder="e.g. Customer provided memory card, backup completed"

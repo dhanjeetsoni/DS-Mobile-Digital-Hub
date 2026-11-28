@@ -2257,7 +2257,7 @@ export default function App() {
     if (cart.length === 0 || checkoutInFlight.current) return;
     checkoutInFlight.current=true;setCheckoutBusy(true);
     try {
-    if(!cartIdentifiersValid(cart)||cart.some(i=>!Number.isFinite(i.price)||i.price<0||!Number.isFinite(i.qty)||i.qty<=0)){showToast("Invalid quantity, price or duplicate device identifier.","red");return;}
+    if(!cartIdentifiersValid(cart)||cart.some(i=>!Number.isFinite(i.price)||i.price<0||!Number.isSafeInteger(i.qty)||i.qty<=0)){showToast("Invalid quantity, price or duplicate device identifier.","red");return;}
     const subtotal = cart.reduce((a, i) => a + i.price * i.qty, 0);
     if(!Number.isFinite(subtotal)||!Number.isFinite(cartDiscount)||cartDiscount<0||cartDiscount>subtotal){showToast("Invalid bill amount or discount.","red");return;}
     const { taxAmount, total } = computeSaleTotals(subtotal, cartDiscount, db.settings.gstEnabled, db.settings.gstPercent);
@@ -3699,7 +3699,7 @@ export default function App() {
                           ) : (
                             <div className="cart-price-box" style={{ width: "100px" }}>
                               <input
-                                type="number"
+                                type="number" inputMode="decimal" step="0.01" aria-label={"Unit price for "+item.name}
                                 min="0"
                                 value={item.price}
                                 onChange={(e) => updateCartPrice(idx, e.target.value)}
@@ -3721,10 +3721,10 @@ export default function App() {
                               )}
                             </div>
                           )}
-                          <button className="qtybtn" onClick={() => updateCartQty(idx, -1)}>-</button>
+                          <button className="qtybtn" aria-label={"Decrease quantity of "+item.name} onClick={() => updateCartQty(idx, -1)}>-</button>
                           <span className="qtyval">{item.qty}</span>
-                          <button className="qtybtn" onClick={() => updateCartQty(idx, 1)}>+</button>
-                          <button className="btn sm danger" onClick={() => setCart(cart.filter((_, i) => i !== idx))}>
+                          <button className="qtybtn" aria-label={"Increase quantity of "+item.name} onClick={() => updateCartQty(idx, 1)}>+</button>
+                          <button className="btn sm danger" aria-label={"Remove "+item.name+" from cart"} onClick={() => setCart(cart.filter((_, i) => i !== idx))}>
                             ✕
                           </button>
                         </div>

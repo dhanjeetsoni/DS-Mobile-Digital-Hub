@@ -1,3 +1,4 @@
+import {stockDraftError} from "../utils/counterValidation";
 import React, { useRef, useState } from "react";
 import { Sparkles, Upload, CheckCircle2, AlertCircle, X, Plus, RefreshCw, Barcode, ShieldCheck, Search, FileText } from "lucide-react";
 import { Database, Product, StockBatch } from "../types";
@@ -79,6 +80,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   toast,
   hideCostFields = false,
 }) => {
+  const submitFlight=useRef(false);
   const { closing, requestClose, runClosing } = useAnimatedClose(onClose);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef2 = useRef<HTMLInputElement | null>(null);
@@ -657,6 +659,9 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if(submitFlight.current||closing)return;
+    const error=stockDraftError({quantity:stock,minimumStock:minStock,selling:sellingPrice,purchase:hideCostFields?0:purchasePrice,confidential:hideCostFields?0:confidentialPrice,mrp});
+    if(error){toast(error,"red");return;}
     if (!brand.trim()) {
       toast("Brand / Company daalna zaroori hai", "red");
       return;
@@ -736,6 +741,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       createdAt: new Date().toISOString(),
     };
 
+    submitFlight.current=true;
     db.products.push(product);
 
     // Phase 1 (continued) — write the full catalog relationally too, not
@@ -1573,7 +1579,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 
             <div className="modal-actions" style={{ marginTop: "16px" }}>
               <button type="button" className="btn" onClick={() => runClosing(() => { resetForm(); onClose(); })}>Cancel</button>
-              <button type="submit" className="btn primary">
+              <button type="submit" className="btn primary" disabled={closing}>
                 <CheckCircle2 size={16} /> Save Product to Catalog
               </button>
             </div>

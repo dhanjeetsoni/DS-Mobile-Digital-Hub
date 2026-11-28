@@ -53,3 +53,12 @@
  }
  html[data-retail-motion=quiet] #app #page .product-card,html[data-retail-motion=quiet] #app #page .product-card-photo img { transition:none!important;transform:none!important; }
 }
+
+/* Keep counter forms usable on compact screens and with a soft keyboard. */
+@media screen {
+ .ds-quick-service{overscroll-behavior:contain;scrollbar-gutter:stable;}
+ .ds-quick-service input,.ds-fast-stock input{box-sizing:border-box;min-width:0;max-width:100%;}
+ .ds-quick-service button,.ds-fast-stock button{min-height:40px;}
+ .ds-quick-service input:focus-visible,.ds-fast-stock input:focus-visible,.ds-fast-stock [role=button]:focus-visible{outline:2px solid var(--brand);outline-offset:2px;}
+ @media(max-width:600px){.ds-quick-service button,.ds-fast-stock button,.cart-line .qtybtn{min-height:44px;min-width:44px;}.ds-quick-service form{padding:12px!important;}.ds-quick-service input,.ds-fast-stock input{font-size:16px!important;}.ds-fast-stock .modal-actions{position:sticky;bottom:0;background:var(--card);padding:8px 0;z-index:1;}}
+}

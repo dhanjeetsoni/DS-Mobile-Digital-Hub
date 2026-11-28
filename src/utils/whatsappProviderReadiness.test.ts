@@ -1,0 +1,7 @@
+import {describe,it,expect} from "vitest";import {isInvoiceTemplate,consentValid} from "../../supabase/functions/whatsapp-invoice-worker/readiness";
+const base={name:"receipt",language:"en",status:"APPROVED",category:"UTILITY",components:[{type:"BODY",text:"Shop {{1}} invoice {{2}} total {{3}} link {{4}}"}]};
+describe("official WhatsApp invoice readiness",()=>{
+ it("accepts only the approved four-position utility template and selected language",()=>{expect(isInvoiceTemplate(base,"receipt","en")).toBe(true);expect(isInvoiceTemplate({...base,status:"PENDING"},"receipt","en")).toBe(false);expect(isInvoiceTemplate({...base,category:"MARKETING"},"receipt","en")).toBe(false);expect(isInvoiceTemplate(base,"receipt","hi")).toBe(false);});
+ it("rejects unsupported dynamic header, buttons and missing or named parameters",()=>{expect(isInvoiceTemplate({...base,components:[...base.components,{type:"HEADER",format:"IMAGE"}]},"receipt","en")).toBe(false);expect(isInvoiceTemplate({...base,components:[...base.components,{type:"BUTTONS",buttons:[]}]},"receipt","en")).toBe(false);expect(isInvoiceTemplate({...base,components:[{type:"BODY",text:"{{1}} {{2}} {{3}} {{3}}"}]},"receipt","en")).toBe(false);});
+ it("rejects invalid, expired and future consent timestamps",()=>{const n=Date.parse("2026-11-28T12:00:00Z");expect(consentValid("2026-11-28T10:00:00Z",n)).toBe(true);for(const d of [null,"invalid","2026-11-19","2026-11-29"])expect(consentValid(d,n)).toBe(false);});
+});

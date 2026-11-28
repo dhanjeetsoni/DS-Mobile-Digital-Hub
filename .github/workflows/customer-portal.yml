@@ -2,7 +2,7 @@ name: Build public customer storefront
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'hardening/selected-scope-*']
+    branches: [main, 'hardening/**']
     paths: ['customer-portal/**','scripts/customer-portal-smoke.mjs','.github/workflows/customer-portal.yml']
 permissions:
   contents: read

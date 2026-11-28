@@ -36,3 +36,20 @@
    #app #page .section,#app #page .card,#app #page .btn { scroll-behavior:auto!important; }
  }
 }
+
+/* Bounded depth and interaction feedback; never affect print or quiet mode. */
+@media screen {
+ #app #page .retail-hero { background-image: radial-gradient(ellipse at 86% 15%,color-mix(in srgb,var(--brand) 85%,#172747),transparent 65%), repeating-linear-gradient(125deg,transparent 0 38px,#ffffff09 39px 40px,transparent 41px 75px),linear-gradient(135deg,#101a2d,#182e51); }
+ #app #page .product-card-photo { background-image: radial-gradient(ellipse at 50% 85%,color-mix(in srgb,var(--brand) 13%,transparent),transparent 65%),linear-gradient(150deg,var(--surface),var(--surface-2)); }
+ #app #page .product-card-price { letter-spacing:-.025em; }
+ @media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference) {
+   html:not([data-retail-motion=quiet]) #app #page .product-card { transition:transform 180ms ease-out,box-shadow 180ms ease-out; }
+   html:not([data-retail-motion=quiet]) #app #page .product-card:hover { transform:perspective(1000px) translateY(-3px) rotateX(1.5deg);box-shadow:var(--ds-hover-shadow); }
+   html:not([data-retail-motion=quiet]) #app #page .product-card-photo img { transition:transform 180ms ease-out; }
+   html:not([data-retail-motion=quiet]) #app #page .product-card:hover .product-card-photo img { transform:scale(1.025); }
+ }
+ @media (prefers-reduced-motion:reduce) {
+  #app #page .product-card,#app #page .product-card-photo img { transition:none!important;transform:none!important; }
+ }
+ html[data-retail-motion=quiet] #app #page .product-card,html[data-retail-motion=quiet] #app #page .product-card-photo img { transition:none!important;transform:none!important; }
+}
